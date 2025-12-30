@@ -11,6 +11,7 @@ interface Filament {
   id: string;
   description: string;
   color: string;
+  remainingMassGrams: number;
 }
 
 interface Client {
@@ -106,6 +107,18 @@ function NewSaleContent() {
     };
     fetchData();
   }, [stockId]);
+
+  const filteredFilaments = formData.massGrams > 0
+    ? filaments.filter(filament => filament.remainingMassGrams >= Number(formData.massGrams))
+    : [];
+
+  useEffect(() => {
+    if (formData.filamentId === '') return;
+    const selected = filaments.find(filament => filament.id === formData.filamentId);
+    if (!selected || formData.massGrams <= 0 || selected.remainingMassGrams < Number(formData.massGrams)) {
+      setFormData(prev => ({ ...prev, filamentId: '' }));
+    }
+  }, [formData.massGrams, formData.filamentId, filaments]);
 
   // Calculate cost and suggested price automatically
   useEffect(() => {
@@ -293,12 +306,15 @@ function NewSaleContent() {
               name="filamentId"
               value={formData.filamentId}
               onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+              disabled={formData.massGrams <= 0}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900 disabled:bg-gray-100 disabled:text-gray-500"
             >
-              <option value="">Selecione um filamento...</option>
-              {filaments.map(filament => (
+              <option value="">
+                {formData.massGrams > 0 ? 'Selecione um filamento...' : 'Informe a massa para listar filamentos'}
+              </option>
+              {filteredFilaments.map(filament => (
                 <option key={filament.id} value={filament.id}>
-                  {filament.description} ({filament.color})
+                  {filament.description} ({filament.color}) - {filament.remainingMassGrams}g
                 </option>
               ))}
             </select>
