@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Dashboard from "../components/Dashboard";
+import Reminders from "../components/Reminders";
 
 export default function Home() {
   return (
@@ -15,6 +16,10 @@ export default function Home() {
 
       <div className="px-4">
         <Dashboard />
+      </div>
+
+      <div className="fixed top-24 right-6 w-80 z-40">
+        <Reminders />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 px-4">
