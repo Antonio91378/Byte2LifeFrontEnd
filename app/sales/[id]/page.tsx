@@ -1,5 +1,6 @@
 'use client';
 
+import PrintScheduleCalendar from '@/components/PrintScheduleCalendar';
 import { DETAIL_LEVELS } from '@/constants/printQuality';
 import { parseDurationToHours } from '@/utils/time';
 import axios from 'axios';
@@ -10,6 +11,7 @@ interface Filament {
   id: string;
   description: string;
   color: string;
+  remainingMassGrams: number;
 }
 
 interface Client {
@@ -21,6 +23,12 @@ interface Client {
 export default function EditSalePage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const { id } = use(params);
+
+  const parseMassGrams = (value: string | number) => {
+    const normalized = String(value ?? '').replace(',', '.');
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
   
   const [filaments, setFilaments] = useState<Filament[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -55,6 +63,8 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
     tags: [],
     priority: 0,
     printStartedAt: null,
+    printStartScheduledAt: null,
+    printStartConfirmedAt: '',
     errorReason: null,
     wastedFilamentGrams: null,
     stockItemId: null
@@ -83,14 +93,14 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
 
         setFormData({
           description: sale.description,
-          productLink: sale.productLink,
+          productLink: sale.productLink || '',
           printQuality: quality,
           massGrams: sale.massGrams,
           cost: sale.cost,
           saleValue: sale.saleValue,
           profit: sale.profit,
           profitPercentage: sale.profitPercentage,
-          designPrintTime: sale.designPrintTime,
+          designPrintTime: sale.designPrintTime || '',
           isPrintConcluded: sale.isPrintConcluded,
           isDelivered: sale.isDelivered,
           isPaid: sale.isPaid,
@@ -110,6 +120,8 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
           tags: sale.tags || [],
           priority: sale.priority || 0,
           printStartedAt: sale.printStartedAt || null,
+          printStartScheduledAt: sale.printStartScheduledAt || null,
+          printStartConfirmedAt: sale.printStartConfirmedAt || '',
           errorReason: sale.errorReason || null,
           wastedFilamentGrams: sale.wastedFilamentGrams || null,
           stockItemId: sale.stockItemId || null
@@ -124,10 +136,25 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
     fetchData();
   }, [id]);
 
+  const massGramsValue = parseMassGrams(formData.massGrams);
+
+  const filteredFilaments = massGramsValue > 0
+    ? filaments.filter(filament => filament.remainingMassGrams >= massGramsValue)
+    : [];
+
+  useEffect(() => {
+    if (formData.filamentId === '') return;
+    const selected = filaments.find(filament => filament.id === formData.filamentId);
+    if (!selected || massGramsValue <= 0 || selected.remainingMassGrams < massGramsValue) {
+      setFormData(prev => ({ ...prev, filamentId: '' }));
+    }
+  }, [massGramsValue, formData.filamentId, filaments]);
+
   // Calculate cost and suggested price automatically
   useEffect(() => {
     const calculatePrice = async () => {
-      if (!formData.filamentId || formData.massGrams <= 0) return;
+      const isValidFilamentId = typeof formData.filamentId === 'string' && formData.filamentId.length === 24;
+      if (!isValidFilamentId || massGramsValue <= 0) return;
 
       const hours = parseDurationToHours(formData.designPrintTime);
       const level = DETAIL_LEVELS.find(l => l.label === formData.printQuality)?.value ?? 1;
@@ -136,7 +163,7 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
         const res = await axios.post('http://localhost:5000/api/budget/calculate', {
           filamentId: formData.filamentId,
           detailLevel: level,
-          massGrams: formData.massGrams,
+          massGrams: massGramsValue,
           hasCustomArt: formData.hasCustomArt,
           hasPainting: formData.hasPainting,
           hasVarnish: formData.hasVarnish,
@@ -222,10 +249,12 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
     try {
       const payload = {
         ...formData,
+        massGrams: massGramsValue,
         printTimeHours: parseDurationToHours(formData.designPrintTime),
         deliveryDate: formData.deliveryDate === '' ? null : formData.deliveryDate,
-        filamentId: formData.filamentId === '' ? null : formData.filamentId,
-        clientId: formData.clientId === '' ? null : formData.clientId
+        printStartConfirmedAt: formData.printStartConfirmedAt === '' ? null : formData.printStartConfirmedAt,
+        filamentId: formData.filamentId && formData.filamentId.length === 24 ? formData.filamentId : null,
+        clientId: formData.clientId && formData.clientId.length === 24 ? formData.clientId : null
       };
       await axios.put(`http://localhost:5000/api/sales/${id}`, payload);
       router.push('/sales');
@@ -284,6 +313,16 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
             />
           </div>
 
+          <div className="col-span-1 md:col-span-2">
+            <PrintScheduleCalendar
+              estimatedHours={parseDurationToHours(formData.designPrintTime)}
+              hasPainting={formData.hasPainting}
+              value={formData.printStartConfirmedAt}
+              onChange={(value) => setFormData(prev => ({ ...prev, printStartConfirmedAt: value || '' }))}
+              saleId={id}
+            />
+          </div>
+
           {/* Client */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
@@ -309,12 +348,15 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
               name="filamentId"
               value={formData.filamentId}
               onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+              disabled={formData.massGrams <= 0}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900 disabled:bg-gray-100 disabled:text-gray-500"
             >
-              <option value="">Selecione um filamento...</option>
-              {filaments.map(filament => (
+              <option value="">
+                {formData.massGrams > 0 ? 'Selecione um filamento...' : 'Informe a massa para listar filamentos'}
+              </option>
+              {filteredFilaments.map(filament => (
                 <option key={filament.id} value={filament.id}>
-                  {filament.description} ({filament.color})
+                  {filament.description} ({filament.color}) - {filament.remainingMassGrams}g
                 </option>
               ))}
             </select>
@@ -326,7 +368,7 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
             <input
               type="url"
               name="productLink"
-              value={formData.productLink}
+              value={formData.productLink ?? ''}
               onChange={handleChange}
               className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
             />

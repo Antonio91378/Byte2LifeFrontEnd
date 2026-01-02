@@ -1,6 +1,7 @@
 'use client';
 
 import { DETAIL_LEVELS } from '@/constants/printQuality';
+import PrintScheduleCalendar from '@/components/PrintScheduleCalendar';
 import { useDialog } from '@/context/DialogContext';
 import { parseDurationToHours } from '@/utils/time';
 import axios from 'axios';
@@ -33,6 +34,12 @@ function NewSaleContent() {
   const searchParams = useSearchParams();
   const stockId = searchParams.get('stockId');
   const { showAlert } = useDialog();
+
+  const parseMassGrams = (value: string | number) => {
+    const normalized = String(value ?? '').replace(',', '.');
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
   const [filaments, setFilaments] = useState<Filament[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(false);
@@ -61,6 +68,7 @@ function NewSaleContent() {
     productionCost: 0,
     nozzleDiameter: '',
     layerHeight: '',
+    printStartConfirmedAt: '',
     costDetails: null as any
   });
 
@@ -108,22 +116,25 @@ function NewSaleContent() {
     fetchData();
   }, [stockId]);
 
-  const filteredFilaments = formData.massGrams > 0
-    ? filaments.filter(filament => filament.remainingMassGrams >= Number(formData.massGrams))
+  const massGramsValue = parseMassGrams(formData.massGrams);
+
+  const filteredFilaments = massGramsValue > 0
+    ? filaments.filter(filament => filament.remainingMassGrams >= massGramsValue)
     : [];
 
   useEffect(() => {
     if (formData.filamentId === '') return;
     const selected = filaments.find(filament => filament.id === formData.filamentId);
-    if (!selected || formData.massGrams <= 0 || selected.remainingMassGrams < Number(formData.massGrams)) {
+    if (!selected || massGramsValue <= 0 || selected.remainingMassGrams < massGramsValue) {
       setFormData(prev => ({ ...prev, filamentId: '' }));
     }
-  }, [formData.massGrams, formData.filamentId, filaments]);
+  }, [massGramsValue, formData.filamentId, filaments]);
 
   // Calculate cost and suggested price automatically
   useEffect(() => {
     const calculatePrice = async () => {
-      if (!formData.filamentId || formData.massGrams <= 0) return;
+      const isValidFilamentId = typeof formData.filamentId === 'string' && formData.filamentId.length === 24;
+      if (!isValidFilamentId || massGramsValue <= 0) return;
 
       const hours = parseDurationToHours(formData.designPrintTime);
       const level = DETAIL_LEVELS.find(l => l.label === formData.printQuality)?.value ?? 1;
@@ -132,7 +143,7 @@ function NewSaleContent() {
         const res = await axios.post('http://localhost:5000/api/budget/calculate', {
           filamentId: formData.filamentId,
           detailLevel: level,
-          massGrams: formData.massGrams,
+          massGrams: massGramsValue,
           hasCustomArt: formData.hasCustomArt,
           hasPainting: formData.hasPainting,
           hasVarnish: formData.hasVarnish,
@@ -206,10 +217,12 @@ function NewSaleContent() {
     try {
       const payload = {
         ...formData,
+        massGrams: massGramsValue,
         printTimeHours: parseDurationToHours(formData.designPrintTime),
         deliveryDate: formData.deliveryDate === '' ? null : formData.deliveryDate,
-        filamentId: formData.filamentId === '' ? null : formData.filamentId,
-        clientId: formData.clientId === '' ? null : formData.clientId,
+        printStartConfirmedAt: formData.printStartConfirmedAt === '' ? null : formData.printStartConfirmedAt,
+        filamentId: formData.filamentId && formData.filamentId.length === 24 ? formData.filamentId : null,
+        clientId: formData.clientId && formData.clientId.length === 24 ? formData.clientId : null,
         stockItemId: stockId || null
       };
       await axios.post('http://localhost:5000/api/sales', payload);
@@ -281,6 +294,15 @@ function NewSaleContent() {
             />
           </div>
 
+          <div className="col-span-1 md:col-span-2">
+            <PrintScheduleCalendar
+              estimatedHours={parseDurationToHours(formData.designPrintTime)}
+              hasPainting={formData.hasPainting}
+              value={formData.printStartConfirmedAt}
+              onChange={(value) => setFormData(prev => ({ ...prev, printStartConfirmedAt: value || '' }))}
+            />
+          </div>
+
           {/* Client */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
@@ -326,7 +348,7 @@ function NewSaleContent() {
             <input
               type="url"
               name="productLink"
-              value={formData.productLink}
+              value={formData.productLink ?? ''}
               onChange={handleChange}
               className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
             />
@@ -385,6 +407,7 @@ function NewSaleContent() {
               name="designPrintTime"
               placeholder="ex: 4h 30m"
               value={formData.designPrintTime}
+              required
               onChange={handleChange}
               className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
             />

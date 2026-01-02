@@ -39,6 +39,8 @@ interface Sale {
   isPrintConcluded: boolean;
   saleDate?: string;
   deliveryDate?: string;
+  printStartScheduledAt?: string;
+  printStartConfirmedAt?: string;
   productLink?: string;
   clientId?: string;
   filamentId?: string;

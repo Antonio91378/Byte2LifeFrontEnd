@@ -10,6 +10,8 @@ interface Sale {
   massGrams: number;
   saleValue: number;
   isPrintConcluded: boolean;
+  printStartScheduledAt?: string;
+  printStartConfirmedAt?: string;
 }
 
 export default function EditFilamentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -26,7 +28,9 @@ export default function EditFilamentPage({ params }: { params: Promise<{ id: str
     remainingMassGrams: 0,
     color: '',
     colorHex: '#000000',
-    type: 'PLA'
+    type: 'PLA',
+    warningComment: '',
+    slicingProfile3mfPath: ''
   });
 
   useEffect(() => {
@@ -37,8 +41,16 @@ export default function EditFilamentPage({ params }: { params: Promise<{ id: str
           axios.get(`http://localhost:5000/api/filaments/${id}/sales`)
         ]);
         setFormData({
-          ...filamentRes.data,
-          type: filamentRes.data.type || 'PLA'
+          description: filamentRes.data.description || '',
+          link: filamentRes.data.link || '',
+          price: filamentRes.data.price ?? 0,
+          initialMassGrams: filamentRes.data.initialMassGrams ?? 0,
+          remainingMassGrams: filamentRes.data.remainingMassGrams ?? 0,
+          color: filamentRes.data.color || '',
+          colorHex: filamentRes.data.colorHex || '#000000',
+          type: filamentRes.data.type || 'PLA',
+          warningComment: filamentRes.data.warningComment || '',
+          slicingProfile3mfPath: filamentRes.data.slicingProfile3mfPath || ''
         });
         setSales(salesRes.data);
         setLoading(false);
@@ -51,7 +63,7 @@ export default function EditFilamentPage({ params }: { params: Promise<{ id: str
     fetchData();
   }, [id, router]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
@@ -60,7 +72,19 @@ export default function EditFilamentPage({ params }: { params: Promise<{ id: str
     e.preventDefault();
     setLoading(true);
     try {
-      await axios.put(`http://localhost:5000/api/filaments/${id}`, formData);
+      const payload = {
+        description: formData.description,
+        link: formData.link,
+        price: formData.price,
+        initialMassGrams: formData.initialMassGrams,
+        remainingMassGrams: formData.remainingMassGrams,
+        color: formData.color,
+        colorHex: formData.colorHex,
+        type: formData.type,
+        warningComment: formData.warningComment,
+        slicingProfile3mfPath: formData.slicingProfile3mfPath
+      };
+      await axios.put(`http://localhost:5000/api/filaments/${id}`, payload);
       router.push('/filaments');
     } catch (error) {
       console.error('Error updating filament:', error);
@@ -191,6 +215,30 @@ export default function EditFilamentPage({ params }: { params: Promise<{ id: str
               name="link"
               value={formData.link}
               onChange={handleChange}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Ressalvas de Fatiamento (warning)</label>
+            <textarea
+              name="warningComment"
+              value={formData.warningComment}
+              onChange={handleChange}
+              rows={3}
+              placeholder="Ex: precisa de perfil X, reduzir velocidade, usar brim..."
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Arquivo 3MF de Exemplo (caminho)</label>
+            <input
+              type="text"
+              name="slicingProfile3mfPath"
+              value={formData.slicingProfile3mfPath}
+              onChange={handleChange}
+              placeholder="Ex: C:\\perfis\\filamento_x.3mf"
               className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
             />
           </div>

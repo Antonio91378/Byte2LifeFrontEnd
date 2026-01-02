@@ -4,6 +4,7 @@ import axios from 'axios';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import Modal from './Modal';
+import PrintScheduleCalendar from './PrintScheduleCalendar';
 
 interface PrintIncident {
   timestamp: string;
@@ -18,6 +19,8 @@ interface Sale {
   printStatus: string;
   priority: number;
   printStartedAt?: string;
+  printStartScheduledAt?: string;
+  printStartConfirmedAt?: string;
   printTimeHours?: number;
   tags?: string[];
   deliveryDate?: string;
@@ -48,11 +51,13 @@ export default function Dashboard() {
   const [wastedFilament, setWastedFilament] = useState("");
   const [forceZeroTimer, setForceZeroTimer] = useState(false);
   const [showIncidentsModal, setShowIncidentsModal] = useState<Sale | null>(null);
+  const [showCalendar, setShowCalendar] = useState(false);
 
   // Edit Time State
   const [isEditingTime, setIsEditingTime] = useState(false);
   const [editTimeValue, setEditTimeValue] = useState("");
   const [editTimeReason, setEditTimeReason] = useState("Other");
+  const [editTimeComment, setEditTimeComment] = useState("");
 
   const fetchData = async () => {
     try {
@@ -154,10 +159,13 @@ export default function Dashboard() {
 
       const newTotalDurationHours = newTotalDurationMs / (1000 * 3600);
 
+      const commentText = editTimeComment.trim();
       const newIncident = {
         timestamp: new Date().toISOString(),
         reason: editTimeReason,
-        comment: `Tempo ajustado para ${editTimeValue}`
+        comment: commentText
+          ? `${commentText} (Tempo ajustado para ${editTimeValue})`
+          : `Tempo ajustado para ${editTimeValue}`
       };
 
       const updatedIncidents = currentPrint.incidents ? [...currentPrint.incidents, newIncident] : [newIncident];
@@ -170,6 +178,7 @@ export default function Dashboard() {
       
       setIsEditingTime(false);
       setEditTimeReason("Other");
+      setEditTimeComment("");
       fetchData();
     } catch (error) {
       console.error("Error updating time", error);
@@ -402,12 +411,25 @@ export default function Dashboard() {
                                 </option>
                               ))}
                             </select>
+                            <textarea
+                              value={editTimeComment}
+                              onChange={(e) => setEditTimeComment(e.target.value)}
+                              rows={2}
+                              className="w-full text-sm text-gray-900 bg-white border-gray-300 rounded-md shadow-sm focus:ring-brand-purple focus:border-brand-purple p-2"
+                              placeholder="Comentário da ocorrência"
+                            />
                             <div className="flex gap-2 w-full justify-center mt-1">
                               <button onClick={handleSaveTime} className="px-3 py-1 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 text-sm font-medium flex items-center gap-1">
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
                                 Salvar
                               </button>
-                              <button onClick={() => setIsEditingTime(false)} className="px-3 py-1 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 text-sm font-medium flex items-center gap-1">
+                              <button
+                                onClick={() => {
+                                  setIsEditingTime(false);
+                                  setEditTimeComment("");
+                                }}
+                                className="px-3 py-1 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 text-sm font-medium flex items-center gap-1"
+                              >
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                                 Cancelar
                               </button>
@@ -430,6 +452,7 @@ export default function Dashboard() {
                             <button 
                               onClick={() => {
                                 setEditTimeValue(remainingTime.substring(0, 5)); // HH:MM
+                                setEditTimeComment("");
                                 setIsEditingTime(true);
                               }}
                               className="absolute -right-10 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-brand-purple opacity-0 group-hover:opacity-100 transition-opacity"
@@ -573,6 +596,38 @@ export default function Dashboard() {
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      <div className="mb-10">
+        {!showCalendar && (
+          <button
+            type="button"
+            onClick={() => setShowCalendar(true)}
+            className="w-full py-4 rounded-2xl border border-gray-200 bg-white text-brand-purple font-semibold shadow-sm hover:shadow-md transition-shadow"
+          >
+            Abrir agenda de impressao
+          </button>
+        )}
+        <div
+          className={`transition-all duration-500 ease-out overflow-hidden ${
+            showCalendar ? 'max-h-[1800px] opacity-100 translate-y-0 mt-6' : 'max-h-0 opacity-0 -translate-y-2'
+          }`}
+        >
+          {showCalendar && (
+            <div className="space-y-4">
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowCalendar(false)}
+                  className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50 transition-colors text-sm font-semibold"
+                >
+                  Ocultar agenda
+                </button>
+              </div>
+              <PrintScheduleCalendar readOnly showSuggestionSummary={false} />
+            </div>
+          )}
         </div>
       </div>
     </div>

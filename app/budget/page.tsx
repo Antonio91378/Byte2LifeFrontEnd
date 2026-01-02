@@ -2,6 +2,7 @@
 
 import { DETAIL_LEVELS } from '@/constants/printQuality';
 import axios from 'axios';
+import PrintScheduleCalendar from '@/components/PrintScheduleCalendar';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
@@ -10,6 +11,8 @@ interface Filament {
   description: string;
   color: string;
   price: number;
+  warningComment?: string;
+  slicingProfile3mfPath?: string;
 }
 
 interface BudgetResult {
@@ -44,6 +47,11 @@ export default function BudgetPage() {
   });
 
   const [result, setResult] = useState<BudgetResult | null>(null);
+  const selectedFilament = filaments.find(f => f.id === formData.filamentId);
+  const warningDetails = [selectedFilament?.warningComment?.trim(), selectedFilament?.slicingProfile3mfPath?.trim() ? `3MF: ${selectedFilament.slicingProfile3mfPath.trim()}` : '']
+    .filter(Boolean)
+    .join(' | ');
+  const hasWarning = Boolean(warningDetails);
 
   useEffect(() => {
     axios.get('http://localhost:5000/api/filaments')
@@ -113,7 +121,7 @@ export default function BudgetPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold text-gray-800">Simulação de Orçamento</h1>
@@ -125,7 +133,7 @@ export default function BudgetPage() {
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)] gap-10">
           {/* Form Section */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
             <form onSubmit={handleCalculate} className="space-y-6">
@@ -146,6 +154,20 @@ export default function BudgetPage() {
                     </option>
                   ))}
                 </select>
+                {hasWarning && (
+                  <div className="mt-2 flex items-center gap-2 text-sm text-yellow-700">
+                    <span
+                      className="text-yellow-500"
+                      title={warningDetails}
+                      aria-label="Filamento com ressalvas de fatiamento"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                      </svg>
+                    </span>
+                    <span className="text-gray-600">Filamento exige cuidados de fatiamento.</span>
+                  </div>
+                )}
               </div>
 
               {/* Detail Level Selection */}
@@ -263,7 +285,7 @@ export default function BudgetPage() {
           </div>
 
           {/* Result Section */}
-          <div className="space-y-6">
+          <div className="space-y-6 min-w-0">
             {result ? (
               <div className="space-y-6">
                 {/* Sale Price Card */}
@@ -331,7 +353,15 @@ export default function BudgetPage() {
                   </div>
                 </div>
 
-                {/* Technical Details Card */}
+                <div className="w-full">
+                  <PrintScheduleCalendar
+                    estimatedHours={result.estimatedTimeHours}
+                    hasPainting={formData.hasPainting}
+                    readOnly
+                  />
+                </div>
+
+              {/* Technical Details Card */}
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
                   <h3 className="text-sm font-bold text-gray-900 mb-4">Detalhes Técnicos (Editável)</h3>
                   <div className="grid grid-cols-3 gap-4 pb-4 border-b border-gray-100">

@@ -16,10 +16,12 @@ export default function NewFilamentPage() {
     remainingMassGrams: 1000,
     color: '',
     colorHex: '#000000',
-    type: 'PLA'
+    type: 'PLA',
+    warningComment: '',
+    slicingProfile3mfPath: ''
   });
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
@@ -149,6 +151,30 @@ export default function NewFilamentPage() {
             name="link"
             value={formData.link}
             onChange={handleChange}
+            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Ressalvas de Fatiamento (warning)</label>
+          <textarea
+            name="warningComment"
+            value={formData.warningComment}
+            onChange={handleChange}
+            rows={3}
+            placeholder="Ex: precisa de perfil X, reduzir velocidade, usar brim..."
+            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Arquivo 3MF de Exemplo (caminho)</label>
+          <input
+            type="text"
+            name="slicingProfile3mfPath"
+            value={formData.slicingProfile3mfPath}
+            onChange={handleChange}
+            placeholder="Ex: C:\\perfis\\filamento_x.3mf"
             className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
           />
         </div>

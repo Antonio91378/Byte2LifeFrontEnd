@@ -14,6 +14,8 @@ interface Filament {
   colorHex?: string;
   price: number;
   type: string;
+  warningComment?: string;
+  slicingProfile3mfPath?: string;
 }
 
 export default function FilamentsPage() {
@@ -58,7 +60,18 @@ export default function FilamentsPage() {
           </Link>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filaments.map(f => (
+          {filaments.map(f => {
+            const warningComment = f.warningComment?.trim();
+            const slicingProfile3mfPath = f.slicingProfile3mfPath?.trim();
+            const warningDetails = [
+              warningComment,
+              slicingProfile3mfPath ? `3MF: ${slicingProfile3mfPath}` : ''
+            ]
+              .filter(Boolean)
+              .join(' | ');
+            const hasWarning = Boolean(warningDetails);
+
+            return (
           <div key={f.id} className="bg-white rounded-lg shadow-md overflow-hidden border border-gray-100 hover:shadow-lg transition-shadow relative group">
             <div className="h-2" style={{ backgroundColor: f.colorHex || '#2e0249' }}></div>
             <div className="p-6">
@@ -70,18 +83,44 @@ export default function FilamentsPage() {
                     <span className="px-2 py-1 text-xs font-semibold rounded bg-orange-100 text-orange-800">{f.type && f.type.trim() ? f.type : 'Tipo não informado'}</span>
                   </div>
                 </div>
-                {f.colorHex && (
-                  <span 
-                    className="w-4 h-4 rounded-full border border-gray-200 shadow-sm" 
-                    style={{ backgroundColor: f.colorHex }}
-                    title={f.color}
-                  ></span>
-                )}
+                <div className="flex items-center gap-2">
+                  {hasWarning && (
+                    <span
+                      className="text-yellow-500"
+                      title={warningDetails}
+                      aria-label="Filamento com ressalvas de fatiamento"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                      </svg>
+                    </span>
+                  )}
+                  {f.colorHex && (
+                    <span 
+                      className="w-4 h-4 rounded-full border border-gray-200 shadow-sm" 
+                      style={{ backgroundColor: f.colorHex }}
+                      title={f.color}
+                    ></span>
+                  )}
+                </div>
               </div>
               
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Restante:</span>
+                  <span className="text-gray-500 flex items-center gap-2">
+                    Restante:
+                    {hasWarning && (
+                      <span
+                        className="text-yellow-500"
+                        title={warningDetails}
+                        aria-label="Filamento com ressalvas de fatiamento"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                        </svg>
+                      </span>
+                    )}
+                  </span>
                   <span className={`font-medium ${f.remainingMassGrams < 200 ? 'text-red-500' : 'text-green-600'}`}>
                     {f.remainingMassGrams}g
                   </span>
@@ -111,7 +150,8 @@ export default function FilamentsPage() {
               </div>
             </div>
           </div>
-        ))}
+        );
+        })}
       </div>
       
         {filaments.length === 0 && (
