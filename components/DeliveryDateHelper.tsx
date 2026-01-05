@@ -56,14 +56,11 @@ function calculateNextStart(previousEnd: Date | null, baseTime: Date) {
   return alignStart(candidate, true);
 }
 
-function calculateDeliveryDate(printEnd: Date, hasPainting: boolean) {
+function calculateDeliveryDate(printEnd: Date) {
   const cutoff = new Date(printEnd);
   cutoff.setHours(DELIVERY_CUTOFF_HOUR, 0, 0, 0);
   const delivery = new Date(printEnd);
   if (printEnd > cutoff) {
-    delivery.setDate(delivery.getDate() + 1);
-  }
-  if (hasPainting) {
     delivery.setDate(delivery.getDate() + 1);
   }
   delivery.setHours(0, 0, 0, 0);
@@ -140,7 +137,7 @@ export default function DeliveryDateHelper({ estimatedHours, hasPainting }: Deli
 
     const suggestedStart = calculateNextStart(previousEnd, baseTime);
     const suggestedEnd = addHours(suggestedStart, hours);
-    const suggestedDelivery = calculateDeliveryDate(suggestedEnd, Boolean(hasPainting));
+    const suggestedDelivery = calculateDeliveryDate(suggestedEnd);
     return { suggestedStart, suggestedDelivery };
   }, [queue, currentPrint, estimatedHours, hasPainting]);
 
@@ -175,7 +172,7 @@ export default function DeliveryDateHelper({ estimatedHours, hasPainting }: Deli
       <div className="mt-4 text-xs text-gray-500">
         {loading
           ? 'Carregando fila de producao...'
-          : 'Regras: inicio entre 08:00-23:00, intervalo de 20 min, entrega ate 18:00 e pintura adiciona +1 dia.'}
+          : 'Regras: inicio entre 08:00-23:00, intervalo de 20 min, entrega ate 18:00.'}
       </div>
     </div>
   );

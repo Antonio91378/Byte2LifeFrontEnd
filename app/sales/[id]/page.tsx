@@ -4,7 +4,7 @@ import PrintScheduleCalendar from '@/components/PrintScheduleCalendar';
 import { DETAIL_LEVELS } from '@/constants/printQuality';
 import { parseDurationToHours } from '@/utils/time';
 import axios from 'axios';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { use, useEffect, useState } from 'react';
 
 interface Filament {
@@ -22,6 +22,7 @@ interface Client {
 
 export default function EditSalePage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { id } = use(params);
 
   const parseMassGrams = (value: string | number) => {
@@ -55,6 +56,9 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
     hasCustomArt: false,
     hasPainting: false,
     hasVarnish: false,
+    paintTimeHours: 0,
+    paintResponsible: '',
+    paintStartConfirmedAt: '',
     productionCost: 0,
     nozzleDiameter: '',
     layerHeight: '',
@@ -69,6 +73,35 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
     wastedFilamentGrams: null,
     stockItemId: null
   });
+
+  const buildReturnToSalesUrl = () => {
+    if (!searchParams) {
+      return '/sales';
+    }
+    const params = new URLSearchParams();
+    const filterType = searchParams.get('filterType');
+    if (filterType === 'date' || filterType === 'month') {
+      params.set('filterType', filterType);
+    }
+    const filterDate = searchParams.get('filterDate');
+    if (filterDate) {
+      params.set('filterDate', filterDate);
+    }
+    const filterClientId = searchParams.get('filterClientId');
+    if (filterClientId) {
+      params.set('filterClientId', filterClientId);
+    }
+    const filterUnpaid = searchParams.get('filterUnpaid');
+    if (filterUnpaid === '1') {
+      params.set('filterUnpaid', '1');
+    }
+    const filterUndelivered = searchParams.get('filterUndelivered');
+    if (filterUndelivered === '1') {
+      params.set('filterUndelivered', '1');
+    }
+    const query = params.toString();
+    return query ? `/sales?${query}` : '/sales';
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -112,6 +145,9 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
           hasCustomArt: sale.hasCustomArt || false,
           hasPainting: sale.hasPainting || false,
           hasVarnish: sale.hasVarnish || false,
+          paintTimeHours: sale.paintTimeHours || 0,
+          paintResponsible: sale.paintResponsible || '',
+          paintStartConfirmedAt: sale.paintStartConfirmedAt || '',
           productionCost: sale.productionCost || 0,
           nozzleDiameter: sale.nozzleDiameter || '',
           layerHeight: sale.layerHeight || '',
@@ -221,6 +257,9 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
     } else {
       setFormData(prev => {
         const updates: any = { [name]: value };
+        if (name === 'paintTimeHours') {
+          updates.paintTimeHours = Number(value);
+        }
         // If quality changes, clear manual overrides so defaults are recalculated
         if (name === 'printQuality') {
           updates.nozzleDiameter = '';
@@ -253,11 +292,14 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
         printTimeHours: parseDurationToHours(formData.designPrintTime),
         deliveryDate: formData.deliveryDate === '' ? null : formData.deliveryDate,
         printStartConfirmedAt: formData.printStartConfirmedAt === '' ? null : formData.printStartConfirmedAt,
+        paintStartConfirmedAt: formData.paintStartConfirmedAt === '' ? null : formData.paintStartConfirmedAt,
+        paintTimeHours: Number(formData.paintTimeHours) || 0,
+        paintResponsible: formData.paintResponsible || '',
         filamentId: formData.filamentId && formData.filamentId.length === 24 ? formData.filamentId : null,
         clientId: formData.clientId && formData.clientId.length === 24 ? formData.clientId : null
       };
       await axios.put(`http://localhost:5000/api/sales/${id}`, payload);
-      router.push('/sales');
+      router.push(buildReturnToSalesUrl());
     } catch (error) {
       console.error('Error updating sale:', error);
       alert('Erro ao atualizar venda');
@@ -269,7 +311,7 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
   if (loading) return <div className="text-center py-12">Carregando...</div>;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 md:px-0">
+    <div className="max-w-6xl mx-auto px-4 md:px-0">
       <h1 className="text-3xl font-bold text-brand-purple mb-8 border-b-2 border-brand-orange pb-4">Editar Venda</h1>
       
       <form onSubmit={handleSubmit} className="bg-white p-4 md:p-8 rounded-xl shadow-sm border border-gray-100 space-y-6">
@@ -288,57 +330,17 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
             />
           </div>
 
-          {/* Sale Date */}
+          {/* Mass */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Data da Venda</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Massa (g)</label>
             <input
-              type="date"
-              name="saleDate"
-              required
-              value={formData.saleDate}
+              type="number"
+              name="massGrams"
+              step="0.1"
+              value={formData.massGrams}
               onChange={handleChange}
               className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
             />
-          </div>
-
-          {/* Delivery Date */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Data de Entrega</label>
-            <input
-              type="date"
-              name="deliveryDate"
-              value={formData.deliveryDate}
-              onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
-            />
-          </div>
-
-          <div className="col-span-1 md:col-span-2">
-            <PrintScheduleCalendar
-              estimatedHours={parseDurationToHours(formData.designPrintTime)}
-              hasPainting={formData.hasPainting}
-              value={formData.printStartConfirmedAt}
-              onChange={(value) => setFormData(prev => ({ ...prev, printStartConfirmedAt: value || '' }))}
-              saleId={id}
-            />
-          </div>
-
-          {/* Client */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
-            <select
-              name="clientId"
-              value={formData.clientId}
-              onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
-            >
-              <option value="">Selecione um cliente...</option>
-              {clients.map(client => (
-                <option key={client.id} value={client.id}>
-                  {client.name || client.phoneNumber}
-                </option>
-              ))}
-            </select>
           </div>
 
           {/* Filament */}
@@ -362,58 +364,26 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
             </select>
           </div>
 
-          {/* Product Link */}
-          <div className="col-span-1 md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Link do Produto (STL)</label>
+          {/* Sale Date */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Data da Venda</label>
             <input
-              type="url"
-              name="productLink"
-              value={formData.productLink ?? ''}
+              type="date"
+              name="saleDate"
+              required
+              value={formData.saleDate}
               onChange={handleChange}
               className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
             />
           </div>
 
-          {/* Print Quality */}
+          {/* Delivery Date */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Qualidade de Impressão</label>
-            <select
-              name="printQuality"
-              value={formData.printQuality}
-              onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
-            >
-              {DETAIL_LEVELS.map(level => (
-                <option key={level.value} value={level.label}>{level.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Print Status */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Status da Impressão</label>
-            <select
-              name="printStatus"
-              value={formData.printStatus}
-              onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
-            >
-              <option value="Pending">Pendente</option>
-              <option value="InQueue">Na Fila</option>
-              <option value="Staged">Preparado</option>
-              <option value="InProgress">Em Progresso</option>
-              <option value="Concluded">Concluído</option>
-            </select>
-          </div>
-
-          {/* Mass */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Massa (g)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Data de Entrega</label>
             <input
-              type="number"
-              name="massGrams"
-              step="0.1"
-              value={formData.massGrams}
+              type="date"
+              name="deliveryDate"
+              value={formData.deliveryDate}
               onChange={handleChange}
               className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
             />
@@ -469,7 +439,112 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
             </div>
           </div>
 
-          {/* Cost Details */}
+          {formData.hasPainting && (
+            <div className="col-span-1 md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Responsavel pela Pintura</label>
+                <input
+                  type="text"
+                  name="paintResponsible"
+                  value={formData.paintResponsible}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                  placeholder="Ex: Maria"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tempo de Pintura (h)</label>
+                <input
+                  type="number"
+                  name="paintTimeHours"
+                  step="0.1"
+                  min="0"
+                  value={formData.paintTimeHours}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="col-span-1 md:col-span-2">
+            <PrintScheduleCalendar
+              estimatedHours={parseDurationToHours(formData.designPrintTime)}
+              hasPainting={formData.hasPainting}
+              showPainting={formData.hasPainting}
+              value={formData.printStartConfirmedAt}
+              onChange={(value) => setFormData(prev => ({ ...prev, printStartConfirmedAt: value || '' }))}
+              paintHours={Number(formData.paintTimeHours) || 0}
+              paintValue={formData.paintStartConfirmedAt}
+              onPaintChange={(value) => setFormData(prev => ({ ...prev, paintStartConfirmedAt: value || '' }))}
+              paintResponsible={formData.paintResponsible}
+              saleId={id}
+            />
+          </div>
+
+          {/* Client */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
+            <select
+              name="clientId"
+              value={formData.clientId}
+              onChange={handleChange}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+            >
+              <option value="">Selecione um cliente...</option>
+              {clients.map(client => (
+                <option key={client.id} value={client.id}>
+                  {client.name || client.phoneNumber}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Product Link */}
+          <div className="col-span-1 md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Link do Produto (STL)</label>
+            <input
+              type="url"
+              name="productLink"
+              value={formData.productLink ?? ''}
+              onChange={handleChange}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+            />
+          </div>
+
+          {/* Print Quality */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Qualidade de Impressão</label>
+            <select
+              name="printQuality"
+              value={formData.printQuality}
+              onChange={handleChange}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+            >
+              {DETAIL_LEVELS.map(level => (
+                <option key={level.value} value={level.label}>{level.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Print Status */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Status da Impressão</label>
+            <select
+              name="printStatus"
+              value={formData.printStatus}
+              onChange={handleChange}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+            >
+              <option value="Pending">Pendente</option>
+              <option value="InQueue">Na Fila</option>
+              <option value="Staged">Preparado</option>
+              <option value="InProgress">Em Progresso</option>
+              <option value="Concluded">Concluído</option>
+            </select>
+          </div>
+
+{/* Cost Details */}
           <div className="col-span-1 md:col-span-2 bg-gray-50 p-4 rounded-xl border border-gray-200">
             <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>

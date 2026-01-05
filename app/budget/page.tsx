@@ -353,14 +353,6 @@ export default function BudgetPage() {
                   </div>
                 </div>
 
-                <div className="w-full">
-                  <PrintScheduleCalendar
-                    estimatedHours={result.estimatedTimeHours}
-                    hasPainting={formData.hasPainting}
-                    readOnly
-                  />
-                </div>
-
               {/* Technical Details Card */}
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
                   <h3 className="text-sm font-bold text-gray-900 mb-4">Detalhes Técnicos (Editável)</h3>
@@ -419,6 +411,17 @@ export default function BudgetPage() {
               </div>
             )}
           </div>
+          {result && (
+            <div className="lg:col-span-2">
+              <PrintScheduleCalendar
+                estimatedHours={result.estimatedTimeHours}
+                hasPainting={formData.hasPainting}
+                showPainting={formData.hasPainting}
+                layout="stacked"
+                readOnly
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

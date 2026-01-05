@@ -81,6 +81,40 @@ export default function Reminders() {
     setErrorMessage('');
   };
 
+  const syncLocalToApi = async (serverItems: Reminder[]) => {
+    const localItems = readLocalReminders();
+    if (localItems.length === 0) {
+      return serverItems;
+    }
+
+    const existing = new Set(
+      serverItems.map(item => `${item.title.trim().toLowerCase()}|${item.isDone}`)
+    );
+
+    const toCreate = localItems.filter(item => {
+      const key = `${item.title.trim().toLowerCase()}|${item.isDone}`;
+      return !existing.has(key);
+    });
+
+    if (toCreate.length === 0) {
+      writeLocalReminders([]);
+      return serverItems;
+    }
+
+    await Promise.allSettled(
+      toCreate.map(item =>
+        axios.post(API_URL, {
+          title: item.title,
+          isDone: item.isDone
+        })
+      )
+    );
+
+    writeLocalReminders([]);
+    const refreshed = await axios.get(API_URL);
+    return Array.isArray(refreshed.data) ? refreshed.data : serverItems;
+  };
+
   const shouldFallbackToLocal = (error: unknown) => {
     if (!axios.isAxiosError(error)) return false;
     const status = error.response?.status;
@@ -98,7 +132,8 @@ export default function Reminders() {
 
     try {
       const res = await axios.get(API_URL);
-      setReminders(sortReminders(res.data));
+      const merged = await syncLocalToApi(Array.isArray(res.data) ? res.data : []);
+      setReminders(sortReminders(merged));
       setErrorMessage('');
     } catch (error) {
       if (shouldFallbackToLocal(error)) {

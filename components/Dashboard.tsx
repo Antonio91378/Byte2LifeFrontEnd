@@ -497,13 +497,22 @@ export default function Dashboard() {
                     </div>
                     <h3 className="text-3xl font-bold text-gray-800">{currentPrint.description}</h3>
                     <p className="text-gray-500">Pronto para imprimir</p>
-                    <button 
-                      onClick={handleStartPrint}
-                      className="mt-6 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-md font-bold text-lg flex items-center justify-center gap-2 mx-auto"
-                    >
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                      Iniciar Contabilizador
-                    </button>
+                    <div className="flex justify-center gap-4 mt-6">
+                      <Link
+                        href={`/sales/${currentPrint.id}`}
+                        className="px-6 py-3 border border-brand-purple text-brand-purple rounded-lg hover:bg-purple-50 transition-colors shadow-sm flex items-center gap-2 font-bold text-lg"
+                      >
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                        Ver Detalhes
+                      </Link>
+                      <button 
+                        onClick={handleStartPrint}
+                        className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-md font-bold text-lg flex items-center justify-center gap-2"
+                      >
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        Iniciar Contabilizador
+                      </button>
+                    </div>
                   </>
                 )}
               </div>
@@ -625,7 +634,7 @@ export default function Dashboard() {
                   Ocultar agenda
                 </button>
               </div>
-              <PrintScheduleCalendar readOnly showSuggestionSummary={false} />
+              <PrintScheduleCalendar readOnly showSuggestionSummary={false} showPainting />
             </div>
           )}
         </div>

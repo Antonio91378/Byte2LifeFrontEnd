@@ -6,6 +6,7 @@ import axios from 'axios';
 import { Fragment, useEffect, useState } from 'react';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 
 const INCIDENT_REASONS = [
   { value: 'PowerLoss', label: 'Queda de Energia' },
@@ -56,6 +57,7 @@ export default function SalesPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [filaments, setFilaments] = useState<Filament[]>([]);
   const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null);
+  const searchParams = useSearchParams();
   
   const [filterDate, setFilterDate] = useState('');
   const [filterType, setFilterType] = useState<'date' | 'month'>('date');
@@ -85,6 +87,30 @@ export default function SalesPage() {
     };
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (!searchParams) return;
+    const nextFilterType = searchParams.get('filterType');
+    if (nextFilterType === 'date' || nextFilterType === 'month') {
+      setFilterType(nextFilterType);
+    }
+    const nextFilterDate = searchParams.get('filterDate');
+    if (nextFilterDate !== null) {
+      setFilterDate(nextFilterDate);
+    }
+    const nextFilterClientId = searchParams.get('filterClientId');
+    if (nextFilterClientId !== null) {
+      setFilterClientId(nextFilterClientId);
+    }
+    const nextFilterUnpaid = searchParams.get('filterUnpaid');
+    if (nextFilterUnpaid !== null) {
+      setFilterUnpaid(nextFilterUnpaid === '1');
+    }
+    const nextFilterUndelivered = searchParams.get('filterUndelivered');
+    if (nextFilterUndelivered !== null) {
+      setFilterUndelivered(nextFilterUndelivered === '1');
+    }
+  }, [searchParams]);
 
   const toggleExpand = (id: string) => {
     setExpandedSaleId(expandedSaleId === id ? null : id);
@@ -184,6 +210,23 @@ export default function SalesPage() {
   const totalSales = filteredSales.reduce((acc, curr) => acc + curr.saleValue, 0);
   const totalProfit = filteredSales.reduce((acc, curr) => acc + curr.profit, 0);
   const pendingPrints = filteredSales.filter(s => !s.isPrintConcluded).length;
+  const filterQuery = new URLSearchParams();
+  filterQuery.set('filterType', filterType);
+  if (filterDate) {
+    filterQuery.set('filterDate', filterDate);
+  }
+  if (filterClientId) {
+    filterQuery.set('filterClientId', filterClientId);
+  }
+  if (filterUnpaid) {
+    filterQuery.set('filterUnpaid', '1');
+  }
+  if (filterUndelivered) {
+    filterQuery.set('filterUndelivered', '1');
+  }
+  const newSaleHref = filterQuery.toString() ? `/sales/new?${filterQuery.toString()}` : '/sales/new';
+  const buildEditHref = (id: string) =>
+    filterQuery.toString() ? `/sales/${id}?${filterQuery.toString()}` : `/sales/${id}`;
 
   return (
     <div className="space-y-8">
@@ -258,7 +301,7 @@ export default function SalesPage() {
             <span className={`text-sm font-medium ${filterUndelivered ? 'text-yellow-600' : 'text-gray-600'}`}>Apenas Não Entregues</span>
           </div>
 
-          <Link href="/sales/new" className="bg-brand-purple hover:bg-purple-800 text-white px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md">
+          <Link href={newSaleHref} className="bg-brand-purple hover:bg-purple-800 text-white px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
             Nova Venda
           </Link>
@@ -282,7 +325,7 @@ export default function SalesPage() {
       
       <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-100">
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
+          <table className="min-w-full divide-y divide-gray-200 table-fixed">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Data</th>
@@ -307,13 +350,13 @@ export default function SalesPage() {
                     <td className="hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {s.deliveryDate ? new Date(s.deliveryDate).toLocaleDateString('pt-BR') : '-'}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 flex items-center gap-2">
+                    <td className="px-6 py-4 text-sm font-medium text-gray-900 flex items-center gap-2 min-w-0">
                       {expandedSaleId === s.id ? (
                         <svg className="w-4 h-4 text-brand-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                       ) : (
                         <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
                       )}
-                      {s.description}
+                      <div className="flex-1 min-w-0 max-w-[260px] overflow-x-auto whitespace-nowrap">{s.description}</div>
                       {s.incidents && s.incidents.length > 0 && (
                         <button 
                           onClick={(e) => {
@@ -341,7 +384,7 @@ export default function SalesPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium" onClick={(e) => e.stopPropagation()}>
-                      <Link href={`/sales/${s.id}`} className="text-brand-purple hover:text-purple-900 mr-4">Editar</Link>
+                      <Link href={buildEditHref(s.id)} className="text-brand-purple hover:text-purple-900 mr-4">Editar</Link>
                       <button 
                         onClick={() => handleDelete(s.id)}
                         className="text-red-600 hover:text-red-900"

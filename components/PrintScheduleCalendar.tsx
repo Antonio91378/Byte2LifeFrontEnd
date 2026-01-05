@@ -10,6 +10,12 @@ import { parseDurationToHours } from '@/utils/time';
 interface PrintScheduleCalendarProps {
   estimatedHours?: number;
   hasPainting?: boolean;
+  layout?: 'auto' | 'stacked';
+  paintHours?: number;
+  paintValue?: string | null;
+  onPaintChange?: (value: string | null) => void;
+  paintResponsible?: string;
+  showPainting?: boolean;
   value?: string | null;
   onChange?: (value: string | null) => void;
   readOnly?: boolean;
@@ -26,6 +32,10 @@ interface QueueSale {
   printStartConfirmedAt?: string;
   printStartScheduledAt?: string;
   printStatus?: string;
+  hasPainting?: boolean;
+  paintStartConfirmedAt?: string;
+  paintTimeHours?: number;
+  paintResponsible?: string;
 }
 
 const PRINT_START_HOUR = 8;
@@ -95,14 +105,15 @@ function getDurationHours(sale: QueueSale) {
   return parseDurationToHours(sale.designPrintTime || '');
 }
 
-function calculateDeliveryDate(printEnd: Date, hasPainting: boolean) {
-  const cutoff = new Date(printEnd);
+function getPaintDurationHours(sale: QueueSale) {
+  return Number(sale.paintTimeHours) || 0;
+}
+
+function calculateDeliveryDate(completionEnd: Date) {
+  const cutoff = new Date(completionEnd);
   cutoff.setHours(DELIVERY_CUTOFF_HOUR, 0, 0, 0);
-  const delivery = new Date(printEnd);
-  if (printEnd > cutoff) {
-    delivery.setDate(delivery.getDate() + 1);
-  }
-  if (hasPainting) {
+  const delivery = new Date(completionEnd);
+  if (completionEnd > cutoff) {
     delivery.setDate(delivery.getDate() + 1);
   }
   delivery.setHours(0, 0, 0, 0);
@@ -154,9 +165,38 @@ function validateSlot(
   return { valid: true };
 }
 
+function validatePaintSlot(
+  start: Date,
+  durationHours: number,
+  options: { enforceFuture?: boolean; minStart?: Date | null } = {}
+) {
+  if (durationHours <= 0) {
+    return { valid: false, message: 'Informe o tempo de pintura para agendar.' };
+  }
+
+  if (options.minStart && start < options.minStart) {
+    return { valid: false, message: 'A pintura deve iniciar após o término da impressão.' };
+  }
+
+  if (options.enforceFuture) {
+    const now = new Date();
+    if (start < now) {
+      return { valid: false, message: 'Escolha um horario futuro.' };
+    }
+  }
+
+  return { valid: true };
+}
+
 export default function PrintScheduleCalendar({
   estimatedHours,
   hasPainting,
+  layout = 'auto',
+  paintHours,
+  paintValue,
+  onPaintChange,
+  paintResponsible,
+  showPainting,
   value,
   onChange,
   readOnly,
@@ -165,11 +205,39 @@ export default function PrintScheduleCalendar({
 }: PrintScheduleCalendarProps) {
   const [queue, setQueue] = useState<QueueSale[]>([]);
   const [currentPrint, setCurrentPrint] = useState<QueueSale | null>(null);
+  const [paintingSales, setPaintingSales] = useState<QueueSale[]>([]);
   const [loading, setLoading] = useState(true);
+  const [paintEndpointAvailable, setPaintEndpointAvailable] = useState(true);
   const [selectionError, setSelectionError] = useState('');
+  const [paintSelectionError, setPaintSelectionError] = useState('');
   const [saving, setSaving] = useState(false);
   const [effectiveHours, setEffectiveHours] = useState<number>(Number(estimatedHours) || 0);
   const canPersist = isValidObjectId(saleId);
+  const shouldShowPainting = Boolean(showPainting ?? hasPainting);
+  const shouldSplit = shouldShowPainting && layout !== 'stacked';
+  const effectivePaintHours = Math.max(0, Number(paintHours) || 0);
+  const normalizedPaintValue = typeof paintValue === 'string' && paintValue.trim() !== '' ? paintValue : null;
+  const paintSale = saleId ? paintingSales.find((sale) => sale.id === saleId) : null;
+  const resolvedPaintValue = normalizedPaintValue || paintSale?.paintStartConfirmedAt || null;
+  const resolvedPaintHours = effectivePaintHours > 0
+    ? effectivePaintHours
+    : Math.max(0, Number(paintSale?.paintTimeHours) || 0);
+  const hasResolvedPaintSchedule = Boolean(resolvedPaintValue) && resolvedPaintHours > 0;
+
+  const fetchPaintingFallback = async () => {
+    try {
+      const salesRes = await axios.get('http://localhost:5000/api/sales');
+      const list = (salesRes.data || []).filter((sale: QueueSale) =>
+        sale.hasPainting ||
+        sale.paintStartConfirmedAt ||
+        (Number(sale.paintTimeHours) || 0) > 0 ||
+        (sale.paintResponsible && sale.paintResponsible.trim() !== '')
+      );
+      setPaintingSales(list);
+    } catch {
+      setPaintingSales([]);
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -182,6 +250,31 @@ export default function PrintScheduleCalendar({
     } catch (error) {
       setQueue([]);
       setCurrentPrint(null);
+    }
+
+    if (!shouldShowPainting) {
+      setPaintingSales([]);
+      setLoading(false);
+      return;
+    }
+
+    if (!paintEndpointAvailable) {
+      await fetchPaintingFallback();
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const paintRes = await axios.get('http://localhost:5000/api/sales/painting');
+      setPaintingSales(paintRes.data || []);
+    } catch (error) {
+      const status = (error as any)?.response?.status;
+      if (status === 404) {
+        setPaintEndpointAvailable(false);
+        await fetchPaintingFallback();
+      } else {
+        setPaintingSales([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -189,7 +282,7 @@ export default function PrintScheduleCalendar({
 
   useEffect(() => {
     fetchData().catch(() => null);
-  }, []);
+  }, [shouldShowPainting, paintEndpointAvailable]);
 
   useEffect(() => {
     const nextHours = Number(estimatedHours) || 0;
@@ -220,12 +313,12 @@ export default function PrintScheduleCalendar({
     });
 
     return fixedSlots;
-  }, [queue, currentPrint]);
+  }, [queue, currentPrint, saleId, effectiveHours]);
 
   const suggestion = useMemo(() => {
     const duration = Math.max(0, effectiveHours);
     if (duration <= 0) {
-      return { start: null, delivery: null };
+      return { start: null, delivery: null, printEnd: null };
     }
     const suggestedSlots = queue
       .filter((sale) => !sale.printStartConfirmedAt && sale.printStartScheduledAt)
@@ -237,12 +330,11 @@ export default function PrintScheduleCalendar({
       .filter((slot) => slot.end > slot.start);
 
     const start = findNextAvailableStart(new Date(), [...occupied, ...suggestedSlots], duration);
-    const end = addHours(start, duration);
-    const delivery = calculateDeliveryDate(end, Boolean(hasPainting));
-    return { start, delivery };
-  }, [effectiveHours, hasPainting, occupied, queue]);
+    const printEnd = addHours(start, duration);
+    return { start, delivery: null, printEnd };
+  }, [effectiveHours, occupied, queue]);
 
-  const events = useMemo(() => {
+  const printEvents = useMemo(() => {
     const list: any[] = [];
     if (currentPrint?.printStartedAt) {
       const duration = Math.max(getDurationHours(currentPrint), 0);
@@ -324,6 +416,87 @@ export default function PrintScheduleCalendar({
     return list;
   }, [queue, currentPrint, value, effectiveHours, suggestion.start, readOnly, saleId]);
 
+  const deliveryInfo = useMemo(() => {
+    const duration = Math.max(0, effectiveHours);
+    const baseStart = value ? new Date(value) : suggestion.start;
+    const printEnd = baseStart && duration > 0 ? addHours(baseStart, duration) : null;
+    const paintEnd = resolvedPaintValue && resolvedPaintHours > 0
+      ? addHours(new Date(resolvedPaintValue), resolvedPaintHours)
+      : null;
+    const completionEnd = paintEnd && printEnd
+      ? (paintEnd > printEnd ? paintEnd : printEnd)
+      : paintEnd || printEnd;
+    const delivery = completionEnd ? calculateDeliveryDate(completionEnd) : null;
+    return { printEnd, paintEnd, delivery };
+  }, [effectiveHours, value, suggestion.start, resolvedPaintValue, resolvedPaintHours]);
+
+  const printEndForPainting = useMemo(() => {
+    const duration = Math.max(0, effectiveHours);
+    if (value && duration > 0) {
+      return addHours(new Date(value), duration);
+    }
+
+    if (!saleId) {
+      return null;
+    }
+
+    if (currentPrint?.id === saleId && currentPrint.printStartedAt) {
+      const hours = duration > 0 ? duration : Math.max(getDurationHours(currentPrint), 0);
+      if (hours > 0) {
+        return addHours(new Date(currentPrint.printStartedAt), hours);
+      }
+    }
+
+    const queued = queue.find((sale) => sale.id === saleId && sale.printStartConfirmedAt);
+    if (queued?.printStartConfirmedAt) {
+      const hours = duration > 0 ? duration : Math.max(getDurationHours(queued), 0);
+      if (hours > 0) {
+        return addHours(new Date(queued.printStartConfirmedAt), hours);
+      }
+    }
+
+    return null;
+  }, [value, effectiveHours, saleId, currentPrint, queue]);
+
+  const paintEvents = useMemo(() => {
+    const list: any[] = [];
+    paintingSales.forEach((sale) => {
+      if (!sale.paintStartConfirmedAt) return;
+      const duration = Math.max(getPaintDurationHours(sale), 0);
+      if (duration <= 0) return;
+      const start = new Date(sale.paintStartConfirmedAt);
+      const responsible = sale.paintResponsible ? ` - ${sale.paintResponsible}` : '';
+      list.push({
+        id: `paint-${sale.id}`,
+        title: `${sale.description || 'Pintura'}${responsible}`,
+        start,
+        end: addHours(start, duration),
+        color: '#6366f1'
+      });
+    });
+
+    const hasSelectedMatch = paintValue
+      ? paintingSales.some((sale) => sale.paintStartConfirmedAt && new Date(sale.paintStartConfirmedAt).getTime() === new Date(paintValue).getTime())
+      : false;
+
+    if (paintValue && !hasSelectedMatch) {
+      const duration = Math.max(0, effectivePaintHours);
+      if (duration > 0) {
+        const start = new Date(paintValue);
+        const responsible = paintResponsible ? ` - ${paintResponsible}` : '';
+        list.push({
+          id: 'paint-selected',
+          title: `${'Pintura'}${responsible}`,
+          start,
+          end: addHours(start, duration),
+          color: '#8b5cf6'
+        });
+      }
+    }
+
+    return list;
+  }, [paintingSales, paintValue, effectivePaintHours, paintResponsible]);
+
   const persistSchedule = async (nextValue: string | null) => {
     if (!canPersist) return;
     setSaving(true);
@@ -357,6 +530,54 @@ export default function PrintScheduleCalendar({
     }
   };
 
+  const persistPaintSchedule = async (nextValue: string | null) => {
+    if (!canPersist) return;
+    setSaving(true);
+    const payload = {
+      paintStartConfirmedAt: nextValue ? nextValue : null,
+      paintTimeHours: effectivePaintHours > 0 ? effectivePaintHours : null,
+      paintResponsible: paintResponsible && paintResponsible.trim() !== '' ? paintResponsible.trim() : null
+    };
+    try {
+      if (!paintEndpointAvailable) {
+        throw new Error('paint-endpoint-missing');
+      }
+      await axios.patch(`http://localhost:5000/api/sales/${saleId}/paint-schedule`, payload);
+      await fetchData();
+      setPaintSelectionError('');
+    } catch (error) {
+      const status = (error as any)?.response?.status;
+      if ((status === 404 || (error as Error)?.message === 'paint-endpoint-missing') && saleId) {
+        if (status === 404) {
+          setPaintEndpointAvailable(false);
+        }
+        try {
+          const saleRes = await axios.get(`http://localhost:5000/api/sales/${saleId}`);
+          const updatedSale = {
+            ...saleRes.data,
+            paintStartConfirmedAt: nextValue ? nextValue : null
+          };
+          if (effectivePaintHours > 0) {
+            updatedSale.paintTimeHours = effectivePaintHours;
+          }
+          if (paintResponsible && paintResponsible.trim() !== '') {
+            updatedSale.paintResponsible = paintResponsible.trim();
+          }
+          await axios.put(`http://localhost:5000/api/sales/${saleId}`, updatedSale);
+          await fetchData();
+          setPaintSelectionError('');
+          return;
+        } catch (fallbackError) {
+          console.error('Error saving paint schedule (fallback)', fallbackError);
+        }
+      }
+      console.error('Error saving paint schedule', error);
+      setPaintSelectionError('Erro ao salvar o horario de pintura. Tente novamente.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   useEffect(() => {
     if (!value || !onChange || readOnly) return;
     const duration = Math.max(0, effectiveHours);
@@ -370,7 +591,22 @@ export default function PrintScheduleCalendar({
       return;
     }
     setSelectionError('');
-  }, [estimatedHours, value, occupied, onChange, readOnly, saleId]);
+  }, [estimatedHours, value, occupied, onChange, readOnly, saleId, effectiveHours]);
+
+  useEffect(() => {
+    if (!paintValue || !onPaintChange || readOnly) return;
+    const duration = Math.max(0, effectivePaintHours);
+    const start = new Date(paintValue);
+    const validation = validatePaintSlot(start, duration, {
+      minStart: printEndForPainting
+    });
+    if (!validation.valid) {
+      onPaintChange(null);
+      setPaintSelectionError(validation.message || 'Horario invalido para pintura.');
+      return;
+    }
+    setPaintSelectionError('');
+  }, [paintValue, onPaintChange, readOnly, effectivePaintHours, printEndForPainting]);
 
   const handleDateClick = (info: { date: Date }) => {
     if (!onChange || readOnly) return;
@@ -390,87 +626,178 @@ export default function PrintScheduleCalendar({
     persistSchedule(nextValue).catch(() => null);
   };
 
+  const handlePaintDateClick = (info: { date: Date }) => {
+    if (!onPaintChange || readOnly) return;
+    const duration = Math.max(0, effectivePaintHours);
+    const validation = validatePaintSlot(info.date, duration, {
+      enforceFuture: true,
+      minStart: printEndForPainting
+    });
+    if (!validation.valid) {
+      setPaintSelectionError(validation.message || 'Horario invalido para pintura.');
+      return;
+    }
+
+    setPaintSelectionError('');
+    const nextValue = info.date.toISOString();
+    onPaintChange(nextValue);
+    persistPaintSchedule(nextValue).catch(() => null);
+  };
+
   const suggestedStartLabel = suggestion.start
     ? suggestion.start.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
     : '--';
-  const suggestedDeliveryLabel = suggestion.delivery
-    ? suggestion.delivery.toLocaleDateString('pt-BR')
+  const suggestedDeliveryLabel = deliveryInfo.delivery
+    ? deliveryInfo.delivery.toLocaleDateString('pt-BR')
     : '--';
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-lg font-bold text-gray-800">Agenda de impressao</h3>
-          <p className="text-sm text-gray-500">Sugestao baseada na fila e no horario de trabalho.</p>
-        </div>
-        <span className="text-xs font-semibold uppercase tracking-wide text-teal-600 bg-teal-50 px-2 py-1 rounded-full">Agenda</span>
-      </div>
-
-      {showSuggestionSummary && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
-            <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Inicio sugerido</p>
-            <p className="text-2xl font-bold text-gray-900">{suggestedStartLabel}</p>
+    <div className={`grid grid-cols-1 ${shouldSplit ? 'xl:grid-cols-2' : ''} gap-6`}>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-bold text-gray-800">Agenda de impressao</h3>
+            <p className="text-sm text-gray-500">Sugestao baseada na fila e no horario de trabalho.</p>
           </div>
-          <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
-            <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Entrega sugerida</p>
-            <p className="text-2xl font-bold text-gray-900">{suggestedDeliveryLabel}</p>
-          </div>
+          <span className="text-xs font-semibold uppercase tracking-wide text-teal-600 bg-teal-50 px-2 py-1 rounded-full">Impressão</span>
         </div>
-      )}
 
-      {showSuggestionSummary && onChange && suggestion.start && !readOnly && (
-        <div className="mt-3">
-          <button
-            type="button"
-            onClick={() => {
-              const nextValue = suggestion.start ? suggestion.start.toISOString() : null;
-              onChange(nextValue);
-              persistSchedule(nextValue).catch(() => null);
+        {showSuggestionSummary && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
+              <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Inicio sugerido</p>
+              <p className="text-2xl font-bold text-gray-900">{suggestedStartLabel}</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
+              <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Entrega sugerida</p>
+              <p className="text-2xl font-bold text-gray-900">{suggestedDeliveryLabel}</p>
+            </div>
+          </div>
+        )}
+
+        {showSuggestionSummary && onChange && suggestion.start && !readOnly && (
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => {
+                const nextValue = suggestion.start ? suggestion.start.toISOString() : null;
+                onChange(nextValue);
+                persistSchedule(nextValue).catch(() => null);
+              }}
+              className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors text-sm font-semibold"
+            >
+              {saving ? 'Salvando...' : 'Aplicar sugestao'}
+            </button>
+          </div>
+        )}
+
+        {showSuggestionSummary && hasPainting && shouldShowPainting && !hasResolvedPaintSchedule && (
+          <div className="mt-3 text-xs text-amber-600 flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+            </svg>
+            Defina a agenda de pintura para completar a sugestao de entrega.
+          </div>
+        )}
+
+        {!readOnly && onChange && (
+          <div className="mt-3 text-xs text-amber-600 flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+            </svg>
+            Marque a agenda de impressao clicando no horario desejado.
+          </div>
+        )}
+
+        {selectionError && (
+          <div className="mt-3 text-xs text-red-600">{selectionError}</div>
+        )}
+
+        <div className="mt-4">
+          <FullCalendar
+            plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
+            initialView="timeGridWeek"
+            headerToolbar={{
+              left: 'prev,next today',
+              center: 'title',
+              right: 'timeGridWeek,timeGridDay'
             }}
-            className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors text-sm font-semibold"
-          >
-            {saving ? 'Salvando...' : 'Aplicar sugestao'}
-          </button>
+            height="auto"
+            allDaySlot={false}
+            selectable={!readOnly && Boolean(onChange)}
+            selectMirror
+            dayMaxEvents
+            slotMinTime="08:00:00"
+            slotMaxTime="23:00:00"
+            businessHours={{
+              daysOfWeek: [1, 2, 3, 4, 5, 6, 0],
+              startTime: '08:00',
+              endTime: '23:00'
+            }}
+            events={printEvents}
+            dateClick={handleDateClick}
+          />
+        </div>
+
+        <div className="mt-4 text-xs text-gray-500">
+          {loading
+            ? 'Carregando agenda...'
+            : 'Regras: inicio entre 08:00-23:00, intervalo de 20 min, entrega ate 18:00.'}
+        </div>
+      </div>
+
+      {shouldShowPainting && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-bold text-gray-800">Agenda de pintura</h3>
+              <p className="text-sm text-gray-500">Agendamento livre, sem regras de horario.</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Responsavel: {paintResponsible ? paintResponsible : 'Nao informado'}
+              </p>
+            </div>
+            <span className="text-xs font-semibold uppercase tracking-wide text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full">Pintura</span>
+          </div>
+
+          {!readOnly && onPaintChange && (
+            <div className="mt-2 text-xs text-amber-600 flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+              </svg>
+              Marque a agenda de pintura clicando no horario desejado.
+            </div>
+          )}
+
+          {paintSelectionError && (
+            <div className="mt-3 text-xs text-red-600">{paintSelectionError}</div>
+          )}
+
+          <div className="mt-4">
+            <FullCalendar
+              plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
+              initialView="timeGridWeek"
+              headerToolbar={{
+                left: 'prev,next today',
+                center: 'title',
+                right: 'timeGridWeek,timeGridDay'
+              }}
+              height="auto"
+              allDaySlot={false}
+              selectable={!readOnly && Boolean(onPaintChange)}
+              selectMirror
+              dayMaxEvents
+              slotMinTime="00:00:00"
+              slotMaxTime="24:00:00"
+              events={paintEvents}
+              dateClick={handlePaintDateClick}
+            />
+          </div>
+
+          <div className="mt-4 text-xs text-gray-500">
+            {loading ? 'Carregando agenda...' : 'Sem regras fixas para pintura.'}
+          </div>
         </div>
       )}
-
-      {selectionError && (
-        <div className="mt-3 text-xs text-red-600">{selectionError}</div>
-      )}
-
-      <div className="mt-4">
-        <FullCalendar
-          plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
-          initialView="timeGridWeek"
-          headerToolbar={{
-            left: 'prev,next today',
-            center: 'title',
-            right: 'timeGridWeek,timeGridDay'
-          }}
-          height="auto"
-          allDaySlot={false}
-          selectable={!readOnly}
-          selectMirror
-          dayMaxEvents
-          slotMinTime="08:00:00"
-          slotMaxTime="23:00:00"
-          businessHours={{
-            daysOfWeek: [1, 2, 3, 4, 5, 6, 0],
-            startTime: '08:00',
-            endTime: '23:00'
-          }}
-          events={events}
-          dateClick={handleDateClick}
-        />
-      </div>
-
-      <div className="mt-4 text-xs text-gray-500">
-        {loading
-          ? 'Carregando agenda...'
-          : 'Regras: inicio entre 08:00-23:00, intervalo de 20 min, entrega ate 18:00 e pintura adiciona +1 dia.'}
-      </div>
     </div>
   );
 }
