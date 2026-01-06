@@ -61,8 +61,10 @@ export default function SalesPage() {
   
   const [filterDate, setFilterDate] = useState('');
   const [filterType, setFilterType] = useState<'date' | 'month'>('date');
-  const [filterUnpaid, setFilterUnpaid] = useState(false);
-  const [filterUndelivered, setFilterUndelivered] = useState(false);
+  const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
+  const [deliveryFilter, setDeliveryFilter] = useState<'all' | 'delivered' | 'undelivered'>('all');
+  const [printFilter, setPrintFilter] = useState<'all' | 'printed' | 'pending'>('all');
+  const [isStatusFilterOpen, setIsStatusFilterOpen] = useState(false);
   const [filterClientId, setFilterClientId] = useState<string>('');
   const [showIncidentsModal, setShowIncidentsModal] = useState<Sale | null>(null);
   const [isAddingIncident, setIsAddingIncident] = useState(false);
@@ -102,13 +104,27 @@ export default function SalesPage() {
     if (nextFilterClientId !== null) {
       setFilterClientId(nextFilterClientId);
     }
-    const nextFilterUnpaid = searchParams.get('filterUnpaid');
-    if (nextFilterUnpaid !== null) {
-      setFilterUnpaid(nextFilterUnpaid === '1');
+    const nextPaymentStatus = searchParams.get('paymentStatus');
+    if (nextPaymentStatus === 'paid' || nextPaymentStatus === 'unpaid') {
+      setPaymentFilter(nextPaymentStatus);
+    } else {
+      const legacyUnpaid = searchParams.get('filterUnpaid');
+      if (legacyUnpaid === '1') {
+        setPaymentFilter('unpaid');
+      }
     }
-    const nextFilterUndelivered = searchParams.get('filterUndelivered');
-    if (nextFilterUndelivered !== null) {
-      setFilterUndelivered(nextFilterUndelivered === '1');
+    const nextDeliveryStatus = searchParams.get('deliveryStatus');
+    if (nextDeliveryStatus === 'delivered' || nextDeliveryStatus === 'undelivered') {
+      setDeliveryFilter(nextDeliveryStatus);
+    } else {
+      const legacyUndelivered = searchParams.get('filterUndelivered');
+      if (legacyUndelivered === '1') {
+        setDeliveryFilter('undelivered');
+      }
+    }
+    const nextPrintStatus = searchParams.get('printStatus');
+    if (nextPrintStatus === 'printed' || nextPrintStatus === 'pending') {
+      setPrintFilter(nextPrintStatus);
     }
   }, [searchParams]);
 
@@ -126,6 +142,18 @@ export default function SalesPage() {
     if (!id) return 'N/A';
     const filament = filaments.find(f => f.id === id);
     return filament ? `${filament.description} (${filament.color})` : 'Desconhecido';
+  };
+
+  const togglePaymentFilter = (value: 'paid' | 'unpaid') => {
+    setPaymentFilter(prev => (prev === value ? 'all' : value));
+  };
+
+  const toggleDeliveryFilter = (value: 'delivered' | 'undelivered') => {
+    setDeliveryFilter(prev => (prev === value ? 'all' : value));
+  };
+
+  const togglePrintFilter = (value: 'printed' | 'pending') => {
+    setPrintFilter(prev => (prev === value ? 'all' : value));
   };
 
   const handleMoveToStock = (id: string) => {
@@ -162,6 +190,36 @@ export default function SalesPage() {
     );
   };
 
+  const handleToggleStatus = async (sale: Sale, field: 'isPrintConcluded' | 'isDelivered' | 'isPaid') => {
+    const updatedSale: any = { ...sale, [field]: !sale[field] };
+    try {
+      await axios.put(`http://localhost:5000/api/sales/${sale.id}`, updatedSale);
+      setSales(prev => prev.map(item => (item.id === sale.id ? { ...item, [field]: updatedSale[field] } : item)));
+    } catch (error) {
+      console.error(error);
+      showAlert('Erro', 'Falha ao atualizar status da venda.', 'error');
+    }
+  };
+
+  const handleClone = async (sale: Sale) => {
+    const payload: any = { ...sale };
+    delete payload.id;
+    try {
+      const res = await axios.post('http://localhost:5000/api/sales', payload);
+      const created = res.data;
+      if (created && created.id) {
+        setSales(prev => [created, ...prev]);
+      } else {
+        const listRes = await axios.get('http://localhost:5000/api/sales');
+        setSales(listRes.data);
+      }
+      showAlert('Sucesso', 'Venda clonada.', 'success');
+    } catch (error) {
+      console.error(error);
+      showAlert('Erro', 'Falha ao clonar venda.', 'error');
+    }
+  };
+
   const handleAddIncident = async () => {
     if (!showIncidentsModal) return;
 
@@ -196,10 +254,12 @@ export default function SalesPage() {
   const filteredSales = sales.filter(s => {
     // Filtro por cliente
     if (filterClientId && s.clientId !== filterClientId) return false;
-    // Unpaid filter
-    if (filterUnpaid && s.isPaid) return false;
-    // Undelivered filter
-    if (filterUndelivered && s.isDelivered) return false;
+    if (paymentFilter === 'paid' && !s.isPaid) return false;
+    if (paymentFilter === 'unpaid' && s.isPaid) return false;
+    if (deliveryFilter === 'delivered' && !s.isDelivered) return false;
+    if (deliveryFilter === 'undelivered' && s.isDelivered) return false;
+    if (printFilter === 'printed' && !s.isPrintConcluded) return false;
+    if (printFilter === 'pending' && s.isPrintConcluded) return false;
 
     if (!filterDate) return true;
     if (!s.saleDate) return false;
@@ -210,6 +270,7 @@ export default function SalesPage() {
   const totalSales = filteredSales.reduce((acc, curr) => acc + curr.saleValue, 0);
   const totalProfit = filteredSales.reduce((acc, curr) => acc + curr.profit, 0);
   const pendingPrints = filteredSales.filter(s => !s.isPrintConcluded).length;
+  const activeStatusFilters = [paymentFilter, deliveryFilter, printFilter].filter(value => value !== 'all').length;
   const filterQuery = new URLSearchParams();
   filterQuery.set('filterType', filterType);
   if (filterDate) {
@@ -218,11 +279,14 @@ export default function SalesPage() {
   if (filterClientId) {
     filterQuery.set('filterClientId', filterClientId);
   }
-  if (filterUnpaid) {
-    filterQuery.set('filterUnpaid', '1');
+  if (paymentFilter !== 'all') {
+    filterQuery.set('paymentStatus', paymentFilter);
   }
-  if (filterUndelivered) {
-    filterQuery.set('filterUndelivered', '1');
+  if (deliveryFilter !== 'all') {
+    filterQuery.set('deliveryStatus', deliveryFilter);
+  }
+  if (printFilter !== 'all') {
+    filterQuery.set('printStatus', printFilter);
   }
   const newSaleHref = filterQuery.toString() ? `/sales/new?${filterQuery.toString()}` : '/sales/new';
   const buildEditHref = (id: string) =>
@@ -287,18 +351,127 @@ export default function SalesPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-200 shadow-sm cursor-pointer justify-center md:justify-start" onClick={() => setFilterUnpaid(!filterUnpaid)}>
-            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${filterUnpaid ? 'bg-red-500 border-red-500' : 'border-gray-300'}`}>
-              {filterUnpaid && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
-            </div>
-            <span className={`text-sm font-medium ${filterUnpaid ? 'text-red-600' : 'text-gray-600'}`}>Apenas Não Pagas</span>
-          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsStatusFilterOpen(prev => !prev)}
+              className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm hover:border-gray-300 transition-colors"
+            >
+              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707L14 14.586V19a1 1 0 01-1.447.894l-4-2A1 1 0 018 16.618v-2.032L3.293 7.293A1 1 0 013 6.586V4z"></path>
+              </svg>
+              <span className="text-sm font-medium text-gray-700">Filtros</span>
+              {activeStatusFilters > 0 && (
+                <span className="text-xs font-bold text-white bg-brand-purple px-2 py-0.5 rounded-full">
+                  {activeStatusFilters}
+                </span>
+              )}
+              <svg className={`w-4 h-4 text-gray-400 transition-transform ${isStatusFilterOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
+              </svg>
+            </button>
 
-          <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-200 shadow-sm cursor-pointer justify-center md:justify-start" onClick={() => setFilterUndelivered(!filterUndelivered)}>
-            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${filterUndelivered ? 'bg-yellow-500 border-yellow-500' : 'border-gray-300'}`}>
-              {filterUndelivered && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
-            </div>
-            <span className={`text-sm font-medium ${filterUndelivered ? 'text-yellow-600' : 'text-gray-600'}`}>Apenas Não Entregues</span>
+            {isStatusFilterOpen && (
+              <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 rounded-xl shadow-lg p-4 z-10">
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Pagamento</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => togglePaymentFilter('paid')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                          paymentFilter === 'paid'
+                            ? 'bg-green-100 text-green-700 border-green-200'
+                            : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                        }`}
+                      >
+                        Pagas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => togglePaymentFilter('unpaid')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                          paymentFilter === 'unpaid'
+                            ? 'bg-red-100 text-red-700 border-red-200'
+                            : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                        }`}
+                      >
+                        Nao pagas
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Entrega</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleDeliveryFilter('delivered')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                          deliveryFilter === 'delivered'
+                            ? 'bg-purple-100 text-purple-700 border-purple-200'
+                            : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                        }`}
+                      >
+                        Entregues
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleDeliveryFilter('undelivered')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                          deliveryFilter === 'undelivered'
+                            ? 'bg-yellow-100 text-yellow-700 border-yellow-200'
+                            : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                        }`}
+                      >
+                        Nao entregues
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Impressao</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => togglePrintFilter('printed')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                          printFilter === 'printed'
+                            ? 'bg-blue-100 text-blue-700 border-blue-200'
+                            : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                        }`}
+                      >
+                        Impressas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => togglePrintFilter('pending')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                          printFilter === 'pending'
+                            ? 'bg-gray-200 text-gray-700 border-gray-300'
+                            : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                        }`}
+                      >
+                        Nao impressas
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentFilter('all');
+                      setDeliveryFilter('all');
+                      setPrintFilter('all');
+                    }}
+                    className="w-full text-xs font-semibold text-gray-600 hover:text-gray-800 transition-colors border-t border-gray-100 pt-3"
+                  >
+                    Limpar filtros
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <Link href={newSaleHref} className="bg-brand-purple hover:bg-purple-800 text-white px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md">
@@ -373,17 +546,57 @@ export default function SalesPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">R$ {s.saleValue.toFixed(2)}</td>
                     <td className="hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-green-600 font-bold">R$ {s.profit.toFixed(2)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-center space-x-2">
-                      <span className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${s.isPrintConcluded ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleToggleStatus(s, 'isPrintConcluded');
+                        }}
+                        className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isPrintConcluded ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}
+                        title="Alternar impresso"
+                      >
                         {s.isPrintConcluded ? 'Impresso' : 'Pendente'}
                       </span>
-                      <span className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${s.isDelivered ? 'bg-purple-100 text-purple-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleToggleStatus(s, 'isDelivered');
+                        }}
+                        className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isDelivered ? 'bg-purple-100 text-purple-800' : 'bg-yellow-100 text-yellow-800'}`}
+                        title="Alternar entregue"
+                      >
                         {s.isDelivered ? 'Entregue' : 'A Enviar'}
                       </span>
-                      <span className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${s.isPaid ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleToggleStatus(s, 'isPaid');
+                        }}
+                        className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isPaid ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
+                        title="Alternar pago"
+                      >
                         {s.isPaid ? 'Pago' : 'Não Pago'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleClone(s);
+                        }}
+                        className="mr-3 text-gray-400 hover:text-brand-purple transition-colors"
+                        title="Clonar venda"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7a2 2 0 012-2h7a2 2 0 012 2v9a2 2 0 01-2 2h-7a2 2 0 01-2-2V7zm-4 4a2 2 0 012-2h1v7a2 2 0 002 2h5v1a2 2 0 01-2 2H6a2 2 0 01-2-2v-8z"></path>
+                        </svg>
+                      </button>
                       <Link href={buildEditHref(s.id)} className="text-brand-purple hover:text-purple-900 mr-4">Editar</Link>
                       <button 
                         onClick={() => handleDelete(s.id)}

@@ -535,14 +535,14 @@ export default function Dashboard() {
           </div>
           <div className="p-0 flex-grow overflow-y-auto max-h-[300px]">
             {queue.length > 0 ? (
-              <table className="w-full text-left">
+              <table className="w-full text-left table-fixed">
                 <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
                   <tr>
-                    <th className="px-6 py-3">Prioridade</th>
-                    <th className="px-6 py-3">Entrega</th>
+                    <th className="px-6 py-3 w-[120px]">Prioridade</th>
+                    <th className="px-6 py-3 w-[140px]">Entrega</th>
                     <th className="px-6 py-3">Descrição</th>
-                    <th className="px-6 py-3">Status</th>
-                    <th className="px-6 py-3">Ação</th>
+                    <th className="px-6 py-3 w-[120px]">Status</th>
+                    <th className="px-6 py-3 w-[120px]">Ação</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -561,8 +561,10 @@ export default function Dashboard() {
                         {item.deliveryDate ? new Date(item.deliveryDate).toLocaleDateString('pt-BR') : '-'}
                       </td>
                       <td className="px-6 py-4 text-gray-700">
-                        <div className="flex items-center gap-2">
-                          {item.description}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="flex-1 min-w-0 max-w-[260px] overflow-x-auto whitespace-nowrap">
+                            {item.description}
+                          </div>
                           {item.incidents && item.incidents.length > 0 && (
                             <button 
                               onClick={() => setShowIncidentsModal(item)}

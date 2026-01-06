@@ -91,13 +91,21 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
     if (filterClientId) {
       params.set('filterClientId', filterClientId);
     }
-    const filterUnpaid = searchParams.get('filterUnpaid');
-    if (filterUnpaid === '1') {
-      params.set('filterUnpaid', '1');
+    const paymentStatus = searchParams.get('paymentStatus');
+    if (paymentStatus === 'paid' || paymentStatus === 'unpaid') {
+      params.set('paymentStatus', paymentStatus);
+    } else if (searchParams.get('filterUnpaid') === '1') {
+      params.set('paymentStatus', 'unpaid');
     }
-    const filterUndelivered = searchParams.get('filterUndelivered');
-    if (filterUndelivered === '1') {
-      params.set('filterUndelivered', '1');
+    const deliveryStatus = searchParams.get('deliveryStatus');
+    if (deliveryStatus === 'delivered' || deliveryStatus === 'undelivered') {
+      params.set('deliveryStatus', deliveryStatus);
+    } else if (searchParams.get('filterUndelivered') === '1') {
+      params.set('deliveryStatus', 'undelivered');
+    }
+    const printStatus = searchParams.get('printStatus');
+    if (printStatus === 'printed' || printStatus === 'pending') {
+      params.set('printStatus', printStatus);
     }
     const query = params.toString();
     return query ? `/sales?${query}` : '/sales';
