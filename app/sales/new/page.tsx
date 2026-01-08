@@ -2,6 +2,7 @@
 
 import { DETAIL_LEVELS } from '@/constants/printQuality';
 import PrintScheduleCalendar from '@/components/PrintScheduleCalendar';
+import FilamentSelect from '@/components/FilamentSelect';
 import { useDialog } from '@/context/DialogContext';
 import { parseDurationToHours } from '@/utils/time';
 import axios from 'axios';
@@ -12,6 +13,8 @@ interface Filament {
   id: string;
   description: string;
   color: string;
+  colorHex?: string;
+  type?: string;
   remainingMassGrams: number;
 }
 
@@ -20,6 +23,21 @@ interface Client {
   name: string;
   phoneNumber: string;
 }
+
+interface ServiceProvider {
+  id: string;
+  name: string;
+  categories: string[];
+  category?: string;
+}
+
+const normalizeCategory = (value?: string) => (value || '').trim().toLowerCase();
+const hasCategory = (categories: string[] | undefined, matcher: (value: string) => boolean) =>
+  (categories || []).some(category => matcher(normalizeCategory(category)));
+const isDesignerCategory = (categories?: string[]) =>
+  hasCategory(categories, value => value.includes('design'));
+const isPainterCategory = (categories?: string[]) =>
+  hasCategory(categories, value => value.includes('pint') || value.includes('paint'));
 
 export default function NewSalePage() {
   return (
@@ -42,6 +60,7 @@ function NewSaleContent() {
   };
   const [filaments, setFilaments] = useState<Filament[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [serviceProviders, setServiceProviders] = useState<ServiceProvider[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -65,6 +84,10 @@ function NewSaleContent() {
     hasCustomArt: false,
     hasPainting: false,
     hasVarnish: false,
+    designTimeHours: 0,
+    designResponsible: '',
+    designStartConfirmedAt: '',
+    designValue: 0,
     paintTimeHours: 0,
     paintResponsible: '',
     paintStartConfirmedAt: '',
@@ -115,12 +138,14 @@ function NewSaleContent() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [filamentsRes, clientsRes] = await Promise.all([
+        const [filamentsRes, clientsRes, providersRes] = await Promise.all([
           axios.get('http://localhost:5000/api/filaments'),
-          axios.get('http://localhost:5000/api/clients')
+          axios.get('http://localhost:5000/api/clients'),
+          axios.get('http://localhost:5000/api/service-providers').catch(() => ({ data: [] }))
         ]);
         setFilaments(filamentsRes.data);
         setClients(clientsRes.data);
+        setServiceProviders(providersRes.data || []);
 
         // If coming from stock, fetch stock details
         if (stockId) {
@@ -161,6 +186,26 @@ function NewSaleContent() {
   const filteredFilaments = massGramsValue > 0
     ? filaments.filter(filament => filament.remainingMassGrams >= massGramsValue)
     : [];
+  const designerProviders = serviceProviders.filter(provider => isDesignerCategory(
+    provider.categories && provider.categories.length > 0
+      ? provider.categories
+      : provider.category
+      ? [provider.category]
+      : []
+  ));
+  const painterProviders = serviceProviders.filter(provider => isPainterCategory(
+    provider.categories && provider.categories.length > 0
+      ? provider.categories
+      : provider.category
+      ? [provider.category]
+      : []
+  ));
+  const normalizedDesignResponsible = formData.designResponsible.trim().toLowerCase();
+  const normalizedPaintResponsible = formData.paintResponsible.trim().toLowerCase();
+  const hasDesignOption = normalizedDesignResponsible !== ''
+    && designerProviders.some(provider => provider.name.trim().toLowerCase() === normalizedDesignResponsible);
+  const hasPaintOption = normalizedPaintResponsible !== ''
+    && painterProviders.some(provider => provider.name.trim().toLowerCase() === normalizedPaintResponsible);
 
   useEffect(() => {
     if (formData.filamentId === '') return;
@@ -236,8 +281,8 @@ function NewSaleContent() {
       setFormData(prev => ({ ...prev, [name]: checked }));
     } else {
       setFormData(prev => {
-        if (name === 'paintTimeHours') {
-          return { ...prev, paintTimeHours: Number(value) };
+        if (name === 'paintTimeHours' || name === 'designTimeHours' || name === 'designValue') {
+          return { ...prev, [name]: Number(value) };
         }
         return { ...prev, [name]: value };
       });
@@ -266,6 +311,10 @@ function NewSaleContent() {
         printTimeHours: parseDurationToHours(formData.designPrintTime),
         deliveryDate: formData.deliveryDate === '' ? null : formData.deliveryDate,
         printStartConfirmedAt: formData.printStartConfirmedAt === '' ? null : formData.printStartConfirmedAt,
+        designStartConfirmedAt: formData.designStartConfirmedAt === '' ? null : formData.designStartConfirmedAt,
+        designTimeHours: Number(formData.designTimeHours) || 0,
+        designResponsible: formData.designResponsible || '',
+        designValue: Number(formData.designValue) || 0,
         paintStartConfirmedAt: formData.paintStartConfirmedAt === '' ? null : formData.paintStartConfirmedAt,
         paintTimeHours: Number(formData.paintTimeHours) || 0,
         paintResponsible: formData.paintResponsible || '',
@@ -306,7 +355,7 @@ function NewSaleContent() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Description */}
           <div className="col-span-1 md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Descrição do Produto</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Descricao do Produto</label>
             <input
               type="text"
               name="description"
@@ -333,22 +382,15 @@ function NewSaleContent() {
           {/* Filament */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Filamento</label>
-            <select
-              name="filamentId"
+            <FilamentSelect
+              filaments={filteredFilaments}
               value={formData.filamentId}
-              onChange={handleChange}
+              onChange={(value) => setFormData(prev => ({ ...prev, filamentId: value }))}
+              placeholder={formData.massGrams > 0 ? 'Selecione um filamento...' : 'Informe a massa para listar filamentos'}
               disabled={formData.massGrams <= 0}
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900 disabled:bg-gray-100 disabled:text-gray-500"
-            >
-              <option value="">
-                {formData.massGrams > 0 ? 'Selecione um filamento...' : 'Informe a massa para listar filamentos'}
-              </option>
-              {filteredFilaments.map(filament => (
-                <option key={filament.id} value={filament.id}>
-                  {filament.description} ({filament.color}) - {filament.remainingMassGrams}g
-                </option>
-              ))}
-            </select>
+              showRemaining
+              showType
+            />
           </div>
 
           {/* Sale Date */}
@@ -378,7 +420,7 @@ function NewSaleContent() {
 
           {/* Time */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Tempo de Impressão</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Tempo de Impressao</label>
             <input
               type="text"
               name="designPrintTime"
@@ -427,18 +469,74 @@ function NewSaleContent() {
             </div>
           </div>
 
+          {formData.hasCustomArt && (
+            <div className="col-span-1 md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Responsavel pelo Design</label>
+                <select
+                  name="designResponsible"
+                  value={formData.designResponsible}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                >
+                  <option value="">Selecione um responsavel...</option>
+                  {!hasDesignOption && formData.designResponsible && (
+                    <option value={formData.designResponsible}>{formData.designResponsible}</option>
+                  )}
+                  {designerProviders.map(provider => (
+                    <option key={provider.id} value={provider.name}>
+                      {provider.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tempo de Design (h)</label>
+                <input
+                  type="number"
+                  name="designTimeHours"
+                  step="0.1"
+                  min="0"
+                  value={formData.designTimeHours}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Valor do Design (R$)</label>
+                <input
+                  type="number"
+                  name="designValue"
+                  step="0.01"
+                  min="0"
+                  value={formData.designValue}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                />
+              </div>
+            </div>
+          )}
+
           {formData.hasPainting && (
             <div className="col-span-1 md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Responsavel pela Pintura</label>
-                <input
-                  type="text"
+                <select
                   name="paintResponsible"
                   value={formData.paintResponsible}
                   onChange={handleChange}
                   className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
-                  placeholder="Ex: Maria"
-                />
+                >
+                  <option value="">Selecione um responsavel...</option>
+                  {!hasPaintOption && formData.paintResponsible && (
+                    <option value={formData.paintResponsible}>{formData.paintResponsible}</option>
+                  )}
+                  {painterProviders.map(provider => (
+                    <option key={provider.id} value={provider.name}>
+                      {provider.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Tempo de Pintura (h)</label>
@@ -458,10 +556,16 @@ function NewSaleContent() {
           <div className="col-span-1 md:col-span-2">
             <PrintScheduleCalendar
               estimatedHours={parseDurationToHours(formData.designPrintTime)}
+              hasCustomArt={formData.hasCustomArt}
               hasPainting={formData.hasPainting}
+              showDesign={formData.hasCustomArt}
               showPainting={formData.hasPainting}
               value={formData.printStartConfirmedAt}
               onChange={(value) => setFormData(prev => ({ ...prev, printStartConfirmedAt: value || '' }))}
+              designHours={Number(formData.designTimeHours) || 0}
+              designStartValue={formData.designStartConfirmedAt}
+              onDesignChange={(value) => setFormData(prev => ({ ...prev, designStartConfirmedAt: value || '' }))}
+              designResponsible={formData.designResponsible}
               paintHours={Number(formData.paintTimeHours) || 0}
               paintValue={formData.paintStartConfirmedAt}
               onPaintChange={(value) => setFormData(prev => ({ ...prev, paintStartConfirmedAt: value || '' }))}
@@ -501,7 +605,7 @@ function NewSaleContent() {
 
           {/* Print Quality */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Qualidade de Impressão</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Qualidade de Impressao</label>
             <select
               name="printQuality"
               value={formData.printQuality}
@@ -516,7 +620,7 @@ function NewSaleContent() {
 
           {/* Print Status */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Status da Impressão</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Status da Impressao</label>
             <select
               name="printStatus"
               value={formData.printStatus}

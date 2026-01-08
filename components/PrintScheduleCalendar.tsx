@@ -4,13 +4,21 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import axios from 'axios';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useRouter } from 'next/navigation';
 import { parseDurationToHours } from '@/utils/time';
 
 interface PrintScheduleCalendarProps {
   estimatedHours?: number;
   hasPainting?: boolean;
+  hasCustomArt?: boolean;
   layout?: 'auto' | 'stacked';
+  designHours?: number;
+  designStartValue?: string | null;
+  onDesignChange?: (value: string | null) => void;
+  designResponsible?: string;
+  showDesign?: boolean;
   paintHours?: number;
   paintValue?: string | null;
   onPaintChange?: (value: string | null) => void;
@@ -19,6 +27,7 @@ interface PrintScheduleCalendarProps {
   value?: string | null;
   onChange?: (value: string | null) => void;
   readOnly?: boolean;
+  allowDrag?: boolean;
   saleId?: string;
   showSuggestionSummary?: boolean;
 }
@@ -33,9 +42,46 @@ interface QueueSale {
   printStartScheduledAt?: string;
   printStatus?: string;
   hasPainting?: boolean;
+  hasCustomArt?: boolean;
   paintStartConfirmedAt?: string;
   paintTimeHours?: number;
   paintResponsible?: string;
+  designStartConfirmedAt?: string;
+  designTimeHours?: number;
+  designResponsible?: string;
+  designValue?: number;
+}
+
+interface DesignTask {
+  id: string;
+  title: string;
+  startAt?: string;
+  durationHours?: number;
+  responsibleName?: string;
+  value?: number;
+}
+
+interface PaintingTask {
+  id: string;
+  title: string;
+  startAt?: string;
+  durationHours?: number;
+  responsibleName?: string;
+  value?: number;
+}
+
+interface HoverCardData {
+  x: number;
+  y: number;
+  title: string;
+  typeLabel: string;
+  start: Date;
+  end: Date;
+  durationHours?: number;
+  status?: string;
+  responsible?: string;
+  value?: number;
+  editPath?: string;
 }
 
 const PRINT_START_HOUR = 8;
@@ -53,6 +99,40 @@ function addMinutes(date: Date, minutes: number) {
 
 function addHours(date: Date, hours: number) {
   return new Date(date.getTime() + hours * 60 * 60 * 1000);
+}
+
+function formatDateTime(value: Date) {
+  return value.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function formatCurrency(value?: number) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '';
+  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function getHoverPosition(
+  event: MouseEvent,
+  options: { width?: number; height?: number; anchorRect?: DOMRect } = {}
+) {
+  const width = options.width ?? 288;
+  const height = options.height ?? 220;
+  if (typeof window === 'undefined') {
+    return { x: event.clientX, y: event.clientY };
+  }
+  const padding = 12;
+  const anchor = options.anchorRect;
+  let x = anchor ? anchor.left : event.clientX + padding;
+  let y = anchor ? anchor.top - height - padding : event.clientY + padding;
+
+  if (anchor && y < padding) {
+    y = anchor.bottom + padding;
+  }
+
+  const maxX = window.innerWidth - width - padding;
+  const maxY = window.innerHeight - height - padding;
+  x = Math.min(Math.max(padding, x), Math.max(padding, maxX));
+  y = Math.min(Math.max(padding, y), Math.max(padding, maxY));
+  return { x, y };
 }
 
 function alignStart(candidate: Date, applyGapIfShifted: boolean) {
@@ -132,7 +212,7 @@ function validateSlot(
   start: Date,
   durationHours: number,
   occupied: { start: Date; end: Date; saleId?: string }[],
-  options: { enforceFuture?: boolean; ignoreSaleId?: string } = {}
+  options: { enforceFuture?: boolean; ignoreSaleId?: string; minStart?: Date | null } = {}
 ) {
   if (durationHours <= 0) {
     return { valid: false, message: 'Informe o tempo de impressao para agendar.' };
@@ -147,6 +227,10 @@ function validateSlot(
     if (start < now) {
       return { valid: false, message: 'Escolha um horario futuro.' };
     }
+  }
+
+  if (options.minStart && start < options.minStart) {
+    return { valid: false, message: 'Horario deve ser apos o termino do design.' };
   }
 
   const end = addHours(start, durationHours);
@@ -175,7 +259,33 @@ function validatePaintSlot(
   }
 
   if (options.minStart && start < options.minStart) {
-    return { valid: false, message: 'A pintura deve iniciar após o término da impressão.' };
+    return { valid: false, message: 'A pintura deve iniciar apos o termino da impressao.' };
+  }
+
+  if (options.enforceFuture) {
+    const now = new Date();
+    if (start < now) {
+      return { valid: false, message: 'Escolha um horario futuro.' };
+    }
+  }
+
+  return { valid: true };
+}
+
+function validateDesignSlot(
+  start: Date,
+  durationHours: number,
+  options: { enforceFuture?: boolean; maxEnd?: Date | null } = {}
+) {
+  if (durationHours <= 0) {
+    return { valid: false, message: 'Informe o tempo de design para agendar.' };
+  }
+
+  if (options.maxEnd) {
+    const end = addHours(start, durationHours);
+    if (end > options.maxEnd) {
+      return { valid: false, message: 'O design deve terminar antes da impressao.' };
+    }
   }
 
   if (options.enforceFuture) {
@@ -191,7 +301,13 @@ function validatePaintSlot(
 export default function PrintScheduleCalendar({
   estimatedHours,
   hasPainting,
+  hasCustomArt,
   layout = 'auto',
+  designHours,
+  designStartValue,
+  onDesignChange,
+  designResponsible,
+  showDesign,
   paintHours,
   paintValue,
   onPaintChange,
@@ -200,42 +316,103 @@ export default function PrintScheduleCalendar({
   value,
   onChange,
   readOnly,
+  allowDrag = false,
   saleId,
   showSuggestionSummary = true
 }: PrintScheduleCalendarProps) {
+  const router = useRouter();
   const [queue, setQueue] = useState<QueueSale[]>([]);
   const [currentPrint, setCurrentPrint] = useState<QueueSale | null>(null);
-  const [paintingSales, setPaintingSales] = useState<QueueSale[]>([]);
+  const [serviceSales, setServiceSales] = useState<QueueSale[]>([]);
+  const [designTasks, setDesignTasks] = useState<DesignTask[]>([]);
+  const [paintingTasks, setPaintingTasks] = useState<PaintingTask[]>([]);
   const [loading, setLoading] = useState(true);
-  const [paintEndpointAvailable, setPaintEndpointAvailable] = useState(true);
+  const [serviceEndpointAvailable, setServiceEndpointAvailable] = useState(true);
+  const [designEndpointAvailable, setDesignEndpointAvailable] = useState(true);
+  const [paintingEndpointAvailable, setPaintingEndpointAvailable] = useState(true);
   const [selectionError, setSelectionError] = useState('');
   const [paintSelectionError, setPaintSelectionError] = useState('');
+  const [designSelectionError, setDesignSelectionError] = useState('');
   const [saving, setSaving] = useState(false);
   const [effectiveHours, setEffectiveHours] = useState<number>(Number(estimatedHours) || 0);
+  const [hoverCard, setHoverCard] = useState<HoverCardData | null>(null);
+  const hoverCardActiveRef = useRef(false);
+  const eventHoverActiveRef = useRef(false);
+  const isDraggingRef = useRef(false);
+  const hideHoverTimeoutRef = useRef<number | null>(null);
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const canPersist = isValidObjectId(saleId);
-  const shouldShowPainting = Boolean(showPainting ?? hasPainting);
-  const shouldSplit = shouldShowPainting && layout !== 'stacked';
+  const dragEnabled = !readOnly || allowDrag;
+  const shouldShowDesign = Boolean(showDesign ?? hasCustomArt);
+  const shouldShowPaint = Boolean(showPainting ?? hasPainting);
+  const shouldShowServices = shouldShowDesign || shouldShowPaint;
+  const shouldSplit = shouldShowServices && layout !== 'stacked';
+  const [serviceMode, setServiceMode] = useState<'design' | 'painting'>(shouldShowDesign ? 'design' : 'painting');
+  const effectiveDesignHours = Math.max(0, Number(designHours) || 0);
   const effectivePaintHours = Math.max(0, Number(paintHours) || 0);
+  const normalizedDesignStart = typeof designStartValue === 'string' && designStartValue.trim() !== '' ? designStartValue : null;
   const normalizedPaintValue = typeof paintValue === 'string' && paintValue.trim() !== '' ? paintValue : null;
-  const paintSale = saleId ? paintingSales.find((sale) => sale.id === saleId) : null;
+  const paintSale = saleId ? serviceSales.find((sale) => sale.id === saleId) : null;
+  const designSale = saleId ? serviceSales.find((sale) => sale.id === saleId) : null;
+  const resolvedDesignStart = normalizedDesignStart || designSale?.designStartConfirmedAt || null;
+  const resolvedDesignHours = effectiveDesignHours > 0
+    ? effectiveDesignHours
+    : Math.max(0, Number(designSale?.designTimeHours) || 0);
+  const hasResolvedDesignSchedule = Boolean(resolvedDesignStart) && resolvedDesignHours > 0;
   const resolvedPaintValue = normalizedPaintValue || paintSale?.paintStartConfirmedAt || null;
   const resolvedPaintHours = effectivePaintHours > 0
     ? effectivePaintHours
     : Math.max(0, Number(paintSale?.paintTimeHours) || 0);
   const hasResolvedPaintSchedule = Boolean(resolvedPaintValue) && resolvedPaintHours > 0;
+  const missingServiceLabel = useMemo(() => {
+    const missing: string[] = [];
+    if (shouldShowDesign && !hasResolvedDesignSchedule) {
+      missing.push('design');
+    }
+    if (shouldShowPaint && !hasResolvedPaintSchedule) {
+      missing.push('pintura');
+    }
+    if (missing.length === 0) {
+      return null;
+    }
+    return missing.join(' e ');
+  }, [shouldShowDesign, shouldShowPaint, hasResolvedDesignSchedule, hasResolvedPaintSchedule]);
+  const showModeToggle = shouldShowDesign && shouldShowPaint && !readOnly;
+  const showServiceBadge = !readOnly && !showModeToggle;
+  const showResponsibleSummary = !readOnly;
+  const serviceModeLabel = serviceMode === 'design' ? 'Design' : 'Pintura';
+  const serviceBadgeClass = serviceMode === 'design'
+    ? 'text-sky-600 bg-sky-50'
+    : 'text-indigo-600 bg-indigo-50';
+  const serviceDescription = serviceMode === 'design'
+    ? 'Agendamento de design. Deve terminar antes da impressao.'
+    : 'Agendamento de pintura. Deve iniciar apos o termino da impressao.';
+  const serviceInstruction = serviceMode === 'design'
+    ? 'Marque a agenda de design clicando no horario desejado.'
+    : 'Marque a agenda de pintura clicando no horario desejado.';
+  const serviceSelectionError = serviceMode === 'design' ? designSelectionError : paintSelectionError;
+  const canSelectService = !readOnly && (
+    (serviceMode === 'design' && Boolean(onDesignChange)) ||
+    (serviceMode === 'painting' && Boolean(onPaintChange))
+  );
 
-  const fetchPaintingFallback = async () => {
+  const fetchServiceFallback = async () => {
     try {
       const salesRes = await axios.get('http://localhost:5000/api/sales');
       const list = (salesRes.data || []).filter((sale: QueueSale) =>
         sale.hasPainting ||
         sale.paintStartConfirmedAt ||
         (Number(sale.paintTimeHours) || 0) > 0 ||
-        (sale.paintResponsible && sale.paintResponsible.trim() !== '')
+        (sale.paintResponsible && sale.paintResponsible.trim() !== '') ||
+        sale.hasCustomArt ||
+        sale.designStartConfirmedAt ||
+        (Number(sale.designTimeHours) || 0) > 0 ||
+        (sale.designResponsible && sale.designResponsible.trim() !== '') ||
+        sale.designValue
       );
-      setPaintingSales(list);
+      setServiceSales(list);
     } catch {
-      setPaintingSales([]);
+      setServiceSales([]);
     }
   };
 
@@ -252,37 +429,91 @@ export default function PrintScheduleCalendar({
       setCurrentPrint(null);
     }
 
-    if (!shouldShowPainting) {
-      setPaintingSales([]);
+    if (!shouldShowServices) {
+      setServiceSales([]);
+      setDesignTasks([]);
+      setPaintingTasks([]);
       setLoading(false);
       return;
     }
 
-    if (!paintEndpointAvailable) {
-      await fetchPaintingFallback();
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const paintRes = await axios.get('http://localhost:5000/api/sales/painting');
-      setPaintingSales(paintRes.data || []);
-    } catch (error) {
-      const status = (error as any)?.response?.status;
-      if (status === 404) {
-        setPaintEndpointAvailable(false);
-        await fetchPaintingFallback();
-      } else {
-        setPaintingSales([]);
+    if (!serviceEndpointAvailable) {
+      await fetchServiceFallback();
+    } else {
+      try {
+        const serviceRes = await axios.get('http://localhost:5000/api/sales/services');
+        setServiceSales(serviceRes.data || []);
+      } catch (error) {
+        const status = (error as any)?.response?.status;
+        if (status === 404) {
+          setServiceEndpointAvailable(false);
+          await fetchServiceFallback();
+        } else {
+          setServiceSales([]);
+        }
       }
-    } finally {
-      setLoading(false);
     }
+
+    if (!shouldShowDesign) {
+      setDesignTasks([]);
+    } else if (!designEndpointAvailable) {
+      setDesignTasks([]);
+    } else {
+      try {
+        const designRes = await axios.get('http://localhost:5000/api/designs');
+        setDesignTasks(designRes.data || []);
+      } catch (error) {
+        const status = (error as any)?.response?.status;
+        if (status === 404) {
+          setDesignEndpointAvailable(false);
+        }
+        setDesignTasks([]);
+      }
+    }
+
+    if (!shouldShowPaint) {
+      setPaintingTasks([]);
+    } else if (!paintingEndpointAvailable) {
+      setPaintingTasks([]);
+    } else {
+      try {
+        const paintingRes = await axios.get('http://localhost:5000/api/paintings');
+        setPaintingTasks(paintingRes.data || []);
+      } catch (error) {
+        const status = (error as any)?.response?.status;
+        if (status === 404) {
+          setPaintingEndpointAvailable(false);
+        }
+        setPaintingTasks([]);
+      }
+    }
+
+    setLoading(false);
   };
 
   useEffect(() => {
     fetchData().catch(() => null);
-  }, [shouldShowPainting, paintEndpointAvailable]);
+  }, [
+    shouldShowServices,
+    serviceEndpointAvailable,
+    designEndpointAvailable,
+    paintingEndpointAvailable,
+    shouldShowDesign,
+    shouldShowPaint
+  ]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    setPortalRoot(document.body);
+  }, []);
+
+  useEffect(() => {
+    if (shouldShowDesign && !shouldShowPaint) {
+      setServiceMode('design');
+    } else if (!shouldShowDesign && shouldShowPaint) {
+      setServiceMode('painting');
+    }
+  }, [shouldShowDesign, shouldShowPaint]);
 
   useEffect(() => {
     const nextHours = Number(estimatedHours) || 0;
@@ -345,7 +576,15 @@ export default function PrintScheduleCalendar({
           title: currentPrint.description || 'Em impressao',
           start,
           end: addHours(start, duration),
-          color: '#f97316'
+          color: '#f97316',
+          editable: false,
+          extendedProps: {
+            entityType: 'print',
+            saleId: currentPrint.id,
+            status: 'Em impressao',
+            description: currentPrint.description || 'Em impressao',
+            durationHours: duration
+          }
         });
       }
     }
@@ -362,7 +601,14 @@ export default function PrintScheduleCalendar({
         title: sale.description || 'Agendado',
         start,
         end: addHours(start, duration),
-        color: '#0f766e'
+        color: '#0f766e',
+        extendedProps: {
+          entityType: 'print',
+          saleId: sale.id,
+          status: 'Agendado',
+          description: sale.description || 'Agendado',
+          durationHours: duration
+        }
       });
     });
 
@@ -377,7 +623,11 @@ export default function PrintScheduleCalendar({
         start,
         end: addHours(start, duration),
         display: 'background',
-        backgroundColor: '#fde68a'
+        backgroundColor: '#fde68a',
+        editable: false,
+        extendedProps: {
+          isTransient: true
+        }
       });
     });
 
@@ -394,7 +644,11 @@ export default function PrintScheduleCalendar({
           title: 'Horario selecionado',
           start,
           end: addHours(start, duration),
-          color: '#22c55e'
+          color: '#22c55e',
+          editable: false,
+          extendedProps: {
+            isTransient: true
+          }
         });
       }
     }
@@ -408,7 +662,11 @@ export default function PrintScheduleCalendar({
           start: suggestion.start,
           end: addHours(suggestion.start, duration),
           display: 'background',
-          backgroundColor: '#fde68a'
+          backgroundColor: '#fde68a',
+          editable: false,
+          extendedProps: {
+            isTransient: true
+          }
         });
       }
     }
@@ -458,71 +716,388 @@ export default function PrintScheduleCalendar({
     return null;
   }, [value, effectiveHours, saleId, currentPrint, queue]);
 
-  const paintEvents = useMemo(() => {
+  const printStartForDesign = useMemo(() => {
+    if (value) {
+      return new Date(value);
+    }
+
+    if (!saleId) {
+      return null;
+    }
+
+    if (currentPrint?.id === saleId && currentPrint.printStartedAt) {
+      return new Date(currentPrint.printStartedAt);
+    }
+
+    const queued = queue.find((sale) => sale.id === saleId && sale.printStartConfirmedAt);
+    if (queued?.printStartConfirmedAt) {
+      return new Date(queued.printStartConfirmedAt);
+    }
+
+    return null;
+  }, [value, saleId, currentPrint, queue]);
+
+  const designEndForPrint = useMemo(() => {
+    if (!resolvedDesignStart) {
+      return null;
+    }
+    const duration = Math.max(0, resolvedDesignHours);
+    if (duration <= 0) {
+      return null;
+    }
+    return addHours(new Date(resolvedDesignStart), duration);
+  }, [resolvedDesignStart, resolvedDesignHours]);
+
+  const getDesignEndForSale = (targetSaleId?: string) => {
+    if (!targetSaleId) return null;
+    if (saleId && targetSaleId === saleId && designEndForPrint) {
+      return designEndForPrint;
+    }
+    const sale = serviceSales.find((item) => item.id === targetSaleId);
+    if (!sale?.designStartConfirmedAt) return null;
+    const duration = Math.max(Number(sale.designTimeHours) || 0, 0);
+    if (duration <= 0) return null;
+    return addHours(new Date(sale.designStartConfirmedAt), duration);
+  };
+
+  const getPrintStartForSale = (targetSaleId?: string) => {
+    if (!targetSaleId) return null;
+    if (saleId && targetSaleId === saleId && printStartForDesign) {
+      return printStartForDesign;
+    }
+    if (currentPrint?.id === targetSaleId && currentPrint.printStartedAt) {
+      return new Date(currentPrint.printStartedAt);
+    }
+    const queued = queue.find((sale) => sale.id === targetSaleId && sale.printStartConfirmedAt);
+    if (queued?.printStartConfirmedAt) {
+      return new Date(queued.printStartConfirmedAt);
+    }
+    return null;
+  };
+
+  const getPrintEndForSale = (targetSaleId?: string) => {
+    if (!targetSaleId) return null;
+    if (saleId && targetSaleId === saleId && printEndForPainting) {
+      return printEndForPainting;
+    }
+    if (currentPrint?.id === targetSaleId && currentPrint.printStartedAt) {
+      const duration = Math.max(getDurationHours(currentPrint), 0);
+      if (duration > 0) {
+        return addHours(new Date(currentPrint.printStartedAt), duration);
+      }
+    }
+    const queued = queue.find((sale) => sale.id === targetSaleId && sale.printStartConfirmedAt);
+    if (queued?.printStartConfirmedAt) {
+      const duration = Math.max(getDurationHours(queued), 0);
+      if (duration > 0) {
+        return addHours(new Date(queued.printStartConfirmedAt), duration);
+      }
+    }
+    return null;
+  };
+
+  const serviceEvents = useMemo(() => {
     const list: any[] = [];
-    paintingSales.forEach((sale) => {
-      if (!sale.paintStartConfirmedAt) return;
-      const duration = Math.max(getPaintDurationHours(sale), 0);
+
+    serviceSales.forEach((sale) => {
+      if (sale.designStartConfirmedAt) {
+        const duration = Math.max(Number(sale.designTimeHours) || 0, 0);
+        if (duration > 0) {
+          const start = new Date(sale.designStartConfirmedAt);
+          const responsible = sale.designResponsible ? ` - ${sale.designResponsible}` : '';
+          list.push({
+            id: `design-${sale.id}`,
+            title: `Design - ${sale.description || 'Servico'}${responsible}`,
+            start,
+            end: addHours(start, duration),
+            color: '#0ea5e9',
+            extendedProps: {
+              entityType: 'design',
+              saleId: sale.id,
+              status: 'Design',
+              description: sale.description || 'Servico',
+              responsible: sale.designResponsible || null,
+              durationHours: duration,
+              value: typeof sale.designValue === 'number' ? sale.designValue : null
+            }
+          });
+        }
+      }
+
+      if (sale.paintStartConfirmedAt) {
+        const duration = Math.max(getPaintDurationHours(sale), 0);
+        if (duration > 0) {
+          const start = new Date(sale.paintStartConfirmedAt);
+          const responsible = sale.paintResponsible ? ` - ${sale.paintResponsible}` : '';
+          list.push({
+            id: `paint-${sale.id}`,
+            title: `Pintura - ${sale.description || 'Servico'}${responsible}`,
+            start,
+            end: addHours(start, duration),
+            color: '#6366f1',
+            extendedProps: {
+              entityType: 'painting',
+              saleId: sale.id,
+              status: 'Pintura',
+              description: sale.description || 'Servico',
+              responsible: sale.paintResponsible || null,
+              durationHours: duration
+            }
+          });
+        }
+      }
+    });
+
+    designTasks.forEach((task) => {
+      if (!task.startAt) return;
+      const duration = Math.max(Number(task.durationHours) || 0, 0);
       if (duration <= 0) return;
-      const start = new Date(sale.paintStartConfirmedAt);
-      const responsible = sale.paintResponsible ? ` - ${sale.paintResponsible}` : '';
+      const start = new Date(task.startAt);
+      const responsible = task.responsibleName ? ` - ${task.responsibleName}` : '';
       list.push({
-        id: `paint-${sale.id}`,
-        title: `${sale.description || 'Pintura'}${responsible}`,
+        id: `design-task-${task.id}`,
+        title: `Design - ${task.title}${responsible}`,
         start,
         end: addHours(start, duration),
-        color: '#6366f1'
+        color: '#38bdf8',
+        extendedProps: {
+          entityType: 'design',
+          taskId: task.id,
+          status: 'Design',
+          description: task.title,
+          responsible: task.responsibleName || null,
+          durationHours: duration,
+          value: typeof task.value === 'number' ? task.value : null
+        }
       });
     });
 
-    const hasSelectedMatch = paintValue
-      ? paintingSales.some((sale) => sale.paintStartConfirmedAt && new Date(sale.paintStartConfirmedAt).getTime() === new Date(paintValue).getTime())
+    paintingTasks.forEach((task) => {
+      if (!task.startAt) return;
+      const duration = Math.max(Number(task.durationHours) || 0, 0);
+      if (duration <= 0) return;
+      const start = new Date(task.startAt);
+      const responsible = task.responsibleName ? ` - ${task.responsibleName}` : '';
+      list.push({
+        id: `painting-task-${task.id}`,
+        title: `Pintura - ${task.title}${responsible}`,
+        start,
+        end: addHours(start, duration),
+        color: '#a855f7',
+        extendedProps: {
+          entityType: 'painting',
+          taskId: task.id,
+          status: 'Pintura',
+          description: task.title,
+          responsible: task.responsibleName || null,
+          durationHours: duration,
+          value: typeof task.value === 'number' ? task.value : null
+        }
+      });
+    });
+
+    const hasDesignMatch = normalizedDesignStart
+      ? serviceSales.some((sale) => sale.designStartConfirmedAt && new Date(sale.designStartConfirmedAt).getTime() === new Date(normalizedDesignStart).getTime()) ||
+        designTasks.some((task) => task.startAt && new Date(task.startAt).getTime() === new Date(normalizedDesignStart).getTime())
       : false;
 
-    if (paintValue && !hasSelectedMatch) {
+    if (normalizedDesignStart && !hasDesignMatch) {
+      const duration = Math.max(0, resolvedDesignHours);
+      if (duration > 0) {
+        const start = new Date(normalizedDesignStart);
+        const responsible = designResponsible ? ` - ${designResponsible}` : '';
+        list.push({
+          id: 'design-selected',
+          title: `Design${responsible}`,
+          start,
+          end: addHours(start, duration),
+          color: '#0ea5e9',
+          editable: false,
+          extendedProps: {
+            isTransient: true
+          }
+        });
+      }
+    }
+
+    const hasPaintMatch = normalizedPaintValue
+      ? serviceSales.some((sale) => sale.paintStartConfirmedAt && new Date(sale.paintStartConfirmedAt).getTime() === new Date(normalizedPaintValue).getTime()) ||
+        paintingTasks.some((task) => task.startAt && new Date(task.startAt).getTime() === new Date(normalizedPaintValue).getTime())
+      : false;
+
+    if (normalizedPaintValue && !hasPaintMatch) {
       const duration = Math.max(0, effectivePaintHours);
       if (duration > 0) {
-        const start = new Date(paintValue);
+        const start = new Date(normalizedPaintValue);
         const responsible = paintResponsible ? ` - ${paintResponsible}` : '';
         list.push({
           id: 'paint-selected',
-          title: `${'Pintura'}${responsible}`,
+          title: `Pintura${responsible}`,
           start,
           end: addHours(start, duration),
-          color: '#8b5cf6'
+          color: '#8b5cf6',
+          editable: false,
+          extendedProps: {
+            isTransient: true
+          }
         });
       }
     }
 
     return list;
-  }, [paintingSales, paintValue, effectivePaintHours, paintResponsible]);
+  }, [
+    serviceSales,
+    designTasks,
+    paintingTasks,
+    normalizedDesignStart,
+    normalizedPaintValue,
+    resolvedDesignHours,
+    effectivePaintHours,
+    designResponsible,
+    paintResponsible
+  ]);
+
+  const updateSaleSchedule = async (targetSaleId: string, nextValue: string | null) => {
+    if (!isValidObjectId(targetSaleId)) {
+      throw new Error('Invalid sale id');
+    }
+    try {
+      await axios.patch(`http://localhost:5000/api/sales/${targetSaleId}/schedule`, {
+        printStartConfirmedAt: nextValue ? nextValue : null
+      });
+    } catch (error) {
+      const status = (error as any)?.response?.status;
+      if (status !== 404) {
+        throw error;
+      }
+      const saleRes = await axios.get(`http://localhost:5000/api/sales/${targetSaleId}`);
+      const updatedSale = {
+        ...saleRes.data,
+        printStartConfirmedAt: nextValue ? nextValue : null
+      };
+      await axios.put(`http://localhost:5000/api/sales/${targetSaleId}`, updatedSale);
+    }
+  };
+
+  const updateSalePaintSchedule = async (
+    targetSaleId: string,
+    nextValue: string | null,
+    options: { paintTimeHours?: number; paintResponsible?: string | null } = {}
+  ) => {
+    if (!isValidObjectId(targetSaleId)) {
+      throw new Error('Invalid sale id');
+    }
+    const paintTimeHours = typeof options.paintTimeHours === 'number' && options.paintTimeHours > 0
+      ? options.paintTimeHours
+      : null;
+    const paintResponsible = options.paintResponsible && options.paintResponsible.trim() !== ''
+      ? options.paintResponsible.trim()
+      : null;
+    const payload = {
+      paintStartConfirmedAt: nextValue ? nextValue : null,
+      paintTimeHours,
+      paintResponsible
+    };
+    try {
+      await axios.patch(`http://localhost:5000/api/sales/${targetSaleId}/paint-schedule`, payload);
+    } catch (error) {
+      const status = (error as any)?.response?.status;
+      if (status !== 404) {
+        throw error;
+      }
+      const saleRes = await axios.get(`http://localhost:5000/api/sales/${targetSaleId}`);
+      const updatedSale = {
+        ...saleRes.data,
+        paintStartConfirmedAt: nextValue ? nextValue : null
+      };
+      if (paintTimeHours !== null) {
+        updatedSale.paintTimeHours = paintTimeHours;
+      }
+      if (paintResponsible !== null) {
+        updatedSale.paintResponsible = paintResponsible;
+      }
+      await axios.put(`http://localhost:5000/api/sales/${targetSaleId}`, updatedSale);
+    }
+  };
+
+  const updateSaleDesignSchedule = async (
+    targetSaleId: string,
+    nextValue: string | null,
+    options: { designTimeHours?: number; designResponsible?: string | null; designValue?: number | null } = {}
+  ) => {
+    if (!isValidObjectId(targetSaleId)) {
+      throw new Error('Invalid sale id');
+    }
+    const designTimeHours = typeof options.designTimeHours === 'number' && options.designTimeHours > 0
+      ? options.designTimeHours
+      : null;
+    const designResponsible = options.designResponsible && options.designResponsible.trim() !== ''
+      ? options.designResponsible.trim()
+      : null;
+    const designValue = typeof options.designValue === 'number' ? options.designValue : null;
+    const payload = {
+      designStartConfirmedAt: nextValue ? nextValue : null,
+      designTimeHours,
+      designResponsible,
+      designValue
+    };
+    try {
+      await axios.patch(`http://localhost:5000/api/sales/${targetSaleId}/design-schedule`, payload);
+    } catch (error) {
+      const status = (error as any)?.response?.status;
+      if (status !== 404) {
+        throw error;
+      }
+      const saleRes = await axios.get(`http://localhost:5000/api/sales/${targetSaleId}`);
+      const updatedSale = {
+        ...saleRes.data,
+        designStartConfirmedAt: nextValue ? nextValue : null
+      };
+      if (designTimeHours !== null) {
+        updatedSale.designTimeHours = designTimeHours;
+      }
+      if (designResponsible !== null) {
+        updatedSale.designResponsible = designResponsible;
+      }
+      if (designValue !== null) {
+        updatedSale.designValue = designValue;
+      }
+      await axios.put(`http://localhost:5000/api/sales/${targetSaleId}`, updatedSale);
+    }
+  };
+
+  const updateDesignTaskSchedule = async (taskId: string, nextValue: string) => {
+    const task = designTasks.find((item) => item.id === taskId);
+    if (!task) {
+      throw new Error('Design task not found');
+    }
+    const payload = {
+      ...task,
+      startAt: nextValue
+    };
+    await axios.put(`http://localhost:5000/api/designs/${taskId}`, payload);
+  };
+
+  const updatePaintingTaskSchedule = async (taskId: string, nextValue: string) => {
+    const task = paintingTasks.find((item) => item.id === taskId);
+    if (!task) {
+      throw new Error('Painting task not found');
+    }
+    const payload = {
+      ...task,
+      startAt: nextValue
+    };
+    await axios.put(`http://localhost:5000/api/paintings/${taskId}`, payload);
+  };
 
   const persistSchedule = async (nextValue: string | null) => {
     if (!canPersist) return;
     setSaving(true);
     try {
-      await axios.patch(`http://localhost:5000/api/sales/${saleId}/schedule`, {
-        printStartConfirmedAt: nextValue ? nextValue : null
-      });
+      await updateSaleSchedule(saleId as string, nextValue);
       await fetchData();
       setSelectionError('');
     } catch (error) {
-      const status = (error as any)?.response?.status;
-      if (status === 404 && saleId) {
-        try {
-          const saleRes = await axios.get(`http://localhost:5000/api/sales/${saleId}`);
-          const updatedSale = {
-            ...saleRes.data,
-            printStartConfirmedAt: nextValue ? nextValue : null
-          };
-          await axios.put(`http://localhost:5000/api/sales/${saleId}`, updatedSale);
-          await fetchData();
-          setSelectionError('');
-          return;
-        } catch (fallbackError) {
-          console.error('Error saving schedule (fallback)', fallbackError);
-        }
-      }
       console.error('Error saving schedule', error);
       setSelectionError('Erro ao salvar o horario. Tente novamente.');
     } finally {
@@ -533,46 +1108,34 @@ export default function PrintScheduleCalendar({
   const persistPaintSchedule = async (nextValue: string | null) => {
     if (!canPersist) return;
     setSaving(true);
-    const payload = {
-      paintStartConfirmedAt: nextValue ? nextValue : null,
-      paintTimeHours: effectivePaintHours > 0 ? effectivePaintHours : null,
-      paintResponsible: paintResponsible && paintResponsible.trim() !== '' ? paintResponsible.trim() : null
-    };
     try {
-      if (!paintEndpointAvailable) {
-        throw new Error('paint-endpoint-missing');
-      }
-      await axios.patch(`http://localhost:5000/api/sales/${saleId}/paint-schedule`, payload);
+      await updateSalePaintSchedule(saleId as string, nextValue, {
+        paintTimeHours: effectivePaintHours,
+        paintResponsible
+      });
       await fetchData();
       setPaintSelectionError('');
     } catch (error) {
-      const status = (error as any)?.response?.status;
-      if ((status === 404 || (error as Error)?.message === 'paint-endpoint-missing') && saleId) {
-        if (status === 404) {
-          setPaintEndpointAvailable(false);
-        }
-        try {
-          const saleRes = await axios.get(`http://localhost:5000/api/sales/${saleId}`);
-          const updatedSale = {
-            ...saleRes.data,
-            paintStartConfirmedAt: nextValue ? nextValue : null
-          };
-          if (effectivePaintHours > 0) {
-            updatedSale.paintTimeHours = effectivePaintHours;
-          }
-          if (paintResponsible && paintResponsible.trim() !== '') {
-            updatedSale.paintResponsible = paintResponsible.trim();
-          }
-          await axios.put(`http://localhost:5000/api/sales/${saleId}`, updatedSale);
-          await fetchData();
-          setPaintSelectionError('');
-          return;
-        } catch (fallbackError) {
-          console.error('Error saving paint schedule (fallback)', fallbackError);
-        }
-      }
       console.error('Error saving paint schedule', error);
       setPaintSelectionError('Erro ao salvar o horario de pintura. Tente novamente.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const persistDesignSchedule = async (nextValue: string | null) => {
+    if (!canPersist) return;
+    setSaving(true);
+    try {
+      await updateSaleDesignSchedule(saleId as string, nextValue, {
+        designTimeHours: resolvedDesignHours,
+        designResponsible
+      });
+      await fetchData();
+      setDesignSelectionError('');
+    } catch (error) {
+      console.error('Error saving design schedule', error);
+      setDesignSelectionError('Erro ao salvar o horario de design. Tente novamente.');
     } finally {
       setSaving(false);
     }
@@ -583,7 +1146,8 @@ export default function PrintScheduleCalendar({
     const duration = Math.max(0, effectiveHours);
     const start = new Date(value);
     const validation = validateSlot(start, duration, occupied, {
-      ignoreSaleId: saleId
+      ignoreSaleId: saleId,
+      minStart: designEndForPrint
     });
     if (!validation.valid) {
       onChange(null);
@@ -591,7 +1155,7 @@ export default function PrintScheduleCalendar({
       return;
     }
     setSelectionError('');
-  }, [estimatedHours, value, occupied, onChange, readOnly, saleId, effectiveHours]);
+  }, [estimatedHours, value, occupied, onChange, readOnly, saleId, effectiveHours, designEndForPrint]);
 
   useEffect(() => {
     if (!paintValue || !onPaintChange || readOnly) return;
@@ -608,12 +1172,28 @@ export default function PrintScheduleCalendar({
     setPaintSelectionError('');
   }, [paintValue, onPaintChange, readOnly, effectivePaintHours, printEndForPainting]);
 
+  useEffect(() => {
+    if (!normalizedDesignStart || !onDesignChange || readOnly) return;
+    const duration = Math.max(0, resolvedDesignHours);
+    const start = new Date(normalizedDesignStart);
+    const validation = validateDesignSlot(start, duration, {
+      maxEnd: printStartForDesign
+    });
+    if (!validation.valid) {
+      onDesignChange(null);
+      setDesignSelectionError(validation.message || 'Horario invalido para design.');
+      return;
+    }
+    setDesignSelectionError('');
+  }, [normalizedDesignStart, onDesignChange, readOnly, resolvedDesignHours, printStartForDesign]);
+
   const handleDateClick = (info: { date: Date }) => {
     if (!onChange || readOnly) return;
     const duration = Math.max(0, effectiveHours);
     const validation = validateSlot(info.date, duration, occupied, {
       enforceFuture: true,
-      ignoreSaleId: saleId
+      ignoreSaleId: saleId,
+      minStart: designEndForPrint
     });
     if (!validation.valid) {
       setSelectionError(validation.message || 'Horario invalido para este tempo.');
@@ -626,8 +1206,29 @@ export default function PrintScheduleCalendar({
     persistSchedule(nextValue).catch(() => null);
   };
 
-  const handlePaintDateClick = (info: { date: Date }) => {
-    if (!onPaintChange || readOnly) return;
+  const handleServiceDateClick = (info: { date: Date }) => {
+    if (readOnly) return;
+
+    if (serviceMode === 'design') {
+      if (!onDesignChange) return;
+      const duration = Math.max(0, resolvedDesignHours);
+      const validation = validateDesignSlot(info.date, duration, {
+        enforceFuture: true,
+        maxEnd: printStartForDesign
+      });
+      if (!validation.valid) {
+        setDesignSelectionError(validation.message || 'Horario invalido para design.');
+        return;
+      }
+
+      setDesignSelectionError('');
+      const nextValue = info.date.toISOString();
+      onDesignChange(nextValue);
+      persistDesignSchedule(nextValue).catch(() => null);
+      return;
+    }
+
+    if (!onPaintChange) return;
     const duration = Math.max(0, effectivePaintHours);
     const validation = validatePaintSlot(info.date, duration, {
       enforceFuture: true,
@@ -642,6 +1243,231 @@ export default function PrintScheduleCalendar({
     const nextValue = info.date.toISOString();
     onPaintChange(nextValue);
     persistPaintSchedule(nextValue).catch(() => null);
+  };
+
+  const clearHoverHideTimeout = () => {
+    if (hideHoverTimeoutRef.current) {
+      window.clearTimeout(hideHoverTimeoutRef.current);
+      hideHoverTimeoutRef.current = null;
+    }
+  };
+
+  const scheduleHoverHide = () => {
+    if (typeof window === 'undefined') {
+      setHoverCard(null);
+      return;
+    }
+    clearHoverHideTimeout();
+    hideHoverTimeoutRef.current = window.setTimeout(() => {
+      if (!hoverCardActiveRef.current && !eventHoverActiveRef.current) {
+        setHoverCard(null);
+      }
+    }, 240);
+  };
+
+  const handleEventMouseEnter = (info: any) => {
+    if (isDraggingRef.current) return;
+    clearHoverHideTimeout();
+    eventHoverActiveRef.current = true;
+    hoverCardActiveRef.current = false;
+    const event = info.event;
+    if (!event || event.display === 'background') return;
+    const extended = event.extendedProps || {};
+    if (extended.isTransient) return;
+
+    const entityType = extended.entityType as string | undefined;
+    const typeLabel = entityType === 'print'
+      ? 'Impressao'
+      : entityType === 'design'
+      ? 'Design'
+      : entityType === 'painting'
+      ? 'Pintura'
+      : 'Servico';
+    const description = extended.description || event.title || 'Servico';
+    const start = event.start ? new Date(event.start) : new Date();
+    const duration = Number(extended.durationHours) || 0;
+    const end = event.end ? new Date(event.end) : duration > 0 ? addHours(start, duration) : start;
+    const editPath = extended.saleId
+      ? `/sales/${extended.saleId}`
+      : extended.taskId
+      ? `/services?editType=${entityType}&editId=${extended.taskId}`
+      : undefined;
+    const position = getHoverPosition(info.jsEvent as MouseEvent, {
+      anchorRect: info.el?.getBoundingClientRect()
+    });
+
+    setHoverCard({
+      x: position.x,
+      y: position.y,
+      title: description,
+      typeLabel,
+      start,
+      end,
+      durationHours: duration > 0 ? duration : undefined,
+      status: extended.status,
+      responsible: extended.responsible,
+      value: typeof extended.value === 'number' ? extended.value : undefined,
+      editPath
+    });
+  };
+
+  const handleEventMouseLeave = () => {
+    eventHoverActiveRef.current = false;
+    scheduleHoverHide();
+  };
+
+  const handleEventDragStart = () => {
+    isDraggingRef.current = true;
+    hoverCardActiveRef.current = false;
+    eventHoverActiveRef.current = false;
+    clearHoverHideTimeout();
+    setHoverCard(null);
+  };
+
+  const handleEventDragStop = () => {
+    isDraggingRef.current = false;
+  };
+
+  const handleEventDrop = async (info: any) => {
+    const event = info.event;
+    if (!event || !dragEnabled) {
+      info.revert();
+      return;
+    }
+    if (event.display === 'background') {
+      info.revert();
+      return;
+    }
+    const extended = event.extendedProps || {};
+    if (extended.isTransient) {
+      info.revert();
+      return;
+    }
+    const start = event.start ? new Date(event.start) : null;
+    if (!start) {
+      info.revert();
+      return;
+    }
+    const duration = Number(extended.durationHours) || 0;
+    if (duration <= 0) {
+      info.revert();
+      return;
+    }
+
+    const nextValue = start.toISOString();
+    const entityType = extended.entityType as string | undefined;
+
+    try {
+      if (entityType === 'print') {
+        const targetSaleId = extended.saleId as string | undefined;
+        if (!targetSaleId || !isValidObjectId(targetSaleId)) {
+          info.revert();
+          return;
+        }
+        const validation = validateSlot(start, duration, occupied, {
+          enforceFuture: true,
+          ignoreSaleId: targetSaleId,
+          minStart: getDesignEndForSale(targetSaleId)
+        });
+        if (!validation.valid) {
+          setSelectionError(validation.message || 'Horario invalido para este tempo.');
+          info.revert();
+          return;
+        }
+        if (targetSaleId === saleId && onChange) {
+          onChange(nextValue);
+        }
+        if (targetSaleId === saleId && canPersist) {
+          await persistSchedule(nextValue);
+        } else {
+          await updateSaleSchedule(targetSaleId, nextValue);
+          await fetchData();
+          setSelectionError('');
+        }
+        return;
+      }
+
+      if (entityType === 'design') {
+        const targetSaleId = extended.saleId as string | undefined;
+        const targetTaskId = extended.taskId as string | undefined;
+        if (targetSaleId && isValidObjectId(targetSaleId)) {
+          const validation = validateDesignSlot(start, duration, {
+            enforceFuture: true,
+            maxEnd: getPrintStartForSale(targetSaleId)
+          });
+          if (!validation.valid) {
+            setDesignSelectionError(validation.message || 'Horario invalido para design.');
+            info.revert();
+            return;
+          }
+          if (targetSaleId === saleId && onDesignChange) {
+            onDesignChange(nextValue);
+          }
+          if (targetSaleId === saleId && canPersist) {
+            await persistDesignSchedule(nextValue);
+          } else {
+            await updateSaleDesignSchedule(targetSaleId, nextValue);
+            await fetchData();
+            setDesignSelectionError('');
+          }
+          return;
+        }
+        if (targetTaskId) {
+          await updateDesignTaskSchedule(targetTaskId, nextValue);
+          await fetchData();
+          setDesignSelectionError('');
+          return;
+        }
+      }
+
+      if (entityType === 'painting') {
+        const targetSaleId = extended.saleId as string | undefined;
+        const targetTaskId = extended.taskId as string | undefined;
+        if (targetSaleId && isValidObjectId(targetSaleId)) {
+          const validation = validatePaintSlot(start, duration, {
+            enforceFuture: true,
+            minStart: getPrintEndForSale(targetSaleId)
+          });
+          if (!validation.valid) {
+            setPaintSelectionError(validation.message || 'Horario invalido para pintura.');
+            info.revert();
+            return;
+          }
+          if (targetSaleId === saleId && onPaintChange) {
+            onPaintChange(nextValue);
+          }
+          if (targetSaleId === saleId && canPersist) {
+            await persistPaintSchedule(nextValue);
+          } else {
+            await updateSalePaintSchedule(targetSaleId, nextValue);
+            await fetchData();
+            setPaintSelectionError('');
+          }
+          return;
+        }
+        if (targetTaskId) {
+          await updatePaintingTaskSchedule(targetTaskId, nextValue);
+          await fetchData();
+          setPaintSelectionError('');
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error moving schedule item', error);
+      info.revert();
+      if (entityType === 'painting') {
+        setPaintSelectionError('Erro ao salvar o horario de pintura. Tente novamente.');
+        return;
+      }
+      if (entityType === 'design') {
+        setDesignSelectionError('Erro ao salvar o horario de design. Tente novamente.');
+        return;
+      }
+      setSelectionError('Erro ao salvar o horario. Tente novamente.');
+      return;
+    }
+
+    info.revert();
   };
 
   const suggestedStartLabel = suggestion.start
@@ -659,7 +1485,7 @@ export default function PrintScheduleCalendar({
             <h3 className="text-lg font-bold text-gray-800">Agenda de impressao</h3>
             <p className="text-sm text-gray-500">Sugestao baseada na fila e no horario de trabalho.</p>
           </div>
-          <span className="text-xs font-semibold uppercase tracking-wide text-teal-600 bg-teal-50 px-2 py-1 rounded-full">Impressão</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-teal-600 bg-teal-50 px-2 py-1 rounded-full">Impressao</span>
         </div>
 
         {showSuggestionSummary && (
@@ -691,12 +1517,12 @@ export default function PrintScheduleCalendar({
           </div>
         )}
 
-        {showSuggestionSummary && hasPainting && shouldShowPainting && !hasResolvedPaintSchedule && (
+        {showSuggestionSummary && missingServiceLabel && (
           <div className="mt-3 text-xs text-amber-600 flex items-center gap-2">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
             </svg>
-            Defina a agenda de pintura para completar a sugestao de entrega.
+            Defina a agenda de {missingServiceLabel} para completar a sugestao de entrega.
           </div>
         )}
 
@@ -727,6 +1553,8 @@ export default function PrintScheduleCalendar({
             selectable={!readOnly && Boolean(onChange)}
             selectMirror
             dayMaxEvents
+            editable={dragEnabled}
+            eventDurationEditable={false}
             slotMinTime="08:00:00"
             slotMaxTime="23:00:00"
             businessHours={{
@@ -736,6 +1564,11 @@ export default function PrintScheduleCalendar({
             }}
             events={printEvents}
             dateClick={handleDateClick}
+            eventDragStart={handleEventDragStart}
+            eventDragStop={handleEventDragStop}
+            eventDrop={handleEventDrop}
+            eventMouseEnter={handleEventMouseEnter}
+            eventMouseLeave={handleEventMouseLeave}
           />
         </div>
 
@@ -746,30 +1579,66 @@ export default function PrintScheduleCalendar({
         </div>
       </div>
 
-      {shouldShowPainting && (
+      {shouldShowServices && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="text-lg font-bold text-gray-800">Agenda de pintura</h3>
-              <p className="text-sm text-gray-500">Agendamento livre, sem regras de horario.</p>
-              <p className="text-xs text-gray-500 mt-1">
-                Responsavel: {paintResponsible ? paintResponsible : 'Nao informado'}
-              </p>
+              <h3 className="text-lg font-bold text-gray-800">Agenda de servicos</h3>
+              <p className="text-sm text-gray-500">{serviceDescription}</p>
+              {showResponsibleSummary && (
+                <div className="text-xs text-gray-500 mt-1 space-y-1">
+                  {shouldShowDesign && (
+                    <p>Design: {designResponsible ? designResponsible : 'Nao informado'}</p>
+                  )}
+                  {shouldShowPaint && (
+                    <p>Pintura: {paintResponsible ? paintResponsible : 'Nao informado'}</p>
+                  )}
+                </div>
+              )}
             </div>
-            <span className="text-xs font-semibold uppercase tracking-wide text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full">Pintura</span>
+            {showModeToggle ? (
+              <div className="flex items-center rounded-full border border-gray-200 bg-gray-50 p-1 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setServiceMode('design')}
+                  className={`px-3 py-1 rounded-full transition-colors ${
+                    serviceMode === 'design'
+                      ? 'bg-white text-sky-700 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Design
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setServiceMode('painting')}
+                  className={`px-3 py-1 rounded-full transition-colors ${
+                    serviceMode === 'painting'
+                      ? 'bg-white text-indigo-700 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Pintura
+                </button>
+              </div>
+            ) : showServiceBadge ? (
+              <span className={`text-xs font-semibold uppercase tracking-wide px-2 py-1 rounded-full ${serviceBadgeClass}`}>
+                {serviceModeLabel}
+              </span>
+            ) : null}
           </div>
 
-          {!readOnly && onPaintChange && (
+          {canSelectService && (
             <div className="mt-2 text-xs text-amber-600 flex items-center gap-2">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
               </svg>
-              Marque a agenda de pintura clicando no horario desejado.
+              {serviceInstruction}
             </div>
           )}
 
-          {paintSelectionError && (
-            <div className="mt-3 text-xs text-red-600">{paintSelectionError}</div>
+          {serviceSelectionError && (
+            <div className="mt-3 text-xs text-red-600">{serviceSelectionError}</div>
           )}
 
           <div className="mt-4">
@@ -783,21 +1652,82 @@ export default function PrintScheduleCalendar({
               }}
               height="auto"
               allDaySlot={false}
-              selectable={!readOnly && Boolean(onPaintChange)}
+              selectable={canSelectService}
               selectMirror
               dayMaxEvents
+              editable={dragEnabled}
+              eventDurationEditable={false}
               slotMinTime="00:00:00"
               slotMaxTime="24:00:00"
-              events={paintEvents}
-              dateClick={handlePaintDateClick}
+              events={serviceEvents}
+              dateClick={handleServiceDateClick}
+              eventDragStart={handleEventDragStart}
+              eventDragStop={handleEventDragStop}
+              eventDrop={handleEventDrop}
+              eventMouseEnter={handleEventMouseEnter}
+              eventMouseLeave={handleEventMouseLeave}
             />
           </div>
 
           <div className="mt-4 text-xs text-gray-500">
-            {loading ? 'Carregando agenda...' : 'Sem regras fixas para pintura.'}
+            {loading ? 'Carregando agenda...' : serviceDescription}
           </div>
         </div>
       )}
+      {hoverCard && portalRoot
+        ? createPortal(
+            <div className="fixed z-[9999]" style={{ left: hoverCard.x, top: hoverCard.y }}>
+              <div
+                className="w-72 rounded-xl border border-gray-200 bg-white/95 shadow-lg p-4 backdrop-blur-sm"
+                onMouseEnter={() => {
+                  hoverCardActiveRef.current = true;
+                  clearHoverHideTimeout();
+                }}
+                onMouseLeave={() => {
+                  hoverCardActiveRef.current = false;
+                  scheduleHoverHide();
+                }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                      {hoverCard.typeLabel}
+                    </p>
+                    <p className="text-sm font-semibold text-gray-900">{hoverCard.title}</p>
+                  </div>
+                  {hoverCard.status && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                      {hoverCard.status}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2 space-y-1 text-xs text-gray-600">
+                  <div>Inicio: {formatDateTime(hoverCard.start)}</div>
+                  <div>Fim: {formatDateTime(hoverCard.end)}</div>
+                  {hoverCard.durationHours && (
+                    <div>Duracao: {hoverCard.durationHours.toFixed(2)}h</div>
+                  )}
+                  {hoverCard.responsible && (
+                    <div>Responsavel: {hoverCard.responsible}</div>
+                  )}
+                  {typeof hoverCard.value === 'number' && (
+                    <div>Valor: {formatCurrency(hoverCard.value)}</div>
+                  )}
+                </div>
+                {hoverCard.editPath && (
+                  <button
+                    type="button"
+                    onClick={() => router.push(hoverCard.editPath as string)}
+                    className="mt-3 w-full rounded-lg bg-brand-purple text-white text-xs font-semibold py-2 hover:bg-purple-800 transition-colors"
+                  >
+                    Editar item
+                  </button>
+                )}
+              </div>
+            </div>,
+            portalRoot
+          )
+        : null}
     </div>
   );
 }

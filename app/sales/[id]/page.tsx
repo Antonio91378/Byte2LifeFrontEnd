@@ -1,6 +1,7 @@
 'use client';
 
 import PrintScheduleCalendar from '@/components/PrintScheduleCalendar';
+import FilamentSelect from '@/components/FilamentSelect';
 import { DETAIL_LEVELS } from '@/constants/printQuality';
 import { parseDurationToHours } from '@/utils/time';
 import axios from 'axios';
@@ -11,6 +12,8 @@ interface Filament {
   id: string;
   description: string;
   color: string;
+  colorHex?: string;
+  type?: string;
   remainingMassGrams: number;
 }
 
@@ -19,6 +22,21 @@ interface Client {
   name: string;
   phoneNumber: string;
 }
+
+interface ServiceProvider {
+  id: string;
+  name: string;
+  categories: string[];
+  category?: string;
+}
+
+const normalizeCategory = (value?: string) => (value || '').trim().toLowerCase();
+const hasCategory = (categories: string[] | undefined, matcher: (value: string) => boolean) =>
+  (categories || []).some(category => matcher(normalizeCategory(category)));
+const isDesignerCategory = (categories?: string[]) =>
+  hasCategory(categories, value => value.includes('design'));
+const isPainterCategory = (categories?: string[]) =>
+  hasCategory(categories, value => value.includes('pint') || value.includes('paint'));
 
 export default function EditSalePage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
@@ -33,6 +51,7 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
   
   const [filaments, setFilaments] = useState<Filament[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [serviceProviders, setServiceProviders] = useState<ServiceProvider[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [formData, setFormData] = useState({
@@ -56,6 +75,10 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
     hasCustomArt: false,
     hasPainting: false,
     hasVarnish: false,
+    designTimeHours: 0,
+    designResponsible: '',
+    designStartConfirmedAt: '',
+    designValue: 0,
     paintTimeHours: 0,
     paintResponsible: '',
     paintStartConfirmedAt: '',
@@ -114,14 +137,16 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [filamentsRes, clientsRes, saleRes] = await Promise.all([
+        const [filamentsRes, clientsRes, providersRes, saleRes] = await Promise.all([
           axios.get('http://localhost:5000/api/filaments'),
           axios.get('http://localhost:5000/api/clients'),
+          axios.get('http://localhost:5000/api/service-providers').catch(() => ({ data: [] })),
           axios.get(`http://localhost:5000/api/sales/${id}`)
         ]);
         
         setFilaments(filamentsRes.data);
         setClients(clientsRes.data);
+        setServiceProviders(providersRes.data || []);
         
         const sale = saleRes.data;
         
@@ -153,6 +178,10 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
           hasCustomArt: sale.hasCustomArt || false,
           hasPainting: sale.hasPainting || false,
           hasVarnish: sale.hasVarnish || false,
+          designTimeHours: sale.designTimeHours || 0,
+          designResponsible: sale.designResponsible || '',
+          designStartConfirmedAt: sale.designStartConfirmedAt || '',
+          designValue: sale.designValue || 0,
           paintTimeHours: sale.paintTimeHours || 0,
           paintResponsible: sale.paintResponsible || '',
           paintStartConfirmedAt: sale.paintStartConfirmedAt || '',
@@ -185,6 +214,26 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
   const filteredFilaments = massGramsValue > 0
     ? filaments.filter(filament => filament.remainingMassGrams >= massGramsValue)
     : [];
+  const designerProviders = serviceProviders.filter(provider => isDesignerCategory(
+    provider.categories && provider.categories.length > 0
+      ? provider.categories
+      : provider.category
+      ? [provider.category]
+      : []
+  ));
+  const painterProviders = serviceProviders.filter(provider => isPainterCategory(
+    provider.categories && provider.categories.length > 0
+      ? provider.categories
+      : provider.category
+      ? [provider.category]
+      : []
+  ));
+  const normalizedDesignResponsible = formData.designResponsible.trim().toLowerCase();
+  const normalizedPaintResponsible = formData.paintResponsible.trim().toLowerCase();
+  const hasDesignOption = normalizedDesignResponsible !== ''
+    && designerProviders.some(provider => provider.name.trim().toLowerCase() === normalizedDesignResponsible);
+  const hasPaintOption = normalizedPaintResponsible !== ''
+    && painterProviders.some(provider => provider.name.trim().toLowerCase() === normalizedPaintResponsible);
 
   useEffect(() => {
     if (formData.filamentId === '') return;
@@ -265,8 +314,8 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
     } else {
       setFormData(prev => {
         const updates: any = { [name]: value };
-        if (name === 'paintTimeHours') {
-          updates.paintTimeHours = Number(value);
+        if (name === 'paintTimeHours' || name === 'designTimeHours' || name === 'designValue') {
+          updates[name] = Number(value);
         }
         // If quality changes, clear manual overrides so defaults are recalculated
         if (name === 'printQuality') {
@@ -300,6 +349,10 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
         printTimeHours: parseDurationToHours(formData.designPrintTime),
         deliveryDate: formData.deliveryDate === '' ? null : formData.deliveryDate,
         printStartConfirmedAt: formData.printStartConfirmedAt === '' ? null : formData.printStartConfirmedAt,
+        designStartConfirmedAt: formData.designStartConfirmedAt === '' ? null : formData.designStartConfirmedAt,
+        designTimeHours: Number(formData.designTimeHours) || 0,
+        designResponsible: formData.designResponsible || '',
+        designValue: Number(formData.designValue) || 0,
         paintStartConfirmedAt: formData.paintStartConfirmedAt === '' ? null : formData.paintStartConfirmedAt,
         paintTimeHours: Number(formData.paintTimeHours) || 0,
         paintResponsible: formData.paintResponsible || '',
@@ -327,7 +380,7 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Description */}
           <div className="col-span-1 md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Descrição do Produto</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Descricao do Produto</label>
             <input
               type="text"
               name="description"
@@ -354,22 +407,15 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
           {/* Filament */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Filamento</label>
-            <select
-              name="filamentId"
+            <FilamentSelect
+              filaments={filteredFilaments}
               value={formData.filamentId}
-              onChange={handleChange}
+              onChange={(value) => setFormData(prev => ({ ...prev, filamentId: value }))}
+              placeholder={formData.massGrams > 0 ? 'Selecione um filamento...' : 'Informe a massa para listar filamentos'}
               disabled={formData.massGrams <= 0}
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900 disabled:bg-gray-100 disabled:text-gray-500"
-            >
-              <option value="">
-                {formData.massGrams > 0 ? 'Selecione um filamento...' : 'Informe a massa para listar filamentos'}
-              </option>
-              {filteredFilaments.map(filament => (
-                <option key={filament.id} value={filament.id}>
-                  {filament.description} ({filament.color}) - {filament.remainingMassGrams}g
-                </option>
-              ))}
-            </select>
+              showRemaining
+              showType
+            />
           </div>
 
           {/* Sale Date */}
@@ -399,7 +445,7 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
 
           {/* Time */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Tempo de Impressão</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Tempo de Impressao</label>
             <input
               type="text"
               name="designPrintTime"
@@ -447,18 +493,74 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
             </div>
           </div>
 
+          {formData.hasCustomArt && (
+            <div className="col-span-1 md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Responsavel pelo Design</label>
+                <select
+                  name="designResponsible"
+                  value={formData.designResponsible}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                >
+                  <option value="">Selecione um responsavel...</option>
+                  {!hasDesignOption && formData.designResponsible && (
+                    <option value={formData.designResponsible}>{formData.designResponsible}</option>
+                  )}
+                  {designerProviders.map(provider => (
+                    <option key={provider.id} value={provider.name}>
+                      {provider.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tempo de Design (h)</label>
+                <input
+                  type="number"
+                  name="designTimeHours"
+                  step="0.1"
+                  min="0"
+                  value={formData.designTimeHours}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Valor do Design (R$)</label>
+                <input
+                  type="number"
+                  name="designValue"
+                  step="0.01"
+                  min="0"
+                  value={formData.designValue}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                />
+              </div>
+            </div>
+          )}
+
           {formData.hasPainting && (
             <div className="col-span-1 md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Responsavel pela Pintura</label>
-                <input
-                  type="text"
+                <select
                   name="paintResponsible"
                   value={formData.paintResponsible}
                   onChange={handleChange}
                   className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
-                  placeholder="Ex: Maria"
-                />
+                >
+                  <option value="">Selecione um responsavel...</option>
+                  {!hasPaintOption && formData.paintResponsible && (
+                    <option value={formData.paintResponsible}>{formData.paintResponsible}</option>
+                  )}
+                  {painterProviders.map(provider => (
+                    <option key={provider.id} value={provider.name}>
+                      {provider.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Tempo de Pintura (h)</label>
@@ -478,10 +580,16 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
           <div className="col-span-1 md:col-span-2">
             <PrintScheduleCalendar
               estimatedHours={parseDurationToHours(formData.designPrintTime)}
+              hasCustomArt={formData.hasCustomArt}
               hasPainting={formData.hasPainting}
+              showDesign={formData.hasCustomArt}
               showPainting={formData.hasPainting}
               value={formData.printStartConfirmedAt}
               onChange={(value) => setFormData(prev => ({ ...prev, printStartConfirmedAt: value || '' }))}
+              designHours={Number(formData.designTimeHours) || 0}
+              designStartValue={formData.designStartConfirmedAt}
+              onDesignChange={(value) => setFormData(prev => ({ ...prev, designStartConfirmedAt: value || '' }))}
+              designResponsible={formData.designResponsible}
               paintHours={Number(formData.paintTimeHours) || 0}
               paintValue={formData.paintStartConfirmedAt}
               onPaintChange={(value) => setFormData(prev => ({ ...prev, paintStartConfirmedAt: value || '' }))}
@@ -522,7 +630,7 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
 
           {/* Print Quality */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Qualidade de Impressão</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Qualidade de Impressao</label>
             <select
               name="printQuality"
               value={formData.printQuality}
@@ -537,7 +645,7 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
 
           {/* Print Status */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Status da Impressão</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Status da Impressao</label>
             <select
               name="printStatus"
               value={formData.printStatus}
@@ -548,7 +656,7 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
               <option value="InQueue">Na Fila</option>
               <option value="Staged">Preparado</option>
               <option value="InProgress">Em Progresso</option>
-              <option value="Concluded">Concluído</option>
+              <option value="Concluded">Concluido</option>
             </select>
           </div>
 
@@ -662,7 +770,7 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
               onChange={handleChange}
               className="w-5 h-5 text-brand-purple rounded focus:ring-brand-purple"
             />
-            <span className="text-gray-700">Impressão Concluída</span>
+            <span className="text-gray-700">Impressao Concluida</span>
           </label>
 
           <label className="flex items-center gap-2 cursor-pointer">

@@ -3,6 +3,7 @@
 import { DETAIL_LEVELS } from '@/constants/printQuality';
 import { useDialog } from '@/context/DialogContext';
 import { formatHoursToDuration } from '@/utils/time';
+import FilamentSelect from '@/components/FilamentSelect';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -11,6 +12,8 @@ interface Filament {
   id: string;
   description: string;
   color: string;
+  colorHex?: string;
+  type?: string;
   price: number;
 }
 
@@ -216,17 +219,13 @@ export default function NewStockItemPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Filamento Utilizado</label>
-                <select 
-                  required
-                  className="w-full rounded-lg border-gray-300 focus:ring-brand-purple focus:border-brand-purple text-gray-900 bg-white"
+                <FilamentSelect
+                  filaments={filaments}
                   value={formData.filamentId}
-                  onChange={e => setFormData({...formData, filamentId: e.target.value})}
-                >
-                  <option value="" className="text-gray-900">Selecione o filamento...</option>
-                  {filaments.map(f => (
-                    <option key={f.id} value={f.id} className="text-gray-900">{f.description} - {f.color}</option>
-                  ))}
-                </select>
+                  onChange={(value) => setFormData({ ...formData, filamentId: value })}
+                  placeholder="Selecione o filamento..."
+                  showType
+                />
               </div>
 
               <div>

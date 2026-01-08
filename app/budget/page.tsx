@@ -3,6 +3,7 @@
 import { DETAIL_LEVELS } from '@/constants/printQuality';
 import axios from 'axios';
 import PrintScheduleCalendar from '@/components/PrintScheduleCalendar';
+import FilamentSelect from '@/components/FilamentSelect';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
@@ -10,6 +11,8 @@ interface Filament {
   id: string;
   description: string;
   color: string;
+  colorHex?: string;
+  type?: string;
   price: number;
   warningComment?: string;
   slicingProfile3mfPath?: string;
@@ -141,19 +144,14 @@ export default function BudgetPage() {
               {/* Filament Selection */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Filamento</label>
-                <select
-                  required
+                <FilamentSelect
+                  filaments={filaments}
                   value={formData.filamentId}
-                  onChange={(e) => setFormData({...formData, filamentId: e.target.value})}
-                  className="w-full rounded-lg border-gray-300 shadow-sm focus:border-teal-500 focus:ring-teal-500 text-gray-900"
-                >
-                  <option value="" className="text-gray-500">Selecione um filamento...</option>
-                  {filaments.map(f => (
-                    <option key={f.id} value={f.id} className="text-gray-900">
-                      {f.description} ({f.color}) - R$ {f.price.toFixed(2)}/kg
-                    </option>
-                  ))}
-                </select>
+                  onChange={(value) => setFormData({ ...formData, filamentId: value })}
+                  placeholder="Selecione um filamento..."
+                  showPrice
+                  showType
+                />
                 {hasWarning && (
                   <div className="mt-2 flex items-center gap-2 text-sm text-yellow-700">
                     <span
@@ -415,7 +413,9 @@ export default function BudgetPage() {
             <div className="lg:col-span-2">
               <PrintScheduleCalendar
                 estimatedHours={result.estimatedTimeHours}
+                hasCustomArt={formData.hasCustomArt}
                 hasPainting={formData.hasPainting}
+                showDesign={formData.hasCustomArt}
                 showPainting={formData.hasPainting}
                 layout="stacked"
                 readOnly

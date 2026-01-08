@@ -38,6 +38,24 @@ function getSaleProfit(sale: any) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function getServiceDateStr(task: any) {
+  return (
+    task.startAt ||
+    task.StartAt ||
+    task.createdAt ||
+    task.CreatedAt ||
+    null
+  );
+}
+
+function getServiceValue(task: any) {
+  const raw = task.value ?? task.Value ?? 0;
+  if (typeof raw === "number") return raw;
+  const normalized = String(raw).replace(/\./g, "").replace(/,/, ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 // Agrega vendas por m??s
 function aggregateSalesByMonth(sales: any[]) {
   const map = new Map<string, { value: number; description: string }>();
@@ -66,6 +84,34 @@ function aggregateSalesByDay(sales: any[], month: string) {
     map.set(label, {
       value: prev.value + getSaleProfit(sale),
       description: `Lucro em ${label}`
+    });
+  });
+  return Array.from(map.entries()).map(([label, { value, description }]) => ({ label, value, description }));
+}
+
+function aggregateServicesByDay(tasks: any[], month: string) {
+  const map = new Map<string, { value: number; description: string }>();
+  tasks.forEach(task => {
+    const dateStr = getServiceDateStr(task);
+    if (!dateStr) return;
+    if (getMonthLabel(dateStr) !== month) return;
+    const label = getDayLabel(dateStr);
+    const prev = map.get(label) || { value: 0, description: "" };
+    map.set(label, {
+      value: prev.value + getServiceValue(task),
+      description: `Lucro em ${label}`
+    });
+  });
+  return Array.from(map.entries()).map(([label, { value, description }]) => ({ label, value, description }));
+}
+
+function mergeChartEntries(entries: { label: string; value: number; description: string }[]) {
+  const map = new Map<string, { value: number; description: string }>();
+  entries.forEach(entry => {
+    const prev = map.get(entry.label) || { value: 0, description: `Lucro em ${entry.label}` };
+    map.set(entry.label, {
+      value: prev.value + (Number(entry.value) || 0),
+      description: prev.description
     });
   });
   return Array.from(map.entries()).map(([label, { value, description }]) => ({ label, value, description }));
@@ -110,7 +156,10 @@ interface Investment {
 }
 
 export default function InvestmentsPage() {
+  const [sales, setSales] = useState<any[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]);
+  const [designTasks, setDesignTasks] = useState<any[]>([]);
+  const [paintingTasks, setPaintingTasks] = useState<any[]>([]);
   const [totalProfit, setTotalProfit] = useState(0);
   const [totalRevenue, setTotalRevenue] = useState(0);
   const [totalInvestment, setTotalInvestment] = useState(0);
@@ -132,19 +181,32 @@ export default function InvestmentsPage() {
 
   const fetchData = async () => {
     try {
-      const [salesRes, invRes] = await Promise.all([
+      const [salesRes, invRes, designRes, paintingRes] = await Promise.all([
         axios.get('http://localhost:5000/api/sales'),
-        axios.get('http://localhost:5000/api/investments')
+        axios.get('http://localhost:5000/api/investments'),
+        axios.get('http://localhost:5000/api/designs'),
+        axios.get('http://localhost:5000/api/paintings')
       ]);
 
-      const profit = salesRes.data.reduce((acc: number, sale: any) => acc + getSaleProfit(sale), 0);
-      const revenue = salesRes.data.reduce((acc: number, sale: any) => {
+      const salesList = salesRes.data || [];
+      const designList = designRes.data || [];
+      const paintingList = paintingRes.data || [];
+      setSales(salesList);
+      setDesignTasks(designList);
+      setPaintingTasks(paintingList);
+
+      const servicesProfit = [...designList, ...paintingList].reduce(
+        (acc: number, task: any) => acc + getServiceValue(task),
+        0
+      );
+      const profit = salesList.reduce((acc: number, sale: any) => acc + getSaleProfit(sale), 0) + servicesProfit;
+      const revenue = salesList.reduce((acc: number, sale: any) => {
         const raw = sale.saleValue ?? sale.SaleValue ?? 0;
         if (typeof raw === "number") return acc + raw;
         const normalized = String(raw).replace(/\./g, "").replace(/,/, ".");
         const parsed = Number(normalized);
         return acc + (Number.isFinite(parsed) ? parsed : 0);
-      }, 0);
+      }, 0) + servicesProfit;
       setTotalProfit(profit);
       setTotalRevenue(revenue);
 
@@ -221,17 +283,6 @@ export default function InvestmentsPage() {
   const progress = totalInvestment > 0 ? (totalProfit / totalInvestment) * 100 : 0;
 
 
-
-  // Estado para vendas
-  const [sales, setSales] = useState<any[]>([]);
-
-  // Buscar todas as vendas do backend uma vez
-  useEffect(() => {
-    axios.get('http://localhost:5000/api/sales')
-      .then(res => setSales(res.data))
-      .catch(() => setSales([]));
-  }, []);
-
   // Determina todos os meses disponíveis a partir dos dados
   const allMonths = useMemo(() => {
     const monthsSet = new Set<string>();
@@ -242,8 +293,20 @@ export default function InvestmentsPage() {
         monthsSet.add(getMonthLabel(dateStr));
       }
     });
+    designTasks.forEach(task => {
+      const dateStr = getServiceDateStr(task);
+      if (dateStr) {
+        monthsSet.add(getMonthLabel(dateStr));
+      }
+    });
+    paintingTasks.forEach(task => {
+      const dateStr = getServiceDateStr(task);
+      if (dateStr) {
+        monthsSet.add(getMonthLabel(dateStr));
+      }
+    });
     return Array.from(monthsSet).sort().reverse();
-  }, [investments, sales]);
+  }, [investments, sales, designTasks, paintingTasks]);
 
   // Seleciona mês atual por padrão
   useEffect(() => {
@@ -264,6 +327,14 @@ export default function InvestmentsPage() {
     if (!selectedMonth) return [];
     return aggregateSalesByDay(sales, selectedMonth);
   }, [selectedMonth, sales]);
+  const servicesByDay = useMemo(() => {
+    if (!selectedMonth) return [];
+    return aggregateServicesByDay([...designTasks, ...paintingTasks], selectedMonth);
+  }, [selectedMonth, designTasks, paintingTasks]);
+  const profitByDay = useMemo(() => {
+    if (!selectedMonth) return [];
+    return mergeChartEntries([...salesByDay, ...servicesByDay]);
+  }, [selectedMonth, salesByDay, servicesByDay]);
   const investmentsByDay = useMemo(() => {
     if (!selectedMonth) return [];
     return aggregateInvestmentsByDay(investments, selectedMonth);
@@ -297,7 +368,7 @@ export default function InvestmentsPage() {
       </div>
 
       {/* Gráfico Lucro x Investimentos diário */}
-      <InvestmentsChart sales={salesByDay} investments={investmentsByDay} month={selectedMonth || ''} />
+      <InvestmentsChart sales={profitByDay} investments={investmentsByDay} month={selectedMonth || ''} />
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         {/* Total Profit */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-green-100 relative overflow-hidden">

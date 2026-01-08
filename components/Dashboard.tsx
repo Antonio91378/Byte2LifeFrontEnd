@@ -636,7 +636,7 @@ export default function Dashboard() {
                   Ocultar agenda
                 </button>
               </div>
-              <PrintScheduleCalendar readOnly showSuggestionSummary={false} showPainting />
+              <PrintScheduleCalendar readOnly allowDrag showSuggestionSummary={false} showDesign showPainting />
             </div>
           )}
         </div>
