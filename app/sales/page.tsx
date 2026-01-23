@@ -3,7 +3,7 @@
 import Modal from '@/components/Modal';
 import { useDialog } from '@/context/DialogContext';
 import axios from 'axios';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -70,6 +70,8 @@ export default function SalesPage() {
   const [isAddingIncident, setIsAddingIncident] = useState(false);
   const [newIncidentReason, setNewIncidentReason] = useState('Other');
   const [newIncidentComment, setNewIncidentComment] = useState('');
+  const [hideProfit, setHideProfit] = useState(false);
+  const filterMenuRef = useRef<HTMLDivElement | null>(null);
   const { showAlert, showConfirm } = useDialog();
 
   useEffect(() => {
@@ -127,6 +129,21 @@ export default function SalesPage() {
       setPrintFilter(nextPrintStatus);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!isStatusFilterOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (filterMenuRef.current && !filterMenuRef.current.contains(target)) {
+        setIsStatusFilterOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+    };
+  }, [isStatusFilterOpen]);
 
   const toggleExpand = (id: string) => {
     setExpandedSaleId(expandedSaleId === id ? null : id);
@@ -351,7 +368,7 @@ export default function SalesPage() {
             </div>
           </div>
 
-          <div className="relative">
+          <div className="relative" ref={filterMenuRef}>
             <button
               type="button"
               onClick={() => setIsStatusFilterOpen(prev => !prev)}
@@ -474,6 +491,18 @@ export default function SalesPage() {
             )}
           </div>
 
+          <button
+            type="button"
+            onClick={() => setHideProfit(prev => !prev)}
+            className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm hover:border-gray-300 transition-colors text-sm font-semibold text-gray-700"
+          >
+            <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+            </svg>
+            {hideProfit ? 'Mostrar lucro' : 'Ocultar lucro'}
+          </button>
+
           <Link href={newSaleHref} className="bg-brand-purple hover:bg-purple-800 text-white px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
             Nova Venda
@@ -481,15 +510,17 @@ export default function SalesPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className={`grid grid-cols-1 gap-6 ${hideProfit ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}>
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <p className="text-sm text-gray-500 font-medium uppercase">Faturamento Total</p>
           <p className="text-3xl font-bold text-gray-800 mt-2">R$ {totalSales.toFixed(2)}</p>
         </div>
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-          <p className="text-sm text-gray-500 font-medium uppercase">Lucro Líquido</p>
-          <p className="text-3xl font-bold text-green-600 mt-2">R$ {totalProfit.toFixed(2)}</p>
-        </div>
+        {!hideProfit && (
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <p className="text-sm text-gray-500 font-medium uppercase">Lucro Líquido</p>
+            <p className="text-3xl font-bold text-green-600 mt-2">R$ {totalProfit.toFixed(2)}</p>
+          </div>
+        )}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <p className="text-sm text-gray-500 font-medium uppercase">Impressões Pendentes</p>
           <p className="text-3xl font-bold text-brand-orange mt-2">{pendingPrints}</p>
@@ -505,7 +536,9 @@ export default function SalesPage() {
                 <th className="hidden md:table-cell px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Entrega</th>
                 <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Descrição</th>
                 <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Valor</th>
-                <th className="hidden md:table-cell px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Lucro</th>
+                <th className={`hidden md:table-cell px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider transition-opacity duration-300 ${hideProfit ? 'opacity-0' : 'opacity-100'}`}>
+                  Lucro
+                </th>
                 <th className="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Ações</th>
               </tr>
@@ -544,7 +577,9 @@ export default function SalesPage() {
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">R$ {s.saleValue.toFixed(2)}</td>
-                    <td className="hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-green-600 font-bold">R$ {s.profit.toFixed(2)}</td>
+                    <td className={`hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-green-600 font-bold transition-opacity duration-300 ${hideProfit ? 'opacity-0' : 'opacity-100'}`}>
+                      R$ {s.profit.toFixed(2)}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-center space-x-2">
                       <span
                         role="button"

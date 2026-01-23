@@ -10,6 +10,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createPortal } from 'react-dom';
 
+type ServiceStatus = 'Active' | 'Concluded';
+
 interface ServiceProvider {
   id: string;
   name: string;
@@ -25,6 +27,7 @@ interface DesignTask {
   responsibleId?: string;
   responsibleName?: string;
   value?: number;
+  status?: ServiceStatus;
 }
 
 interface PaintingTask {
@@ -35,6 +38,7 @@ interface PaintingTask {
   responsibleId?: string;
   responsibleName?: string;
   value?: number;
+  status?: ServiceStatus;
 }
 
 interface HoverCardData {
@@ -50,6 +54,7 @@ interface HoverCardData {
   saleId?: string;
   taskType?: 'design' | 'painting';
   taskId?: string;
+  serviceStatus?: ServiceStatus;
 }
 
 interface ServiceSale {
@@ -58,9 +63,11 @@ interface ServiceSale {
   designStartConfirmedAt?: string;
   designTimeHours?: number;
   designResponsible?: string;
+  designStatus?: ServiceStatus;
   paintStartConfirmedAt?: string;
   paintTimeHours?: number;
   paintResponsible?: string;
+  paintStatus?: ServiceStatus;
 }
 
 const normalizeCategory = (value?: string) => (value || '').trim().toLowerCase();
@@ -87,6 +94,9 @@ const mergeTags = (current: string[], next: string[]) => {
   });
   return Array.from(map.values());
 };
+const normalizeServiceStatus = (value?: string): ServiceStatus =>
+  value === 'Concluded' ? 'Concluded' : 'Active';
+const isServiceActive = (value?: string) => normalizeServiceStatus(value) === 'Active';
 const getTagStyle = (tag: string, active: boolean) => {
   const normalized = normalizeTag(tag);
   if (normalized.includes('design')) {
@@ -168,7 +178,8 @@ export default function ServicesPage() {
     value: 0,
     responsibleId: '',
     responsibleName: '',
-    startAt: ''
+    startAt: '',
+    status: 'Active' as ServiceStatus
   });
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [paintingForm, setPaintingForm] = useState({
@@ -177,7 +188,8 @@ export default function ServicesPage() {
     value: 0,
     responsibleId: '',
     responsibleName: '',
-    startAt: ''
+    startAt: '',
+    status: 'Active' as ServiceStatus
   });
   const [editingPaintingId, setEditingPaintingId] = useState<string | null>(null);
   const [calendarTarget, setCalendarTarget] = useState<'design' | 'painting'>('design');
@@ -320,7 +332,8 @@ export default function ServicesPage() {
       value: 0,
       responsibleId: '',
       responsibleName: '',
-      startAt: ''
+      startAt: '',
+      status: 'Active'
     });
     setEditingTaskId(null);
   };
@@ -332,7 +345,8 @@ export default function ServicesPage() {
       value: 0,
       responsibleId: '',
       responsibleName: '',
-      startAt: ''
+      startAt: '',
+      status: 'Active'
     });
     setEditingPaintingId(null);
   };
@@ -467,7 +481,8 @@ export default function ServicesPage() {
       durationHours,
       responsibleId: taskForm.responsibleId || null,
       responsibleName: taskForm.responsibleName || null,
-      value: Number(taskForm.value) || 0
+      value: Number(taskForm.value) || 0,
+      status: normalizeServiceStatus(taskForm.status)
     };
 
     try {
@@ -500,7 +515,8 @@ export default function ServicesPage() {
       value: Number(task.value) || 0,
       responsibleId: task.responsibleId || '',
       responsibleName: resolvedName,
-      startAt: task.startAt || ''
+      startAt: task.startAt || '',
+      status: normalizeServiceStatus(task.status)
     });
     setEditingTaskId(task.id);
   };
@@ -547,7 +563,8 @@ export default function ServicesPage() {
       durationHours,
       responsibleId: paintingForm.responsibleId || null,
       responsibleName: paintingForm.responsibleName || null,
-      value: Number(paintingForm.value) || 0
+      value: Number(paintingForm.value) || 0,
+      status: normalizeServiceStatus(paintingForm.status)
     };
 
     try {
@@ -580,7 +597,8 @@ export default function ServicesPage() {
       value: Number(task.value) || 0,
       responsibleId: task.responsibleId || '',
       responsibleName: resolvedName,
-      startAt: task.startAt || ''
+      startAt: task.startAt || '',
+      status: normalizeServiceStatus(task.status)
     });
     setEditingPaintingId(task.id);
   };
@@ -690,6 +708,88 @@ export default function ServicesPage() {
     }
   };
 
+  const updateSaleDesignStatus = async (targetSaleId: string, nextStatus: ServiceStatus) => {
+    const ensurePersisted = async () => {
+      const saleRes = await axios.get(`http://localhost:5000/api/sales/${targetSaleId}`);
+      const currentStatus = normalizeServiceStatus(saleRes.data?.designStatus);
+      if (currentStatus === nextStatus) {
+        return saleRes.data;
+      }
+      const updatedSale = {
+        ...saleRes.data,
+        designStatus: nextStatus
+      };
+      await axios.put(`http://localhost:5000/api/sales/${targetSaleId}`, updatedSale);
+      const verifyRes = await axios.get(`http://localhost:5000/api/sales/${targetSaleId}`);
+      const verifiedStatus = normalizeServiceStatus(verifyRes.data?.designStatus);
+      if (verifiedStatus !== nextStatus) {
+        throw new Error('Sale design status not persisted');
+      }
+      return verifyRes.data;
+    };
+
+    try {
+      await axios.patch(`http://localhost:5000/api/sales/${targetSaleId}/design-status`, {
+        designStatus: nextStatus
+      });
+    } catch (error) {
+      const status = (error as any)?.response?.status;
+      if (status !== 404) {
+        throw error;
+      }
+    }
+
+    const persistedSale = await ensurePersisted();
+    setServiceSales(prev =>
+      prev.map(sale =>
+        sale.id === targetSaleId
+          ? { ...sale, designStatus: normalizeServiceStatus(persistedSale?.designStatus) }
+          : sale
+      )
+    );
+  };
+
+  const updateSalePaintStatus = async (targetSaleId: string, nextStatus: ServiceStatus) => {
+    const ensurePersisted = async () => {
+      const saleRes = await axios.get(`http://localhost:5000/api/sales/${targetSaleId}`);
+      const currentStatus = normalizeServiceStatus(saleRes.data?.paintStatus);
+      if (currentStatus === nextStatus) {
+        return saleRes.data;
+      }
+      const updatedSale = {
+        ...saleRes.data,
+        paintStatus: nextStatus
+      };
+      await axios.put(`http://localhost:5000/api/sales/${targetSaleId}`, updatedSale);
+      const verifyRes = await axios.get(`http://localhost:5000/api/sales/${targetSaleId}`);
+      const verifiedStatus = normalizeServiceStatus(verifyRes.data?.paintStatus);
+      if (verifiedStatus !== nextStatus) {
+        throw new Error('Sale paint status not persisted');
+      }
+      return verifyRes.data;
+    };
+
+    try {
+      await axios.patch(`http://localhost:5000/api/sales/${targetSaleId}/paint-status`, {
+        paintStatus: nextStatus
+      });
+    } catch (error) {
+      const status = (error as any)?.response?.status;
+      if (status !== 404) {
+        throw error;
+      }
+    }
+
+    const persistedSale = await ensurePersisted();
+    setServiceSales(prev =>
+      prev.map(sale =>
+        sale.id === targetSaleId
+          ? { ...sale, paintStatus: normalizeServiceStatus(persistedSale?.paintStatus) }
+          : sale
+      )
+    );
+  };
+
   const updateDesignTaskSchedule = async (taskId: string, nextValue: string) => {
     const task = designTasks.find(item => item.id === taskId);
     if (!task) {
@@ -712,6 +812,48 @@ export default function ServicesPage() {
       startAt: nextValue
     };
     await axios.put(`http://localhost:5000/api/paintings/${taskId}`, payload);
+  };
+
+  const updateDesignTaskStatus = async (taskId: string, nextStatus: ServiceStatus) => {
+    const task = designTasks.find(item => item.id === taskId);
+    if (!task) {
+      throw new Error('Design task not found');
+    }
+    const payload = {
+      ...task,
+      status: nextStatus
+    };
+    await axios.put(`http://localhost:5000/api/designs/${taskId}`, payload);
+    setDesignTasks(prev =>
+      prev.map(item => (item.id === taskId ? { ...item, status: nextStatus } : item))
+    );
+    if (editingTaskId === taskId) {
+      setTaskForm(prev => ({
+        ...prev,
+        status: nextStatus
+      }));
+    }
+  };
+
+  const updatePaintingTaskStatus = async (taskId: string, nextStatus: ServiceStatus) => {
+    const task = paintingTasks.find(item => item.id === taskId);
+    if (!task) {
+      throw new Error('Painting task not found');
+    }
+    const payload = {
+      ...task,
+      status: nextStatus
+    };
+    await axios.put(`http://localhost:5000/api/paintings/${taskId}`, payload);
+    setPaintingTasks(prev =>
+      prev.map(item => (item.id === taskId ? { ...item, status: nextStatus } : item))
+    );
+    if (editingPaintingId === taskId) {
+      setPaintingForm(prev => ({
+        ...prev,
+        status: nextStatus
+      }));
+    }
   };
 
   const clearHoverHideTimeout = () => {
@@ -766,7 +908,8 @@ export default function ServicesPage() {
       value: typeof extended.value === 'number' ? extended.value : undefined,
       saleId: extended.saleId,
       taskType: entityType,
-      taskId: extended.taskId
+      taskId: extended.taskId,
+      serviceStatus: extended.serviceStatus ? normalizeServiceStatus(extended.serviceStatus) : undefined
     });
   };
 
@@ -857,6 +1000,40 @@ export default function ServicesPage() {
     info.revert();
   };
 
+  const handleConcludeHoverTask = () => {
+    if (!hoverCard || !hoverCard.taskType) return;
+    const taskId = hoverCard.taskId;
+    const saleId = hoverCard.saleId;
+    const taskType = hoverCard.taskType;
+    if (!taskId && !saleId) return;
+    const description = taskType === 'design' ? 'design' : 'pintura';
+    showConfirm(
+      'Concluir servico',
+      `Ao concluir este ${description}, ele sera removido da agenda e ficara apenas na lista de finalizados.`,
+      async () => {
+        try {
+          if (taskId) {
+            if (taskType === 'design') {
+              await updateDesignTaskStatus(taskId, 'Concluded');
+            } else {
+              await updatePaintingTaskStatus(taskId, 'Concluded');
+            }
+          } else if (saleId) {
+            if (taskType === 'design') {
+              await updateSaleDesignStatus(saleId, 'Concluded');
+            } else {
+              await updateSalePaintStatus(saleId, 'Concluded');
+            }
+          }
+          setHoverCard(null);
+        } catch (error) {
+          console.error('Error concluding service task', error);
+          await showAlert('Erro', 'Nao foi possivel concluir o servico.', 'error');
+        }
+      }
+    );
+  };
+
   const handleHoverEdit = () => {
     if (!hoverCard) return;
     if (hoverCard.saleId) {
@@ -891,7 +1068,8 @@ export default function ServicesPage() {
     const list: any[] = [];
 
     serviceSales.forEach(sale => {
-      if (sale.designStartConfirmedAt) {
+      const designStatus = normalizeServiceStatus(sale.designStatus);
+      if (sale.designStartConfirmedAt && isServiceActive(designStatus)) {
         const duration = Math.max(Number(sale.designTimeHours) || 0, 0);
         if (duration > 0) {
           const start = new Date(sale.designStartConfirmedAt);
@@ -908,13 +1086,15 @@ export default function ServicesPage() {
               description: sale.description || 'Venda',
               responsible: sale.designResponsible || null,
               durationHours: duration,
-              value: typeof sale.designValue === 'number' ? sale.designValue : null
+              value: typeof sale.designValue === 'number' ? sale.designValue : null,
+              serviceStatus: designStatus
             }
           });
         }
       }
 
-      if (sale.paintStartConfirmedAt) {
+      const paintStatus = normalizeServiceStatus(sale.paintStatus);
+      if (sale.paintStartConfirmedAt && isServiceActive(paintStatus)) {
         const duration = Math.max(Number(sale.paintTimeHours) || 0, 0);
         if (duration > 0) {
           const start = new Date(sale.paintStartConfirmedAt);
@@ -930,7 +1110,8 @@ export default function ServicesPage() {
               saleId: sale.id,
               description: sale.description || 'Venda',
               responsible: sale.paintResponsible || null,
-              durationHours: duration
+              durationHours: duration,
+              serviceStatus: paintStatus
             }
           });
         }
@@ -939,6 +1120,7 @@ export default function ServicesPage() {
 
     designTasks.forEach(task => {
       if (!task.startAt) return;
+      if (!isServiceActive(task.status)) return;
       const duration = Math.max(Number(task.durationHours) || 0, 0);
       if (duration <= 0) return;
       const start = new Date(task.startAt);
@@ -955,13 +1137,15 @@ export default function ServicesPage() {
           description: task.title,
           responsible: task.responsibleName || null,
           durationHours: duration,
-          value: typeof task.value === 'number' ? task.value : null
+          value: typeof task.value === 'number' ? task.value : null,
+          serviceStatus: normalizeServiceStatus(task.status)
         }
       });
     });
 
     paintingTasks.forEach(task => {
       if (!task.startAt) return;
+      if (!isServiceActive(task.status)) return;
       const duration = Math.max(Number(task.durationHours) || 0, 0);
       if (duration <= 0) return;
       const start = new Date(task.startAt);
@@ -978,12 +1162,13 @@ export default function ServicesPage() {
           description: task.title,
           responsible: task.responsibleName || null,
           durationHours: duration,
-          value: typeof task.value === 'number' ? task.value : null
+          value: typeof task.value === 'number' ? task.value : null,
+          serviceStatus: normalizeServiceStatus(task.status)
         }
       });
     });
 
-    if (taskForm.startAt && taskForm.durationHours > 0) {
+    if (taskForm.startAt && taskForm.durationHours > 0 && isServiceActive(taskForm.status)) {
       const start = new Date(taskForm.startAt);
       const responsible = taskForm.responsibleName ? ` - ${taskForm.responsibleName}` : '';
       list.push({
@@ -999,7 +1184,7 @@ export default function ServicesPage() {
       });
     }
 
-    if (paintingForm.startAt && paintingForm.durationHours > 0) {
+    if (paintingForm.startAt && paintingForm.durationHours > 0 && isServiceActive(paintingForm.status)) {
       const start = new Date(paintingForm.startAt);
       const responsible = paintingForm.responsibleName ? ` - ${paintingForm.responsibleName}` : '';
       list.push({
@@ -1024,10 +1209,12 @@ export default function ServicesPage() {
     taskForm.durationHours,
     taskForm.title,
     taskForm.responsibleName,
+    taskForm.status,
     paintingForm.startAt,
     paintingForm.durationHours,
     paintingForm.title,
-    paintingForm.responsibleName
+    paintingForm.responsibleName,
+    paintingForm.status
   ]);
 
   const sortedProviders = useMemo(
@@ -1042,6 +1229,22 @@ export default function ServicesPage() {
   const sortedPaintingTasks = useMemo(
     () => [...paintingTasks].sort((a, b) => (a.startAt || '').localeCompare(b.startAt || '')),
     [paintingTasks]
+  );
+  const activeDesignTasks = useMemo(
+    () => sortedTasks.filter(task => isServiceActive(task.status)),
+    [sortedTasks]
+  );
+  const concludedDesignTasks = useMemo(
+    () => sortedTasks.filter(task => !isServiceActive(task.status)),
+    [sortedTasks]
+  );
+  const activePaintingTasks = useMemo(
+    () => sortedPaintingTasks.filter(task => isServiceActive(task.status)),
+    [sortedPaintingTasks]
+  );
+  const concludedPaintingTasks = useMemo(
+    () => sortedPaintingTasks.filter(task => !isServiceActive(task.status)),
+    [sortedPaintingTasks]
   );
 
   return (
@@ -1286,6 +1489,20 @@ export default function ServicesPage() {
                         />
                       </div>
                       <div>
+                        <label className="block text-xs font-semibold text-gray-500 mb-1">Status</label>
+                        <select
+                          value={taskForm.status}
+                          onChange={(event) => setTaskForm(prev => ({
+                            ...prev,
+                            status: normalizeServiceStatus(event.target.value)
+                          }))}
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                        >
+                          <option value="Active">Ativo</option>
+                          <option value="Concluded">Concluido</option>
+                        </select>
+                      </div>
+                      <div>
                         <label className="block text-xs font-semibold text-gray-500 mb-1">Valor (R$)</label>
                         <input
                           type="number"
@@ -1372,6 +1589,20 @@ export default function ServicesPage() {
                           onChange={(event) => setPaintingForm(prev => ({ ...prev, durationHours: Number(event.target.value) }))}
                           className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
                         />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-500 mb-1">Status</label>
+                        <select
+                          value={paintingForm.status}
+                          onChange={(event) => setPaintingForm(prev => ({
+                            ...prev,
+                            status: normalizeServiceStatus(event.target.value)
+                          }))}
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                        >
+                          <option value="Active">Ativo</option>
+                          <option value="Concluded">Concluido</option>
+                        </select>
                       </div>
                       <div>
                         <label className="block text-xs font-semibold text-gray-500 mb-1">Valor (R$)</label>
@@ -1468,10 +1699,10 @@ export default function ServicesPage() {
               <div>
                 <h3 className="text-sm font-bold text-gray-700 mb-3">Designs agendados</h3>
                 <div className="space-y-2">
-                  {sortedTasks.length === 0 && (
+                  {activeDesignTasks.length === 0 && (
                     <p className="text-sm text-gray-500">Nenhum design agendado.</p>
                   )}
-                  {sortedTasks.map(task => (
+                  {activeDesignTasks.map(task => (
                     <div key={task.id} className="border border-gray-100 rounded-lg px-3 py-2 flex items-center justify-between gap-4">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-gray-800 truncate">{task.title}</p>
@@ -1507,10 +1738,90 @@ export default function ServicesPage() {
               <div>
                 <h3 className="text-sm font-bold text-gray-700 mb-3">Pinturas agendadas</h3>
                 <div className="space-y-2">
-                  {sortedPaintingTasks.length === 0 && (
+                  {activePaintingTasks.length === 0 && (
                     <p className="text-sm text-gray-500">Nenhuma pintura agendada.</p>
                   )}
-                  {sortedPaintingTasks.map(task => (
+                  {activePaintingTasks.map(task => (
+                    <div key={task.id} className="border border-gray-100 rounded-lg px-3 py-2 flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-800 truncate">{task.title}</p>
+                        <p className="text-xs text-gray-500">
+                          {task.startAt ? new Date(task.startAt).toLocaleString('pt-BR') : '--'} - {task.durationHours || 0}h
+                          {task.responsibleName || providers.find(provider => provider.id === task.responsibleId)?.name
+                            ? ` - ${task.responsibleName || providers.find(provider => provider.id === task.responsibleId)?.name}`
+                            : ''}
+                          {typeof task.value === 'number' && task.value > 0 ? ` - R$ ${task.value.toFixed(2)}` : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => handlePaintingEdit(task)}
+                          className="text-xs text-brand-purple hover:text-purple-900 font-semibold"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handlePaintingDelete(task.id)}
+                          className="text-xs text-red-600 hover:text-red-800 font-semibold"
+                        >
+                          Excluir
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div>
+                <h3 className="text-sm font-bold text-gray-700 mb-3">Designs finalizados</h3>
+                <div className="space-y-2">
+                  {concludedDesignTasks.length === 0 && (
+                    <p className="text-sm text-gray-500">Nenhum design finalizado.</p>
+                  )}
+                  {concludedDesignTasks.map(task => (
+                    <div key={task.id} className="border border-gray-100 rounded-lg px-3 py-2 flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-800 truncate">{task.title}</p>
+                        <p className="text-xs text-gray-500">
+                          {task.startAt ? new Date(task.startAt).toLocaleString('pt-BR') : '--'} - {task.durationHours || 0}h
+                          {task.responsibleName || providers.find(provider => provider.id === task.responsibleId)?.name
+                            ? ` - ${task.responsibleName || providers.find(provider => provider.id === task.responsibleId)?.name}`
+                            : ''}
+                          {typeof task.value === 'number' && task.value > 0 ? ` - R$ ${task.value.toFixed(2)}` : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => handleTaskEdit(task)}
+                          className="text-xs text-brand-purple hover:text-purple-900 font-semibold"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleTaskDelete(task.id)}
+                          className="text-xs text-red-600 hover:text-red-800 font-semibold"
+                        >
+                          Excluir
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-bold text-gray-700 mb-3">Pinturas finalizadas</h3>
+                <div className="space-y-2">
+                  {concludedPaintingTasks.length === 0 && (
+                    <p className="text-sm text-gray-500">Nenhuma pintura finalizada.</p>
+                  )}
+                  {concludedPaintingTasks.map(task => (
                     <div key={task.id} className="border border-gray-100 rounded-lg px-3 py-2 flex items-center justify-between gap-4">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-gray-800 truncate">{task.title}</p>
@@ -1577,15 +1888,27 @@ export default function ServicesPage() {
                   {hoverCard.responsible && (
                     <div>Responsavel: {hoverCard.responsible}</div>
                   )}
-                  {typeof hoverCard.value === 'number' && (
-                    <div>Valor: {formatCurrency(hoverCard.value)}</div>
-                  )}
-                </div>
-                {(hoverCard.saleId || hoverCard.taskId) && (
-                  <button
-                    type="button"
-                    onClick={handleHoverEdit}
-                    className="mt-3 w-full rounded-lg bg-brand-purple text-white text-xs font-semibold py-2 hover:bg-purple-800 transition-colors"
+                {typeof hoverCard.value === 'number' && (
+                  <div>Valor: {formatCurrency(hoverCard.value)}</div>
+                )}
+              </div>
+              {hoverCard.serviceStatus && isServiceActive(hoverCard.serviceStatus) && (hoverCard.taskId || hoverCard.saleId) && (
+                <button
+                  type="button"
+                  onClick={handleConcludeHoverTask}
+                  className="mt-3 w-full rounded-lg border border-amber-200 bg-amber-50 text-amber-700 text-xs font-semibold py-2 hover:bg-amber-100 transition-colors flex items-center justify-between px-3"
+                >
+                  <span>Concluir servico</span>
+                  <span className="relative inline-flex h-5 w-9 items-center rounded-full bg-amber-200">
+                    <span className="inline-block h-4 w-4 translate-x-1 rounded-full bg-white shadow"></span>
+                  </span>
+                </button>
+              )}
+              {(hoverCard.saleId || hoverCard.taskId) && (
+                <button
+                  type="button"
+                  onClick={handleHoverEdit}
+                  className="mt-3 w-full rounded-lg bg-brand-purple text-white text-xs font-semibold py-2 hover:bg-purple-800 transition-colors"
                   >
                     Editar item
                   </button>

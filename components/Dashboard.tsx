@@ -198,6 +198,10 @@ export default function Dashboard() {
         tags: tagsArray
       };
 
+      if (finishStatus === 'Concluded') {
+        updateData.isPrintConcluded = true;
+      }
+
       if (finishStatus === 'Failed') {
         updateData.errorReason = errorReason;
         updateData.wastedFilamentGrams = parseFloat(wastedFilament) || 0;
@@ -636,7 +640,7 @@ export default function Dashboard() {
                   Ocultar agenda
                 </button>
               </div>
-              <PrintScheduleCalendar readOnly allowDrag showSuggestionSummary={false} showDesign showPainting />
+              <PrintScheduleCalendar readOnly allowDrag showSuggestionSummary={false} showDesign showPainting allowImmediateStart />
             </div>
           )}
         </div>

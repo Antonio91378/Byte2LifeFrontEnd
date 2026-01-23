@@ -29,6 +29,7 @@ export default function EditFilamentPage({ params }: { params: Promise<{ id: str
     color: '',
     colorHex: '#000000',
     type: 'PLA',
+    isNozzle02Compatible: false,
     warningComment: '',
     slicingProfile3mfPath: ''
   });
@@ -49,6 +50,7 @@ export default function EditFilamentPage({ params }: { params: Promise<{ id: str
           color: filamentRes.data.color || '',
           colorHex: filamentRes.data.colorHex || '#000000',
           type: filamentRes.data.type || 'PLA',
+          isNozzle02Compatible: Boolean(filamentRes.data.isNozzle02Compatible),
           warningComment: filamentRes.data.warningComment || '',
           slicingProfile3mfPath: filamentRes.data.slicingProfile3mfPath || ''
         });
@@ -64,8 +66,9 @@ export default function EditFilamentPage({ params }: { params: Promise<{ id: str
   }, [id, router]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    const target = e.target as HTMLInputElement;
+    const nextValue = target.type === 'checkbox' ? target.checked : target.value;
+    setFormData(prev => ({ ...prev, [target.name]: nextValue }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -81,6 +84,7 @@ export default function EditFilamentPage({ params }: { params: Promise<{ id: str
         color: formData.color,
         colorHex: formData.colorHex,
         type: formData.type,
+        isNozzle02Compatible: formData.isNozzle02Compatible,
         warningComment: formData.warningComment,
         slicingProfile3mfPath: formData.slicingProfile3mfPath
       };
@@ -122,6 +126,16 @@ export default function EditFilamentPage({ params }: { params: Promise<{ id: str
               <option value="Nylon">Nylon</option>
               <option value="Outro">Outro</option>
             </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="isNozzle02Compatible"
+              checked={formData.isNozzle02Compatible}
+              onChange={handleChange}
+              className="w-5 h-5 text-brand-purple rounded focus:ring-brand-purple"
+            />
+            <span className="text-sm text-gray-700">Compativel com bico 0.2 mm</span>
           </div>
           {/* Description */}
           <div>

@@ -14,6 +14,7 @@ interface Filament {
   colorHex?: string;
   price: number;
   type: string;
+  isNozzle02Compatible?: boolean;
   warningComment?: string;
   slicingProfile3mfPath?: string;
 }
@@ -70,6 +71,7 @@ export default function FilamentsPage() {
               .filter(Boolean)
               .join(' | ');
             const hasWarning = Boolean(warningDetails);
+            const nozzleCompatible = Boolean(f.isNozzle02Compatible);
 
             return (
           <div key={f.id} className="bg-white rounded-lg shadow-md overflow-hidden border border-gray-100 hover:shadow-lg transition-shadow relative group">
@@ -80,6 +82,14 @@ export default function FilamentsPage() {
                   <h3 className="text-xl font-bold text-gray-800">{f.description}</h3>
                   <div className="mt-1 flex gap-2 flex-wrap">
                     <span className="px-2 py-1 text-xs font-semibold rounded bg-gray-100 text-gray-600">{f.color}</span>
+                    {nozzleCompatible && (
+                      <span
+                        className="px-2 py-1 text-xs font-semibold rounded border bg-emerald-100 text-emerald-700 border-emerald-200"
+                        title="Compativel com bico 0.2 mm"
+                      >
+                        0.2 mm
+                      </span>
+                    )}
                     <span className="px-2 py-1 text-xs font-semibold rounded bg-orange-100 text-orange-800">{f.type && f.type.trim() ? f.type : 'Tipo não informado'}</span>
                   </div>
                 </div>
