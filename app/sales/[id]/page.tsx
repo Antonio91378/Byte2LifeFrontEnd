@@ -26,6 +26,7 @@ interface Client {
 interface ServiceProvider {
   id: string;
   name: string;
+  email?: string;
   categories: string[];
   category?: string;
 }
