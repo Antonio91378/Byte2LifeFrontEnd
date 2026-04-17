@@ -256,6 +256,8 @@ function ServicesPageContent() {
   const isDraggingRef = useRef(false);
   const hideHoverTimeoutRef = useRef<number | null>(null);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
+  const scheduleSectionRef = useRef<HTMLElement | null>(null);
+  const lastHandledEditKeyRef = useRef<string | null>(null);
 
   const [reportFilterDate, setReportFilterDate] = useState("");
   const [reportFilterType, setReportFilterType] = useState<"date" | "month">(
@@ -271,6 +273,22 @@ function ServicesPageContent() {
   const [isReportFilterOpen, setIsReportFilterOpen] = useState(false);
   const reportFilterMenuRef = useRef<HTMLDivElement | null>(null);
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
+
+  let activeEditMode: "design" | "painting" | null = null;
+  if (editingTaskId) {
+    activeEditMode = "design";
+  } else if (editingPaintingId) {
+    activeEditMode = "painting";
+  }
+
+  let activeEditDescription = "Gerencie design e pintura no mesmo fluxo.";
+  if (activeEditMode === "design") {
+    activeEditDescription =
+      "Editando design. Ajuste os dados e clique em Atualizar.";
+  } else if (activeEditMode === "painting") {
+    activeEditDescription =
+      "Editando pintura. Ajuste os dados e clique em Atualizar.";
+  }
 
   const designerProviders = useMemo(
     () =>
@@ -421,6 +439,33 @@ function ServicesPageContent() {
     setEditingProviderId(null);
   };
 
+  const scrollToScheduleSection = () => {
+    scheduleSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+
+  const updateEditQuery = (
+    editType?: "design" | "painting",
+    editId?: string,
+  ) => {
+    const params = new URLSearchParams(searchParams.toString());
+
+    if (editType && editId) {
+      params.set("editType", editType);
+      params.set("editId", editId);
+    } else {
+      params.delete("editType");
+      params.delete("editId");
+    }
+
+    const query = params.toString();
+    router.replace(query ? `/services/manage?${query}` : "/services/manage", {
+      scroll: false,
+    });
+  };
+
   const resetTaskForm = () => {
     setTaskForm({
       title: "",
@@ -432,6 +477,7 @@ function ServicesPageContent() {
       status: "Active",
     });
     setEditingTaskId(null);
+    lastHandledEditKeyRef.current = null;
   };
 
   const resetPaintingForm = () => {
@@ -445,6 +491,7 @@ function ServicesPageContent() {
       status: "Active",
     });
     setEditingPaintingId(null);
+    lastHandledEditKeyRef.current = null;
   };
 
   const handleProviderSubmit = async (event: React.FormEvent) => {
@@ -651,13 +698,18 @@ function ServicesPageContent() {
         await showAlert("Sucesso", "Design criado.", "success");
       }
       resetTaskForm();
+      updateEditQuery();
     } catch (error) {
       console.error("Error saving design:", error);
       await showAlert("Erro", "Nao foi possivel salvar o design.", "error");
     }
   };
 
-  const handleTaskEdit = (task: DesignTask) => {
+  const handleTaskEdit = (
+    task: DesignTask,
+    options?: { syncQuery?: boolean; scrollToForm?: boolean },
+  ) => {
+    const { syncQuery = true, scrollToForm = true } = options ?? {};
     setCalendarTarget("design");
     const resolvedName =
       task.responsibleName ||
@@ -673,6 +725,14 @@ function ServicesPageContent() {
       status: normalizeServiceStatus(task.status),
     });
     setEditingTaskId(task.id);
+    setEditingPaintingId(null);
+    if (syncQuery) {
+      lastHandledEditKeyRef.current = `design:${task.id}`;
+      updateEditQuery("design", task.id);
+    }
+    if (scrollToForm) {
+      scrollToScheduleSection();
+    }
   };
 
   const handleTaskDelete = (taskId: string) => {
@@ -752,13 +812,18 @@ function ServicesPageContent() {
         await showAlert("Sucesso", "Pintura criada.", "success");
       }
       resetPaintingForm();
+      updateEditQuery();
     } catch (error) {
       console.error("Error saving painting:", error);
       await showAlert("Erro", "Nao foi possivel salvar a pintura.", "error");
     }
   };
 
-  const handlePaintingEdit = (task: PaintingTask) => {
+  const handlePaintingEdit = (
+    task: PaintingTask,
+    options?: { syncQuery?: boolean; scrollToForm?: boolean },
+  ) => {
+    const { syncQuery = true, scrollToForm = true } = options ?? {};
     setCalendarTarget("painting");
     const resolvedName =
       task.responsibleName ||
@@ -774,6 +839,14 @@ function ServicesPageContent() {
       status: normalizeServiceStatus(task.status),
     });
     setEditingPaintingId(task.id);
+    setEditingTaskId(null);
+    if (syncQuery) {
+      lastHandledEditKeyRef.current = `painting:${task.id}`;
+      updateEditQuery("painting", task.id);
+    }
+    if (scrollToForm) {
+      scrollToScheduleSection();
+    }
   };
 
   useEffect(() => {
@@ -781,10 +854,14 @@ function ServicesPageContent() {
     const editId = searchParams.get("editId");
     if (!editType || !editId) return;
 
+    const editKey = `${editType}:${editId}`;
+    if (lastHandledEditKeyRef.current === editKey) return;
+
     if (editType === "design") {
       const task = designTasks.find((item) => item.id === editId);
       if (task) {
-        handleTaskEdit(task);
+        lastHandledEditKeyRef.current = editKey;
+        handleTaskEdit(task, { syncQuery: false, scrollToForm: true });
       }
       return;
     }
@@ -792,7 +869,8 @@ function ServicesPageContent() {
     if (editType === "painting") {
       const task = paintingTasks.find((item) => item.id === editId);
       if (task) {
-        handlePaintingEdit(task);
+        lastHandledEditKeyRef.current = editKey;
+        handlePaintingEdit(task, { syncQuery: false, scrollToForm: true });
       }
     }
   }, [searchParams, designTasks, paintingTasks]);
@@ -2475,15 +2553,16 @@ function ServicesPageContent() {
         </div>
 
         <div className="space-y-6">
-          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+          <section
+            ref={scheduleSectionRef}
+            className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 scroll-mt-24"
+          >
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
               <div>
                 <h2 className="text-lg font-bold text-gray-800">
                   Agendamento de servicos
                 </h2>
-                <p className="text-sm text-gray-500">
-                  Gerencie design e pintura no mesmo fluxo.
-                </p>
+                <p className="text-sm text-gray-500">{activeEditDescription}</p>
               </div>
               <div className="flex items-center rounded-full border border-gray-200 bg-gray-50 p-1 text-xs font-semibold">
                 <button
@@ -2510,6 +2589,39 @@ function ServicesPageContent() {
                 </button>
               </div>
             </div>
+
+            {activeEditMode && (
+              <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-brand-orange/30 bg-orange-50 px-4 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-brand-purple">
+                    {activeEditMode === "design"
+                      ? "Modo de edição: Design"
+                      : "Modo de edição: Pintura"}
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    Voce pode alterar o status para Concluido e salvar pelo
+                    botao Atualizar.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={
+                    activeEditMode === "design"
+                      ? () => {
+                          resetTaskForm();
+                          updateEditQuery();
+                        }
+                      : () => {
+                          resetPaintingForm();
+                          updateEditQuery();
+                        }
+                  }
+                  className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Sair da edicao
+                </button>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)] gap-6">
               <div className="relative">
@@ -2649,7 +2761,10 @@ function ServicesPageContent() {
                         {editingTaskId && (
                           <button
                             type="button"
-                            onClick={resetTaskForm}
+                            onClick={() => {
+                              resetTaskForm();
+                              updateEditQuery();
+                            }}
                             className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:text-gray-800"
                           >
                             Cancelar
@@ -2794,7 +2909,10 @@ function ServicesPageContent() {
                         {editingPaintingId && (
                           <button
                             type="button"
-                            onClick={resetPaintingForm}
+                            onClick={() => {
+                              resetPaintingForm();
+                              updateEditQuery();
+                            }}
                             className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:text-gray-800"
                           >
                             Cancelar
