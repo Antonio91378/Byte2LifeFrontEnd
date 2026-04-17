@@ -1,7 +1,8 @@
-'use client';
+"use client";
 
-import axios from 'axios';
-import { useEffect, useRef } from 'react';
+import { resolveApiUrl } from "@/utils/api";
+import axios from "axios";
+import { useEffect, useRef } from "react";
 
 export default function AxiosLogger() {
   const initializedRef = useRef(false);
@@ -12,6 +13,11 @@ export default function AxiosLogger() {
     }
     initializedRef.current = true;
 
+    const requestInterceptorId = axios.interceptors.request.use((config) => {
+      config.url = resolveApiUrl(config.url);
+      return config;
+    });
+
     const interceptorId = axios.interceptors.response.use(
       (response) => response,
       (error) => {
@@ -19,12 +25,13 @@ export default function AxiosLogger() {
         const url = error?.config?.url;
         const method = error?.config?.method?.toUpperCase();
         const payload = error?.response?.data ?? error?.message;
-        console.error('[API]', method, url, status, payload, error);
+        console.error("[API]", method, url, status, payload, error);
         return Promise.reject(error);
-      }
+      },
     );
 
     return () => {
+      axios.interceptors.request.eject(requestInterceptorId);
       axios.interceptors.response.eject(interceptorId);
     };
   }, []);

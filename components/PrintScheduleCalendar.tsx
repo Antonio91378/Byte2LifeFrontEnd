@@ -1744,7 +1744,7 @@ export default function PrintScheduleCalendar({
     const extended = event.extendedProps || {};
     if (extended.isTransient) return;
 
-    const entityType = extended.entityType as string | undefined;
+    const entityType = extended.entityType as HoverCardData["entityType"];
     const typeLabel =
       entityType === "print"
         ? "Impressao"
@@ -1976,7 +1976,7 @@ export default function PrintScheduleCalendar({
     }
 
     const nextValue = event.startStr || start.toISOString();
-    let entityType = extended.entityType as string | undefined;
+    let entityType = extended.entityType as HoverCardData["entityType"];
     let targetSaleId = extended.saleId as string | undefined;
     let targetTaskId = extended.taskId as string | undefined;
     const eventId = typeof event.id === "string" ? event.id : "";
