@@ -1,13 +1,13 @@
-﻿'use client';
+﻿"use client";
 
-import { DETAIL_LEVELS } from '@/constants/printQuality';
-import PrintScheduleCalendar from '@/components/PrintScheduleCalendar';
-import FilamentSelect from '@/components/FilamentSelect';
-import { useDialog } from '@/context/DialogContext';
-import { parseDurationToHours } from '@/utils/time';
-import axios from 'axios';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import FilamentSelect from "@/components/FilamentSelect";
+import PrintScheduleCalendar from "@/components/PrintScheduleCalendar";
+import { DETAIL_LEVELS } from "@/constants/printQuality";
+import { useDialog } from "@/context/DialogContext";
+import { parseDurationToHours } from "@/utils/time";
+import axios from "axios";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 
 interface Filament {
   id: string;
@@ -32,13 +32,20 @@ interface ServiceProvider {
   category?: string;
 }
 
-const normalizeCategory = (value?: string) => (value || '').trim().toLowerCase();
-const hasCategory = (categories: string[] | undefined, matcher: (value: string) => boolean) =>
-  (categories || []).some(category => matcher(normalizeCategory(category)));
+const normalizeCategory = (value?: string) =>
+  (value || "").trim().toLowerCase();
+const hasCategory = (
+  categories: string[] | undefined,
+  matcher: (value: string) => boolean,
+) =>
+  (categories || []).some((category) => matcher(normalizeCategory(category)));
 const isDesignerCategory = (categories?: string[]) =>
-  hasCategory(categories, value => value.includes('design'));
+  hasCategory(categories, (value) => value.includes("design"));
 const isPainterCategory = (categories?: string[]) =>
-  hasCategory(categories, value => value.includes('pint') || value.includes('paint'));
+  hasCategory(
+    categories,
+    (value) => value.includes("pint") || value.includes("paint"),
+  );
 
 export default function NewSalePage() {
   return (
@@ -51,98 +58,118 @@ export default function NewSalePage() {
 function NewSaleContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const stockId = searchParams.get('stockId');
+  const stockId = searchParams.get("stockId");
   const { showAlert } = useDialog();
+  const [isMobile, setIsMobile] = useState(false);
+  const [showMobileSchedule, setShowMobileSchedule] = useState(false);
+  const [showMobileAdvanced, setShowMobileAdvanced] = useState(false);
+  const [showMobileCostDetails, setShowMobileCostDetails] = useState(false);
 
   const parseMassGrams = (value: string | number) => {
-    const normalized = String(value ?? '').replace(',', '.');
+    const normalized = String(value ?? "").replace(",", ".");
     const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : 0;
   };
   const [filaments, setFilaments] = useState<Filament[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
-  const [serviceProviders, setServiceProviders] = useState<ServiceProvider[]>([]);
+  const [serviceProviders, setServiceProviders] = useState<ServiceProvider[]>(
+    [],
+  );
   const [loading, setLoading] = useState(false);
 
   const [formData, setFormData] = useState({
-    description: '',
-    productLink: '',
-    printQuality: 'Normal',
+    description: "",
+    productLink: "",
+    printQuality: "Normal",
     massGrams: 0,
     cost: 0,
     saleValue: 0,
     profit: 0,
-    profitPercentage: '',
-    designPrintTime: '',
-    printStatus: 'InQueue',
+    profitPercentage: "",
+    designPrintTime: "",
+    printStatus: "InQueue",
     isPrintConcluded: false,
     isDelivered: false,
     isPaid: false,
-    filamentId: '',
-    clientId: '',
-    saleDate: new Date().toISOString().split('T')[0],
-    deliveryDate: '',
+    filamentId: "",
+    clientId: "",
+    saleDate: new Date().toISOString().split("T")[0],
+    deliveryDate: "",
     hasCustomArt: false,
     hasPainting: false,
     hasVarnish: false,
     designTimeHours: 0,
-    designResponsible: '',
-    designStartConfirmedAt: '',
+    designResponsible: "",
+    designStartConfirmedAt: "",
     designValue: 0,
     paintTimeHours: 0,
-    paintResponsible: '',
-    paintStartConfirmedAt: '',
+    paintResponsible: "",
+    paintStartConfirmedAt: "",
     productionCost: 0,
-    nozzleDiameter: '',
-    layerHeight: '',
-    printStartConfirmedAt: '',
-    costDetails: null as any
+    nozzleDiameter: "",
+    layerHeight: "",
+    printStartConfirmedAt: "",
+    costDetails: null as any,
   });
+
+  useEffect(() => {
+    if (globalThis.window === undefined) return;
+
+    const mediaQuery = globalThis.window.matchMedia("(max-width: 767px)");
+    const syncViewport = () => setIsMobile(mediaQuery.matches);
+
+    syncViewport();
+
+    mediaQuery.addEventListener("change", syncViewport);
+    return () => mediaQuery.removeEventListener("change", syncViewport);
+  }, []);
 
   const buildReturnToSalesUrl = () => {
     if (!searchParams) {
-      return '/sales';
+      return "/sales";
     }
     const params = new URLSearchParams();
-    const filterType = searchParams.get('filterType');
-    if (filterType === 'date' || filterType === 'month') {
-      params.set('filterType', filterType);
+    const filterType = searchParams.get("filterType");
+    if (filterType === "date" || filterType === "month") {
+      params.set("filterType", filterType);
     }
-    const filterDate = searchParams.get('filterDate');
+    const filterDate = searchParams.get("filterDate");
     if (filterDate) {
-      params.set('filterDate', filterDate);
+      params.set("filterDate", filterDate);
     }
-    const filterClientId = searchParams.get('filterClientId');
+    const filterClientId = searchParams.get("filterClientId");
     if (filterClientId) {
-      params.set('filterClientId', filterClientId);
+      params.set("filterClientId", filterClientId);
     }
-    const paymentStatus = searchParams.get('paymentStatus');
-    if (paymentStatus === 'paid' || paymentStatus === 'unpaid') {
-      params.set('paymentStatus', paymentStatus);
-    } else if (searchParams.get('filterUnpaid') === '1') {
-      params.set('paymentStatus', 'unpaid');
+    const paymentStatus = searchParams.get("paymentStatus");
+    if (paymentStatus === "paid" || paymentStatus === "unpaid") {
+      params.set("paymentStatus", paymentStatus);
+    } else if (searchParams.get("filterUnpaid") === "1") {
+      params.set("paymentStatus", "unpaid");
     }
-    const deliveryStatus = searchParams.get('deliveryStatus');
-    if (deliveryStatus === 'delivered' || deliveryStatus === 'undelivered') {
-      params.set('deliveryStatus', deliveryStatus);
-    } else if (searchParams.get('filterUndelivered') === '1') {
-      params.set('deliveryStatus', 'undelivered');
+    const deliveryStatus = searchParams.get("deliveryStatus");
+    if (deliveryStatus === "delivered" || deliveryStatus === "undelivered") {
+      params.set("deliveryStatus", deliveryStatus);
+    } else if (searchParams.get("filterUndelivered") === "1") {
+      params.set("deliveryStatus", "undelivered");
     }
-    const printStatus = searchParams.get('printStatus');
-    if (printStatus === 'printed' || printStatus === 'pending') {
-      params.set('printStatus', printStatus);
+    const printStatus = searchParams.get("printStatus");
+    if (printStatus === "printed" || printStatus === "pending") {
+      params.set("printStatus", printStatus);
     }
     const query = params.toString();
-    return query ? `/sales?${query}` : '/sales';
+    return query ? `/sales?${query}` : "/sales";
   };
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [filamentsRes, clientsRes, providersRes] = await Promise.all([
-          axios.get('http://localhost:5000/api/filaments'),
-          axios.get('http://localhost:5000/api/clients'),
-          axios.get('http://localhost:5000/api/service-providers').catch(() => ({ data: [] }))
+          axios.get("http://localhost:5000/api/filaments"),
+          axios.get("http://localhost:5000/api/clients"),
+          axios
+            .get("http://localhost:5000/api/service-providers")
+            .catch(() => ({ data: [] })),
         ]);
         setFilaments(filamentsRes.data);
         setClients(clientsRes.data);
@@ -150,17 +177,19 @@ function NewSaleContent() {
 
         // If coming from stock, fetch stock details
         if (stockId) {
-          const stockRes = await axios.get(`http://localhost:5000/api/stock/${stockId}`);
+          const stockRes = await axios.get(
+            `http://localhost:5000/api/stock/${stockId}`,
+          );
           const stockItem = stockRes.data;
-          
-          // Map old quality values
-          let quality = stockItem.printQuality || 'Normal';
-          if (quality === 'Draft') quality = 'Baixo';
-          if (quality === 'Standard') quality = 'Normal';
-          if (quality === 'High') quality = 'Alto';
-          if (quality === 'Ultra') quality = 'Extremo';
 
-          setFormData(prev => ({
+          // Map old quality values
+          let quality = stockItem.printQuality || "Normal";
+          if (quality === "Draft") quality = "Baixo";
+          if (quality === "Standard") quality = "Normal";
+          if (quality === "High") quality = "Alto";
+          if (quality === "Ultra") quality = "Extremo";
+
+          setFormData((prev) => ({
             ...prev,
             description: stockItem.description,
             filamentId: stockItem.filamentId,
@@ -168,15 +197,15 @@ function NewSaleContent() {
             cost: stockItem.cost, // This might be overwritten by calculation, but that's fine as it should match
             designPrintTime: stockItem.printTime,
             printQuality: quality,
-            printStatus: 'Concluded', // Stock items are already printed
+            printStatus: "Concluded", // Stock items are already printed
             isPrintConcluded: true,
             hasCustomArt: stockItem.hasCustomArt || false,
             hasPainting: stockItem.hasPainting || false,
-            hasVarnish: stockItem.hasVarnish || false
+            hasVarnish: stockItem.hasVarnish || false,
           }));
         }
       } catch (error) {
-        console.error('Error fetching data:', error);
+        console.error("Error fetching data:", error);
       }
     };
     fetchData();
@@ -184,61 +213,107 @@ function NewSaleContent() {
 
   const massGramsValue = parseMassGrams(formData.massGrams);
 
-  const filteredFilaments = massGramsValue > 0
-    ? filaments.filter(filament => filament.remainingMassGrams >= massGramsValue)
-    : [];
-  const designerProviders = serviceProviders.filter(provider => isDesignerCategory(
-    provider.categories && provider.categories.length > 0
-      ? provider.categories
-      : provider.category
-      ? [provider.category]
-      : []
-  ));
-  const painterProviders = serviceProviders.filter(provider => isPainterCategory(
-    provider.categories && provider.categories.length > 0
-      ? provider.categories
-      : provider.category
-      ? [provider.category]
-      : []
-  ));
-  const normalizedDesignResponsible = formData.designResponsible.trim().toLowerCase();
-  const normalizedPaintResponsible = formData.paintResponsible.trim().toLowerCase();
-  const hasDesignOption = normalizedDesignResponsible !== ''
-    && designerProviders.some(provider => provider.name.trim().toLowerCase() === normalizedDesignResponsible);
-  const hasPaintOption = normalizedPaintResponsible !== ''
-    && painterProviders.some(provider => provider.name.trim().toLowerCase() === normalizedPaintResponsible);
+  const filteredFilaments =
+    massGramsValue > 0
+      ? filaments.filter(
+          (filament) => filament.remainingMassGrams >= massGramsValue,
+        )
+      : [];
+  const designerProviders = serviceProviders.filter((provider) =>
+    isDesignerCategory(
+      provider.categories && provider.categories.length > 0
+        ? provider.categories
+        : provider.category
+          ? [provider.category]
+          : [],
+    ),
+  );
+  const painterProviders = serviceProviders.filter((provider) =>
+    isPainterCategory(
+      provider.categories && provider.categories.length > 0
+        ? provider.categories
+        : provider.category
+          ? [provider.category]
+          : [],
+    ),
+  );
+  const normalizedDesignResponsible = formData.designResponsible
+    .trim()
+    .toLowerCase();
+  const normalizedPaintResponsible = formData.paintResponsible
+    .trim()
+    .toLowerCase();
+  const hasDesignOption =
+    normalizedDesignResponsible !== "" &&
+    designerProviders.some(
+      (provider) =>
+        provider.name.trim().toLowerCase() === normalizedDesignResponsible,
+    );
+  const hasPaintOption =
+    normalizedPaintResponsible !== "" &&
+    painterProviders.some(
+      (provider) =>
+        provider.name.trim().toLowerCase() === normalizedPaintResponsible,
+    );
+  const printStatusLabels: Record<string, string> = {
+    Pending: "Pendente",
+    InQueue: "Na fila",
+    Staged: "Preparado",
+    InProgress: "Em andamento",
+    Concluded: "Concluído",
+  };
+  const selectedPrintScheduleLabel = formData.printStartConfirmedAt
+    ? new Date(formData.printStartConfirmedAt).toLocaleString("pt-BR", {
+        dateStyle: "short",
+        timeStyle: "short",
+      })
+    : "Nenhum horário selecionado";
+  const mobileAdvancedSummary = `${formData.printQuality} • ${printStatusLabels[formData.printStatus] ?? formData.printStatus}`;
 
   useEffect(() => {
-    if (formData.filamentId === '') return;
-    const selected = filaments.find(filament => filament.id === formData.filamentId);
-    if (!selected || massGramsValue <= 0 || selected.remainingMassGrams < massGramsValue) {
-      setFormData(prev => ({ ...prev, filamentId: '' }));
+    if (formData.filamentId === "") return;
+    const selected = filaments.find(
+      (filament) => filament.id === formData.filamentId,
+    );
+    if (
+      !selected ||
+      massGramsValue <= 0 ||
+      selected.remainingMassGrams < massGramsValue
+    ) {
+      setFormData((prev) => ({ ...prev, filamentId: "" }));
     }
   }, [massGramsValue, formData.filamentId, filaments]);
 
   // Calculate cost and suggested price automatically
   useEffect(() => {
     const calculatePrice = async () => {
-      const isValidFilamentId = typeof formData.filamentId === 'string' && formData.filamentId.length === 24;
+      const isValidFilamentId =
+        typeof formData.filamentId === "string" &&
+        formData.filamentId.length === 24;
       if (!isValidFilamentId || massGramsValue <= 0) return;
 
       const hours = parseDurationToHours(formData.designPrintTime);
-      const level = DETAIL_LEVELS.find(l => l.label === formData.printQuality)?.value ?? 1;
+      const level =
+        DETAIL_LEVELS.find((l) => l.label === formData.printQuality)?.value ??
+        1;
 
       try {
-        const res = await axios.post('http://localhost:5000/api/budget/calculate', {
-          filamentId: formData.filamentId,
-          detailLevel: level,
-          massGrams: massGramsValue,
-          hasCustomArt: formData.hasCustomArt,
-          hasPainting: formData.hasPainting,
-          hasVarnish: formData.hasVarnish,
-          printTimeHours: hours > 0 ? hours : undefined,
-          nozzleDiameter: formData.nozzleDiameter,
-          layerHeight: formData.layerHeight
-        });
+        const res = await axios.post(
+          "http://localhost:5000/api/budget/calculate",
+          {
+            filamentId: formData.filamentId,
+            detailLevel: level,
+            massGrams: massGramsValue,
+            hasCustomArt: formData.hasCustomArt,
+            hasPainting: formData.hasPainting,
+            hasVarnish: formData.hasVarnish,
+            printTimeHours: hours > 0 ? hours : undefined,
+            nozzleDiameter: formData.nozzleDiameter,
+            layerHeight: formData.layerHeight,
+          },
+        );
 
-        setFormData(prev => ({
+        setFormData((prev) => ({
           ...prev,
           cost: res.data.materialCost, // Keep using material cost for "Custo Material" field if that's what it means, OR switch to TotalProductionCost
           productionCost: res.data.totalProductionCost,
@@ -249,8 +324,8 @@ function NewSaleContent() {
             breakdown: res.data.breakdown,
             materialCost: res.data.materialCost,
             energyCost: res.data.energyCost,
-            machineCost: res.data.machineCost
-          }
+            machineCost: res.data.machineCost,
+          },
         }));
       } catch (err) {
         console.error("Error calculating price", err);
@@ -263,26 +338,34 @@ function NewSaleContent() {
 
     return () => clearTimeout(timeoutId);
   }, [
-    formData.filamentId, 
-    formData.massGrams, 
-    formData.printQuality, 
+    formData.filamentId,
+    formData.massGrams,
+    formData.printQuality,
     formData.designPrintTime,
     formData.hasCustomArt,
     formData.hasPainting,
     formData.hasVarnish,
     formData.nozzleDiameter,
-    formData.layerHeight
+    formData.layerHeight,
   ]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+  const handleChange = (
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+    >,
+  ) => {
     const { name, value, type } = e.target;
-    
-    if (type === 'checkbox') {
+
+    if (type === "checkbox") {
       const checked = (e.target as HTMLInputElement).checked;
-      setFormData(prev => ({ ...prev, [name]: checked }));
+      setFormData((prev) => ({ ...prev, [name]: checked }));
     } else {
-      setFormData(prev => {
-        if (name === 'paintTimeHours' || name === 'designTimeHours' || name === 'designValue') {
+      setFormData((prev) => {
+        if (
+          name === "paintTimeHours" ||
+          name === "designTimeHours" ||
+          name === "designValue"
+        ) {
           return { ...prev, [name]: Number(value) };
         }
         return { ...prev, [name]: value };
@@ -293,12 +376,15 @@ function NewSaleContent() {
   // Auto-calculate profit (UI only, based on current form values)
   useEffect(() => {
     const profit = Number(formData.saleValue) - Number(formData.cost);
-    const profitPercent = formData.cost > 0 ? ((profit / Number(formData.cost)) * 100).toFixed(2) + '%' : '0%';
-    
-    setFormData(prev => ({
+    const profitPercent =
+      formData.cost > 0
+        ? ((profit / Number(formData.cost)) * 100).toFixed(2) + "%"
+        : "0%";
+
+    setFormData((prev) => ({
       ...prev,
       profit: profit,
-      profitPercentage: profitPercent
+      profitPercentage: profitPercent,
     }));
   }, [formData.cost, formData.saleValue]);
 
@@ -310,28 +396,46 @@ function NewSaleContent() {
         ...formData,
         massGrams: massGramsValue,
         printTimeHours: parseDurationToHours(formData.designPrintTime),
-        deliveryDate: formData.deliveryDate === '' ? null : formData.deliveryDate,
-        printStartConfirmedAt: formData.printStartConfirmedAt === '' ? null : formData.printStartConfirmedAt,
-        designStartConfirmedAt: formData.designStartConfirmedAt === '' ? null : formData.designStartConfirmedAt,
+        deliveryDate:
+          formData.deliveryDate === "" ? null : formData.deliveryDate,
+        printStartConfirmedAt:
+          formData.printStartConfirmedAt === ""
+            ? null
+            : formData.printStartConfirmedAt,
+        designStartConfirmedAt:
+          formData.designStartConfirmedAt === ""
+            ? null
+            : formData.designStartConfirmedAt,
         designTimeHours: Number(formData.designTimeHours) || 0,
-        designResponsible: formData.designResponsible || '',
+        designResponsible: formData.designResponsible || "",
         designValue: Number(formData.designValue) || 0,
-        paintStartConfirmedAt: formData.paintStartConfirmedAt === '' ? null : formData.paintStartConfirmedAt,
+        paintStartConfirmedAt:
+          formData.paintStartConfirmedAt === ""
+            ? null
+            : formData.paintStartConfirmedAt,
         paintTimeHours: Number(formData.paintTimeHours) || 0,
-        paintResponsible: formData.paintResponsible || '',
-        filamentId: formData.filamentId && formData.filamentId.length === 24 ? formData.filamentId : null,
-        clientId: formData.clientId && formData.clientId.length === 24 ? formData.clientId : null,
-        stockItemId: stockId || null
+        paintResponsible: formData.paintResponsible || "",
+        filamentId:
+          formData.filamentId && formData.filamentId.length === 24
+            ? formData.filamentId
+            : null,
+        clientId:
+          formData.clientId && formData.clientId.length === 24
+            ? formData.clientId
+            : null,
+        stockItemId: stockId || null,
       };
-      await axios.post('http://localhost:5000/api/sales', payload);
-      
+      await axios.post("http://localhost:5000/api/sales", payload);
+
       // If it came from stock, update stock status to Sold
       if (stockId) {
         try {
-          const stockRes = await axios.get(`http://localhost:5000/api/stock/${stockId}`);
+          const stockRes = await axios.get(
+            `http://localhost:5000/api/stock/${stockId}`,
+          );
           await axios.put(`http://localhost:5000/api/stock/${stockId}`, {
             ...stockRes.data,
-            status: 'Sold'
+            status: "Sold",
           });
         } catch (err) {
           console.error("Error updating stock status", err);
@@ -340,23 +444,29 @@ function NewSaleContent() {
 
       router.push(buildReturnToSalesUrl());
     } catch (error) {
-      console.error('Error creating sale:', error);
-      await showAlert('Erro', 'Erro ao criar venda', 'error');
+      console.error("Error creating sale:", error);
+      await showAlert("Erro", "Erro ao criar venda", "error");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 md:px-0">
-      <h1 className="text-3xl font-bold text-brand-purple mb-8 border-b-2 border-brand-orange pb-4">Nova Venda</h1>
-      
-      <form onSubmit={handleSubmit} className="bg-white p-4 md:p-8 rounded-xl shadow-sm border border-gray-100 space-y-6">
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className="max-w-6xl mx-auto px-3 sm:px-4 md:px-0">
+      <h1 className="text-2xl md:text-3xl font-bold text-brand-purple mb-6 md:mb-8 border-b-2 border-brand-orange pb-4">
+        Nova Venda
+      </h1>
+
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white p-3 md:p-8 rounded-xl shadow-sm border border-gray-100 space-y-5 md:space-y-6"
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
           {/* Description */}
           <div className="col-span-1 md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Descricao do Produto</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Descricao do Produto
+            </label>
             <input
               type="text"
               name="description"
@@ -369,7 +479,9 @@ function NewSaleContent() {
 
           {/* Mass */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Massa (g)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Massa (g)
+            </label>
             <input
               type="number"
               name="massGrams"
@@ -382,21 +494,51 @@ function NewSaleContent() {
 
           {/* Filament */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Filamento</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Filamento
+            </label>
             <FilamentSelect
               filaments={filteredFilaments}
               value={formData.filamentId}
-              onChange={(value) => setFormData(prev => ({ ...prev, filamentId: value }))}
-              placeholder={formData.massGrams > 0 ? 'Selecione um filamento...' : 'Informe a massa para listar filamentos'}
+              onChange={(value) =>
+                setFormData((prev) => ({ ...prev, filamentId: value }))
+              }
+              placeholder={
+                formData.massGrams > 0
+                  ? "Selecione um filamento..."
+                  : "Informe a massa para listar filamentos"
+              }
               disabled={formData.massGrams <= 0}
               showRemaining
               showType
             />
           </div>
 
+          {/* Client */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Cliente
+            </label>
+            <select
+              name="clientId"
+              value={formData.clientId}
+              onChange={handleChange}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+            >
+              <option value="">Selecione um cliente...</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name || client.phoneNumber}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Sale Date */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Data da Venda</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Data da Venda
+            </label>
             <input
               type="date"
               name="saleDate"
@@ -409,7 +551,9 @@ function NewSaleContent() {
 
           {/* Delivery Date */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Data de Entrega</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Data de Entrega
+            </label>
             <input
               type="date"
               name="deliveryDate"
@@ -421,7 +565,9 @@ function NewSaleContent() {
 
           {/* Time */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Tempo de Impressao</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Tempo de Impressao
+            </label>
             <input
               type="text"
               name="designPrintTime"
@@ -435,7 +581,9 @@ function NewSaleContent() {
 
           {/* Extras */}
           <div className="col-span-1 md:col-span-2 pt-2">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Adicionais</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Adicionais
+            </label>
             <div className="flex flex-wrap gap-6">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -473,7 +621,9 @@ function NewSaleContent() {
           {formData.hasCustomArt && (
             <div className="col-span-1 md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Responsavel pelo Design</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Responsavel pelo Design
+                </label>
                 <select
                   name="designResponsible"
                   value={formData.designResponsible}
@@ -482,9 +632,11 @@ function NewSaleContent() {
                 >
                   <option value="">Selecione um responsavel...</option>
                   {!hasDesignOption && formData.designResponsible && (
-                    <option value={formData.designResponsible}>{formData.designResponsible}</option>
+                    <option value={formData.designResponsible}>
+                      {formData.designResponsible}
+                    </option>
                   )}
-                  {designerProviders.map(provider => (
+                  {designerProviders.map((provider) => (
                     <option key={provider.id} value={provider.name}>
                       {provider.name}
                     </option>
@@ -492,7 +644,9 @@ function NewSaleContent() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tempo de Design (h)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tempo de Design (h)
+                </label>
                 <input
                   type="number"
                   name="designTimeHours"
@@ -504,7 +658,9 @@ function NewSaleContent() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Valor do Design (R$)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Valor do Design (R$)
+                </label>
                 <input
                   type="number"
                   name="designValue"
@@ -521,7 +677,9 @@ function NewSaleContent() {
           {formData.hasPainting && (
             <div className="col-span-1 md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Responsavel pela Pintura</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Responsavel pela Pintura
+                </label>
                 <select
                   name="paintResponsible"
                   value={formData.paintResponsible}
@@ -530,9 +688,11 @@ function NewSaleContent() {
                 >
                   <option value="">Selecione um responsavel...</option>
                   {!hasPaintOption && formData.paintResponsible && (
-                    <option value={formData.paintResponsible}>{formData.paintResponsible}</option>
+                    <option value={formData.paintResponsible}>
+                      {formData.paintResponsible}
+                    </option>
                   )}
-                  {painterProviders.map(provider => (
+                  {painterProviders.map((provider) => (
                     <option key={provider.id} value={provider.name}>
                       {provider.name}
                     </option>
@@ -540,7 +700,9 @@ function NewSaleContent() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tempo de Pintura (h)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tempo de Pintura (h)
+                </label>
                 <input
                   type="number"
                   name="paintTimeHours"
@@ -555,104 +717,256 @@ function NewSaleContent() {
           )}
 
           <div className="col-span-1 md:col-span-2">
-            <PrintScheduleCalendar
-              estimatedHours={parseDurationToHours(formData.designPrintTime)}
-              hasCustomArt={formData.hasCustomArt}
-              hasPainting={formData.hasPainting}
-              showDesign={formData.hasCustomArt}
-              showPainting={formData.hasPainting}
-              value={formData.printStartConfirmedAt}
-              onChange={(value) => setFormData(prev => ({ ...prev, printStartConfirmedAt: value || '' }))}
-              designHours={Number(formData.designTimeHours) || 0}
-              designStartValue={formData.designStartConfirmedAt}
-              onDesignChange={(value) => setFormData(prev => ({ ...prev, designStartConfirmedAt: value || '' }))}
-              designResponsible={formData.designResponsible}
-              paintHours={Number(formData.paintTimeHours) || 0}
-              paintValue={formData.paintStartConfirmedAt}
-              onPaintChange={(value) => setFormData(prev => ({ ...prev, paintStartConfirmedAt: value || '' }))}
-              paintResponsible={formData.paintResponsible}
-            />
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 md:p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-sm md:text-base font-bold text-brand-purple">
+                    Agenda de impressão
+                  </h2>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {isMobile
+                      ? `Horário atual: ${selectedPrintScheduleLabel}`
+                      : "Escolha um horário para impressão e serviços adicionais."}
+                  </p>
+                </div>
+                {isMobile && (
+                  <button
+                    type="button"
+                    onClick={() => setShowMobileSchedule((prev) => !prev)}
+                    className="shrink-0 rounded-lg border border-brand-purple/20 bg-white px-3 py-2 text-xs font-semibold text-brand-purple"
+                  >
+                    {showMobileSchedule ? "Ocultar agenda" : "Abrir agenda"}
+                  </button>
+                )}
+              </div>
+
+              {(!isMobile || showMobileSchedule) && (
+                <PrintScheduleCalendar
+                  estimatedHours={parseDurationToHours(
+                    formData.designPrintTime,
+                  )}
+                  hasCustomArt={formData.hasCustomArt}
+                  hasPainting={formData.hasPainting}
+                  showDesign={formData.hasCustomArt}
+                  showPainting={formData.hasPainting}
+                  value={formData.printStartConfirmedAt}
+                  onChange={(value) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      printStartConfirmedAt: value || "",
+                    }))
+                  }
+                  designHours={Number(formData.designTimeHours) || 0}
+                  designStartValue={formData.designStartConfirmedAt}
+                  onDesignChange={(value) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      designStartConfirmedAt: value || "",
+                    }))
+                  }
+                  designResponsible={formData.designResponsible}
+                  paintHours={Number(formData.paintTimeHours) || 0}
+                  paintValue={formData.paintStartConfirmedAt}
+                  onPaintChange={(value) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      paintStartConfirmedAt: value || "",
+                    }))
+                  }
+                  paintResponsible={formData.paintResponsible}
+                  layout={isMobile ? "stacked" : "auto"}
+                  showSuggestionSummary={!isMobile}
+                />
+              )}
+            </div>
           </div>
 
-          {/* Client */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
-            <select
-              name="clientId"
-              value={formData.clientId}
-              onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
-            >
-              <option value="">Selecione um cliente...</option>
-              {clients.map(client => (
-                <option key={client.id} value={client.id}>
-                  {client.name || client.phoneNumber}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Product Link */}
           <div className="col-span-1 md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Link do Produto (STL)</label>
-            <input
-              type="url"
-              name="productLink"
-              value={formData.productLink ?? ''}
-              onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
-            />
+            {isMobile ? (
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => setShowMobileAdvanced((prev) => !prev)}
+                  className="flex w-full items-center justify-between gap-3 text-left"
+                >
+                  <div>
+                    <p className="text-sm font-bold text-gray-800">
+                      Configurações avançadas
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {mobileAdvancedSummary}
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold text-brand-purple">
+                    {showMobileAdvanced ? "Ocultar" : "Mostrar"}
+                  </span>
+                </button>
+
+                {showMobileAdvanced && (
+                  <div className="grid grid-cols-1 gap-4 pt-1">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Link do Produto (STL)
+                      </label>
+                      <input
+                        type="url"
+                        name="productLink"
+                        value={formData.productLink ?? ""}
+                        onChange={handleChange}
+                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="mobile-print-quality"
+                        className="block text-sm font-medium text-gray-700 mb-1"
+                      >
+                        Qualidade de Impressao
+                      </label>
+                      <select
+                        id="mobile-print-quality"
+                        name="printQuality"
+                        value={formData.printQuality}
+                        onChange={handleChange}
+                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                      >
+                        {DETAIL_LEVELS.map((level) => (
+                          <option key={level.value} value={level.label}>
+                            {level.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="mobile-print-status"
+                        className="block text-sm font-medium text-gray-700 mb-1"
+                      >
+                        Status da Impressao
+                      </label>
+                      <select
+                        id="mobile-print-status"
+                        name="printStatus"
+                        value={formData.printStatus}
+                        onChange={handleChange}
+                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                      >
+                        <option value="Pending">Pendente</option>
+                        <option value="InQueue">Na Fila</option>
+                        <option value="Staged">Preparado</option>
+                        <option value="InProgress">Em Andamento</option>
+                        <option value="Concluded">Concluído</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Link do Produto (STL)
+                  </label>
+                  <input
+                    type="url"
+                    name="productLink"
+                    value={formData.productLink ?? ""}
+                    onChange={handleChange}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="desktop-print-quality"
+                    className="block text-sm font-medium text-gray-700 mb-1"
+                  >
+                    Qualidade de Impressao
+                  </label>
+                  <select
+                    id="desktop-print-quality"
+                    name="printQuality"
+                    value={formData.printQuality}
+                    onChange={handleChange}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                  >
+                    {DETAIL_LEVELS.map((level) => (
+                      <option key={level.value} value={level.label}>
+                        {level.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor="desktop-print-status"
+                    className="block text-sm font-medium text-gray-700 mb-1"
+                  >
+                    Status da Impressao
+                  </label>
+                  <select
+                    id="desktop-print-status"
+                    name="printStatus"
+                    value={formData.printStatus}
+                    onChange={handleChange}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                  >
+                    <option value="Pending">Pendente</option>
+                    <option value="InQueue">Na Fila</option>
+                    <option value="Staged">Preparado</option>
+                    <option value="InProgress">Em Andamento</option>
+                    <option value="Concluded">Concluído</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Print Quality */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Qualidade de Impressao</label>
-            <select
-              name="printQuality"
-              value={formData.printQuality}
-              onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
-            >
-              {DETAIL_LEVELS.map(level => (
-                <option key={level.value} value={level.label}>{level.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Print Status */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Status da Impressao</label>
-            <select
-              name="printStatus"
-              value={formData.printStatus}
-              onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
-            >
-              <option value="Pending">Pendente</option>
-              <option value="InQueue">Na Fila</option>
-              <option value="Staged">Preparado</option>
-              <option value="InProgress">Em Andamento</option>
-              <option value="Concluded">Concluído</option>
-            </select>
-          </div>
-
-{/* Cost Details */}
+          {/* Cost Details */}
           <div className="col-span-1 md:col-span-2 bg-gray-50 p-4 rounded-xl border border-gray-200">
-            <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
-              Detalhamento de Custos
-            </h3>
-            
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                  ></path>
+                </svg>
+                Detalhamento de Custos
+              </h3>
+              {isMobile && (
+                <button
+                  type="button"
+                  onClick={() => setShowMobileCostDetails((prev) => !prev)}
+                  className="text-xs font-semibold text-brand-purple"
+                >
+                  {showMobileCostDetails ? "Ocultar ajustes" : "Ver ajustes"}
+                </button>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
-                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">Custo de Produção</span>
+                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">
+                  Custo de Produção
+                </span>
                 <span className="text-lg font-bold text-gray-800">
                   R$ {(formData.productionCost || 0).toFixed(2)}
                 </span>
               </div>
-              <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
-                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">Nozzle</span>
-                <input 
+              <div
+                className={`bg-white p-3 rounded-lg border border-gray-100 shadow-sm ${isMobile && !showMobileCostDetails ? "hidden" : ""}`}
+              >
+                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">
+                  Nozzle
+                </span>
+                <input
                   type="text"
                   name="nozzleDiameter"
                   value={formData.nozzleDiameter}
@@ -661,9 +975,13 @@ function NewSaleContent() {
                   placeholder="0.4mm"
                 />
               </div>
-              <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
-                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">Camada</span>
-                <input 
+              <div
+                className={`bg-white p-3 rounded-lg border border-gray-100 shadow-sm ${isMobile && !showMobileCostDetails ? "hidden" : ""}`}
+              >
+                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">
+                  Camada
+                </span>
+                <input
                   type="text"
                   name="layerHeight"
                   value={formData.layerHeight}
@@ -674,23 +992,31 @@ function NewSaleContent() {
               </div>
             </div>
 
-            {formData.costDetails && (
+            {formData.costDetails && (!isMobile || showMobileCostDetails) && (
               <div className="space-y-3">
                 <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
                   <span>Material</span>
-                  <span className="font-medium">R$ {(formData.costDetails.materialCost || 0).toFixed(2)}</span>
+                  <span className="font-medium">
+                    R$ {(formData.costDetails.materialCost || 0).toFixed(2)}
+                  </span>
                 </div>
                 <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
                   <span>Energia</span>
-                  <span className="font-medium">R$ {(formData.costDetails.energyCost || 0).toFixed(2)}</span>
+                  <span className="font-medium">
+                    R$ {(formData.costDetails.energyCost || 0).toFixed(2)}
+                  </span>
                 </div>
                 <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
                   <span>Máquina (Depreciação)</span>
-                  <span className="font-medium">R$ {(formData.costDetails.machineCost || 0).toFixed(2)}</span>
+                  <span className="font-medium">
+                    R$ {(formData.costDetails.machineCost || 0).toFixed(2)}
+                  </span>
                 </div>
-                
+
                 <div className="mt-3 pt-2">
-                  <p className="text-xs font-bold text-gray-700 mb-1">Cálculo da Margem:</p>
+                  <p className="text-xs font-bold text-gray-700 mb-1">
+                    Cálculo da Margem:
+                  </p>
                   <pre className="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-white p-2 rounded border border-gray-100">
                     {formData.costDetails.breakdown}
                   </pre>
@@ -702,35 +1028,48 @@ function NewSaleContent() {
           {/* Sale Value & Profit */}
           <div className="col-span-1 md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Valor de Venda (R$)</label>
+              <label
+                htmlFor="sale-value"
+                className="block text-sm font-medium text-gray-700 mb-1"
+              >
+                Valor de Venda (R$)
+              </label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">R$</span>
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">
+                  R$
+                </span>
                 <input
+                  id="sale-value"
                   type="number"
                   name="saleValue"
                   step="0.01"
                   value={formData.saleValue}
                   onChange={handleChange}
-                  className="w-full pl-10 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900 text-lg font-bold text-green-700"
+                  className="w-full pl-10 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-purple focus:border-transparent text-lg font-bold text-green-700"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Lucro Estimado</label>
-              <div className={`p-3 rounded-xl border flex justify-between items-center ${formData.profit >= 0 ? 'bg-green-50 border-green-100 text-green-800' : 'bg-red-50 border-red-100 text-red-800'}`}>
-                <span className="font-bold text-lg">R$ {formData.profit.toFixed(2)}</span>
+              <p className="block text-sm font-medium text-gray-700 mb-1">
+                Lucro Estimado
+              </p>
+              <div
+                className={`p-3 rounded-xl border flex justify-between items-center ${formData.profit >= 0 ? "bg-green-50 border-green-100 text-green-800" : "bg-red-50 border-red-100 text-red-800"}`}
+              >
+                <span className="font-bold text-lg">
+                  R$ {formData.profit.toFixed(2)}
+                </span>
                 <span className="text-sm font-medium bg-white/50 px-2 py-1 rounded-lg">
                   {formData.profitPercentage}
                 </span>
               </div>
             </div>
           </div>
-
         </div>
 
         {/* Checkboxes */}
-        <div className="flex flex-wrap gap-6 pt-4 border-t border-gray-100">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 border-t border-gray-100">
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -765,25 +1104,23 @@ function NewSaleContent() {
           </label>
         </div>
 
-        <div className="flex justify-end gap-4 pt-6">
+        <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 sm:gap-4 pt-6">
           <button
             type="button"
             onClick={() => router.back()}
-            className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+            className="w-full sm:w-auto px-6 py-3 sm:py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
           >
             Cancelar
           </button>
           <button
             type="submit"
             disabled={loading}
-            className="px-6 py-2 bg-brand-purple text-white rounded-lg hover:bg-purple-800 transition-colors disabled:opacity-50"
+            className="w-full sm:w-auto px-6 py-3 sm:py-2 bg-brand-purple text-white rounded-lg hover:bg-purple-800 transition-colors disabled:opacity-50"
           >
-            {loading ? 'Salvando...' : 'Salvar Venda'}
+            {loading ? "Salvando..." : "Salvar Venda"}
           </button>
         </div>
-
       </form>
     </div>
   );
 }
-

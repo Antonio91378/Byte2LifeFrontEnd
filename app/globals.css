@@ -51,3 +51,75 @@ body {
 .fc .fc-daygrid-day-number {
   color: #1f2937;
 }
+
+@media (max-width: 640px) {
+  .schedule-calendar .fc .fc-toolbar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.5rem !important;
+  }
+
+  .schedule-calendar .fc .fc-toolbar.fc-header-toolbar {
+    margin-bottom: 0.75rem !important;
+  }
+
+  .schedule-calendar .fc .fc-toolbar-chunk {
+    display: flex !important;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+  }
+
+  .schedule-calendar .fc .fc-toolbar-chunk:nth-child(1) {
+    justify-content: flex-start;
+  }
+
+  .schedule-calendar .fc .fc-toolbar-chunk:nth-child(2) {
+    justify-content: center;
+    order: -1;
+  }
+
+  .schedule-calendar .fc .fc-toolbar-chunk:nth-child(3) {
+    justify-content: flex-end;
+  }
+
+  .schedule-calendar .fc .fc-toolbar-title {
+    font-size: 1.05rem !important;
+    line-height: 1.15 !important;
+    text-align: center !important;
+  }
+
+  .schedule-calendar .fc .fc-button {
+    font-size: 0.72rem !important;
+    padding: 0.35rem 0.55rem !important;
+  }
+
+  .schedule-calendar .fc .fc-col-header-cell-cushion,
+  .schedule-calendar .fc .fc-timegrid-axis-cushion,
+  .schedule-calendar .fc .fc-timegrid-slot-label-cushion,
+  .schedule-calendar .fc .fc-daygrid-day-number {
+    font-size: 0.7rem;
+  }
+
+  .schedule-calendar .fc .fc-col-header-cell-cushion {
+    padding: 0.2rem 0.1rem;
+    line-height: 1.1;
+  }
+
+  .schedule-calendar .fc .fc-timegrid-axis-frame {
+    justify-content: center;
+  }
+
+  .schedule-calendar .fc .fc-timegrid-axis-cushion {
+    max-width: 42px;
+  }
+
+  .schedule-calendar .fc .fc-timegrid-slot {
+    height: 1.35rem;
+  }
+
+  .schedule-calendar .fc .fc-v-event .fc-event-main {
+    font-size: 0.65rem;
+    line-height: 1.1;
+  }
+}

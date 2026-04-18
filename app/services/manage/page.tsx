@@ -1,6 +1,10 @@
 "use client";
 
 import { useDialog } from "@/context/DialogContext";
+import {
+    getResponsiveCalendarConfig,
+    useCompactCalendarMode,
+} from "@/utils/calendar";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import FullCalendar from "@fullcalendar/react";
@@ -202,6 +206,7 @@ function ServicesPageContent() {
   const { showAlert, showConfirm } = useDialog();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const isCompactCalendar = useCompactCalendarMode();
   const [providers, setProviders] = useState<ServiceProvider[]>([]);
   const [designTasks, setDesignTasks] = useState<DesignTask[]>([]);
   const [paintingTasks, setPaintingTasks] = useState<PaintingTask[]>([]);
@@ -338,6 +343,14 @@ function ServicesPageContent() {
     calendarTarget === "design"
       ? "Selecione Design/Pintura e preencha Titulo e Duracao do design para liberar a agenda."
       : "Selecione Design/Pintura e preencha Titulo e Duracao da pintura para liberar a agenda.";
+  const {
+    buttonText: calendarButtonText,
+    dayHeaderFormat: calendarDayHeaderFormat,
+    headerToolbar: calendarToolbar,
+    initialView: calendarInitialView,
+    titleFormat: calendarTitleFormat,
+    wrapperClassName: calendarWrapperClassName,
+  } = getResponsiveCalendarConfig(isCompactCalendar);
 
   const fetchProviders = async () => {
     try {
@@ -2937,25 +2950,26 @@ function ServicesPageContent() {
                       d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
                     ></path>
                   </svg>
-                  Clique na agenda ao lado para escolher o horario.
+                  Clique na agenda para escolher o horario.
                 </div>
               </div>
 
               <div className="relative">
-                <div className="relative">
+                <div className={`relative ${calendarWrapperClassName}`}>
                   <FullCalendar
                     plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
-                    initialView="timeGridWeek"
-                    headerToolbar={{
-                      left: "prev,next today",
-                      center: "title",
-                      right: "timeGridWeek,timeGridDay",
-                    }}
+                    key={`services-calendar-${isCompactCalendar ? "compact" : "default"}`}
+                    initialView={calendarInitialView}
+                    headerToolbar={calendarToolbar}
+                    buttonText={calendarButtonText}
+                    titleFormat={calendarTitleFormat}
+                    dayHeaderFormat={calendarDayHeaderFormat}
                     height="auto"
                     allDaySlot={false}
                     selectable={isCalendarReady}
                     selectMirror
                     dayMaxEvents
+                    stickyHeaderDates
                     editable
                     eventDurationEditable={false}
                     slotMinTime="00:00:00"

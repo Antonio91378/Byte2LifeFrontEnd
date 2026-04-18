@@ -360,6 +360,94 @@ function SalesPageContent() {
     filterQuery.toString()
       ? `/sales/${id}?${filterQuery.toString()}`
       : `/sales/${id}`;
+  const hasActiveFilters =
+    Boolean(filterDate || filterClientId) || activeStatusFilters > 0;
+  const formatDisplayDate = (value?: string) =>
+    value ? new Date(value).toLocaleDateString("pt-BR") : "-";
+  const renderExpandedSaleDetails = (sale: Sale) => (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-700">
+      <div>
+        <p className="font-bold text-brand-purple mb-1">Cliente</p>
+        <p>{getClientName(sale.clientId)}</p>
+      </div>
+      <div>
+        <p className="font-bold text-brand-purple mb-1">Filamento</p>
+        <p>{getFilamentName(sale.filamentId)}</p>
+      </div>
+      <div>
+        <p className="font-bold text-brand-purple mb-1">Link do Produto</p>
+        {sale.productLink ? (
+          <a
+            href={sale.productLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:underline break-all block"
+          >
+            {sale.productLink}
+          </a>
+        ) : (
+          <span className="text-gray-400">Não informado</span>
+        )}
+      </div>
+      <div>
+        <p className="font-bold text-brand-purple mb-1">Qualidade</p>
+        <p>{sale.printQuality || "Padrão"}</p>
+      </div>
+      <div>
+        <p className="font-bold text-brand-purple mb-1">Tempo Estimado</p>
+        <p>{sale.designPrintTime || "-"}</p>
+      </div>
+      <div>
+        <p className="font-bold text-brand-purple mb-1">Massa / Custo</p>
+        <p>
+          {sale.massGrams}g / R$ {sale.cost?.toFixed(2)}
+        </p>
+      </div>
+      <div className="md:col-span-3 flex flex-col sm:flex-row sm:justify-end mt-4 pt-4 border-t border-purple-100 gap-3">
+        <button
+          onClick={() => {
+            setShowIncidentsModal(sale);
+            setIsAddingIncident(true);
+          }}
+          className="w-full sm:w-auto bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+        >
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+            ></path>
+          </svg>
+          Registrar Ocorrência
+        </button>
+        <button
+          onClick={() => handleMoveToStock(sale.id)}
+          className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+        >
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
+            ></path>
+          </svg>
+          Mover para Estoque
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-8">
@@ -680,263 +768,234 @@ function SalesPageContent() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-100">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 table-fixed">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
-                  Data
-                </th>
-                <th className="hidden md:table-cell px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
-                  Entrega
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
-                  Descrição
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
-                  Valor
-                </th>
-                <th
-                  className={`hidden md:table-cell px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider transition-opacity duration-300 ${hideProfit ? "opacity-0" : "opacity-100"}`}
+      {filteredSales.length > 0 ? (
+        <>
+          <div className="md:hidden space-y-4">
+            {filteredSales.map((s) => (
+              <div
+                key={s.id}
+                className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Venda em {formatDisplayDate(s.saleDate)}
+                    </p>
+                    <h3 className="mt-1 text-base font-bold text-gray-900 wrap-break-word">
+                      {s.description}
+                    </h3>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Entrega: {formatDisplayDate(s.deliveryDate)}
+                    </p>
+                  </div>
+                  {s.incidents && s.incidents.length > 0 && (
+                    <button
+                      onClick={() => setShowIncidentsModal(s)}
+                      className="shrink-0 text-yellow-500 hover:text-yellow-600 transition-colors"
+                      title="Ver ocorrências de impressão"
+                    >
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                        ></path>
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
+                <div
+                  className={`grid gap-3 ${hideProfit ? "grid-cols-1" : "grid-cols-2"}`}
                 >
-                  Lucro
-                </th>
-                <th className="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">
-                  Ações
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredSales.map((s) => (
-                <Fragment key={s.id}>
-                  <tr
-                    onClick={() => toggleExpand(s.id)}
-                    className={`cursor-pointer transition-colors ${expandedSaleId === s.id ? "bg-purple-50" : "hover:bg-gray-50"}`}
-                  >
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {s.saleDate
-                        ? new Date(s.saleDate).toLocaleDateString("pt-BR")
-                        : "-"}
-                    </td>
-                    <td className="hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {s.deliveryDate
-                        ? new Date(s.deliveryDate).toLocaleDateString("pt-BR")
-                        : "-"}
-                    </td>
-                    <td className="px-6 py-4 text-sm font-medium text-gray-900 flex items-center gap-2 min-w-0">
-                      {expandedSaleId === s.id ? (
-                        <svg
-                          className="w-4 h-4 text-brand-purple"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d="M19 9l-7 7-7-7"
-                          ></path>
-                        </svg>
-                      ) : (
-                        <svg
-                          className="w-4 h-4 text-gray-400"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d="M9 5l7 7-7 7"
-                          ></path>
-                        </svg>
-                      )}
-                      <div className="flex-1 min-w-0 max-w-[260px] overflow-x-auto whitespace-nowrap">
-                        {s.description}
-                      </div>
-                      {s.incidents && s.incidents.length > 0 && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setShowIncidentsModal(s);
-                          }}
-                          className="ml-2 text-yellow-500 hover:text-yellow-600 transition-colors"
-                          title="Ver ocorrências de impressão"
-                        >
-                          <svg
-                            className="w-5 h-5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="2"
-                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                            ></path>
-                          </svg>
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                      Valor
+                    </p>
+                    <p className="mt-1 text-xl font-bold text-gray-900">
                       R$ {s.saleValue.toFixed(2)}
-                    </td>
-                    <td
-                      className={`hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-green-600 font-bold transition-opacity duration-300 ${hideProfit ? "opacity-0" : "opacity-100"}`}
+                    </p>
+                  </div>
+                  {!hideProfit && (
+                    <div className="rounded-xl border border-green-100 bg-green-50 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-green-700">
+                        Lucro
+                      </p>
+                      <p className="mt-1 text-xl font-bold text-green-700">
+                        R$ {s.profit.toFixed(2)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleStatus(s, "isPrintConcluded")}
+                    className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isPrintConcluded ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800"}`}
+                    title="Alternar impresso"
+                  >
+                    {s.isPrintConcluded ? "Impresso" : "Pendente"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleStatus(s, "isDelivered")}
+                    className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isDelivered ? "bg-purple-100 text-purple-800" : "bg-yellow-100 text-yellow-800"}`}
+                    title="Alternar entregue"
+                  >
+                    {s.isDelivered ? "Entregue" : "A Enviar"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleStatus(s, "isPaid")}
+                    className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isPaid ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
+                    title="Alternar pago"
+                  >
+                    {s.isPaid ? "Pago" : "Não Pago"}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Link
+                    href={buildEditHref(s.id)}
+                    className="flex items-center justify-center rounded-lg border border-brand-purple/20 bg-brand-purple/5 px-3 py-2 text-sm font-semibold text-brand-purple"
+                  >
+                    Editar
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(s.id)}
+                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700"
+                  >
+                    Excluir
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleClone(s)}
+                    className="col-span-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700"
+                  >
+                    Clonar venda
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => toggleExpand(s.id)}
+                  className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-700"
+                >
+                  {expandedSaleId === s.id
+                    ? "Ocultar detalhes"
+                    : "Ver detalhes"}
+                </button>
+
+                {expandedSaleId === s.id && (
+                  <div className="rounded-xl border border-purple-100 bg-purple-50 p-4">
+                    {renderExpandedSaleDetails(s)}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden md:block bg-white rounded-xl shadow-lg overflow-hidden border border-gray-100">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 table-fixed">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                      Data
+                    </th>
+                    <th className="hidden md:table-cell px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                      Entrega
+                    </th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                      Descrição
+                    </th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                      Valor
+                    </th>
+                    <th
+                      className={`hidden md:table-cell px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider transition-opacity duration-300 ${hideProfit ? "opacity-0" : "opacity-100"}`}
                     >
-                      R$ {s.profit.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-center space-x-2">
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleStatus(s, "isPrintConcluded");
-                        }}
-                        className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isPrintConcluded ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800"}`}
-                        title="Alternar impresso"
-                      >
-                        {s.isPrintConcluded ? "Impresso" : "Pendente"}
-                      </span>
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleStatus(s, "isDelivered");
-                        }}
-                        className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isDelivered ? "bg-purple-100 text-purple-800" : "bg-yellow-100 text-yellow-800"}`}
-                        title="Alternar entregue"
-                      >
-                        {s.isDelivered ? "Entregue" : "A Enviar"}
-                      </span>
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleStatus(s, "isPaid");
-                        }}
-                        className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isPaid ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
-                        title="Alternar pago"
-                      >
-                        {s.isPaid ? "Pago" : "Não Pago"}
-                      </span>
-                    </td>
-                    <td
-                      className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleClone(s);
-                        }}
-                        className="mr-3 text-gray-400 hover:text-brand-purple transition-colors"
-                        title="Clonar venda"
-                      >
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d="M8 7a2 2 0 012-2h7a2 2 0 012 2v9a2 2 0 01-2 2h-7a2 2 0 01-2-2V7zm-4 4a2 2 0 012-2h1v7a2 2 0 002 2h5v1a2 2 0 01-2 2H6a2 2 0 01-2-2v-8z"
-                          ></path>
-                        </svg>
-                      </button>
-                      <Link
-                        href={buildEditHref(s.id)}
-                        className="text-brand-purple hover:text-purple-900 mr-4"
-                      >
-                        Editar
-                      </Link>
-                      <button
-                        onClick={() => handleDelete(s.id)}
-                        className="text-red-600 hover:text-red-900"
-                      >
-                        Excluir
-                      </button>
-                    </td>
+                      Lucro
+                    </th>
+                    <th className="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">
+                      Ações
+                    </th>
                   </tr>
-                  {expandedSaleId === s.id && (
-                    <tr className="bg-purple-50">
-                      <td colSpan={7} className="px-6 py-4">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-700">
-                          <div>
-                            <p className="font-bold text-brand-purple mb-1">
-                              Cliente
-                            </p>
-                            <p>{getClientName(s.clientId)}</p>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredSales.map((s) => (
+                    <Fragment key={s.id}>
+                      <tr
+                        onClick={() => toggleExpand(s.id)}
+                        className={`cursor-pointer transition-colors ${expandedSaleId === s.id ? "bg-purple-50" : "hover:bg-gray-50"}`}
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {s.saleDate
+                            ? new Date(s.saleDate).toLocaleDateString("pt-BR")
+                            : "-"}
+                        </td>
+                        <td className="hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {s.deliveryDate
+                            ? new Date(s.deliveryDate).toLocaleDateString(
+                                "pt-BR",
+                              )
+                            : "-"}
+                        </td>
+                        <td className="px-6 py-4 text-sm font-medium text-gray-900 flex items-center gap-2 min-w-0">
+                          {expandedSaleId === s.id ? (
+                            <svg
+                              className="w-4 h-4 text-brand-purple"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="2"
+                                d="M19 9l-7 7-7-7"
+                              ></path>
+                            </svg>
+                          ) : (
+                            <svg
+                              className="w-4 h-4 text-gray-400"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="2"
+                                d="M9 5l7 7-7 7"
+                              ></path>
+                            </svg>
+                          )}
+                          <div className="flex-1 min-w-0 max-w-65 overflow-x-auto whitespace-nowrap">
+                            {s.description}
                           </div>
-                          <div>
-                            <p className="font-bold text-brand-purple mb-1">
-                              Filamento
-                            </p>
-                            <p>{getFilamentName(s.filamentId)}</p>
-                          </div>
-                          <div>
-                            <p className="font-bold text-brand-purple mb-1">
-                              Link do Produto
-                            </p>
-                            {s.productLink ? (
-                              <a
-                                href={s.productLink}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:underline truncate block"
-                              >
-                                {s.productLink}
-                              </a>
-                            ) : (
-                              <span className="text-gray-400">
-                                Não informado
-                              </span>
-                            )}
-                          </div>
-                          <div>
-                            <p className="font-bold text-brand-purple mb-1">
-                              Qualidade
-                            </p>
-                            <p>{s.printQuality || "Padrão"}</p>
-                          </div>
-                          <div>
-                            <p className="font-bold text-brand-purple mb-1">
-                              Tempo Estimado
-                            </p>
-                            <p>{s.designPrintTime || "-"}</p>
-                          </div>
-                          <div>
-                            <p className="font-bold text-brand-purple mb-1">
-                              Massa / Custo
-                            </p>
-                            <p>
-                              {s.massGrams}g / R$ {s.cost?.toFixed(2)}
-                            </p>
-                          </div>
-                          <div className="md:col-span-3 flex justify-end mt-4 pt-4 border-t border-purple-100 gap-3">
+                          {s.incidents && s.incidents.length > 0 && (
                             <button
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setShowIncidentsModal(s);
-                                setIsAddingIncident(true);
                               }}
-                              className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                              className="ml-2 text-yellow-500 hover:text-yellow-600 transition-colors"
+                              title="Ver ocorrências de impressão"
                             >
                               <svg
-                                className="w-4 h-4"
+                                className="w-5 h-5"
                                 fill="none"
                                 stroke="currentColor"
                                 viewBox="0 0 24 24"
@@ -948,40 +1007,111 @@ function SalesPageContent() {
                                   d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
                                 ></path>
                               </svg>
-                              Registrar Ocorrência
                             </button>
-                            <button
-                              onClick={() => handleMoveToStock(s.id)}
-                              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          R$ {s.saleValue.toFixed(2)}
+                        </td>
+                        <td
+                          className={`hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-green-600 font-bold transition-opacity duration-300 ${hideProfit ? "opacity-0" : "opacity-100"}`}
+                        >
+                          R$ {s.profit.toFixed(2)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-center space-x-2">
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleStatus(s, "isPrintConcluded");
+                            }}
+                            className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isPrintConcluded ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800"}`}
+                            title="Alternar impresso"
+                          >
+                            {s.isPrintConcluded ? "Impresso" : "Pendente"}
+                          </span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleStatus(s, "isDelivered");
+                            }}
+                            className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isDelivered ? "bg-purple-100 text-purple-800" : "bg-yellow-100 text-yellow-800"}`}
+                            title="Alternar entregue"
+                          >
+                            {s.isDelivered ? "Entregue" : "A Enviar"}
+                          </span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleStatus(s, "isPaid");
+                            }}
+                            className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isPaid ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
+                            title="Alternar pago"
+                          >
+                            {s.isPaid ? "Pago" : "Não Pago"}
+                          </span>
+                        </td>
+                        <td
+                          className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleClone(s);
+                            }}
+                            className="mr-3 text-gray-400 hover:text-brand-purple transition-colors"
+                            title="Clonar venda"
+                          >
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
                             >
-                              <svg
-                                className="w-4 h-4"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth="2"
-                                  d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
-                                ></path>
-                              </svg>
-                              Mover para Estoque
-                            </button>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {sales.length === 0 && (
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="2"
+                                d="M8 7a2 2 0 012-2h7a2 2 0 012 2v9a2 2 0 01-2 2h-7a2 2 0 01-2-2V7zm-4 4a2 2 0 012-2h1v7a2 2 0 002 2h5v1a2 2 0 01-2 2H6a2 2 0 01-2-2v-8z"
+                              ></path>
+                            </svg>
+                          </button>
+                          <Link
+                            href={buildEditHref(s.id)}
+                            className="text-brand-purple hover:text-purple-900 mr-4"
+                          >
+                            Editar
+                          </Link>
+                          <button
+                            onClick={() => handleDelete(s.id)}
+                            className="text-red-600 hover:text-red-900"
+                          >
+                            Excluir
+                          </button>
+                        </td>
+                      </tr>
+                      {expandedSaleId === s.id && (
+                        <tr className="bg-purple-50">
+                          <td colSpan={7} className="px-6 py-4">
+                            {renderExpandedSaleDetails(s)}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      ) : (
         <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-300">
           <svg
             className="mx-auto h-12 w-12 text-gray-400"
@@ -997,10 +1127,14 @@ function SalesPageContent() {
             ></path>
           </svg>
           <h3 className="mt-2 text-sm font-medium text-gray-900">
-            Nenhuma venda registrada
+            {hasActiveFilters
+              ? "Nenhuma venda encontrada"
+              : "Nenhuma venda registrada"}
           </h3>
           <p className="mt-1 text-sm text-gray-500">
-            Comece importando uma planilha ou criando uma nova venda.
+            {hasActiveFilters
+              ? "Ajuste os filtros ou limpe a busca para ver mais resultados."
+              : "Comece importando uma planilha ou criando uma nova venda."}
           </p>
         </div>
       )}

@@ -1,5 +1,9 @@
 "use client";
 import { useDialog } from "@/context/DialogContext";
+import {
+    getResponsiveCalendarConfig,
+    useCompactCalendarMode,
+} from "@/utils/calendar";
 import { parseDurationToHours } from "@/utils/time";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
@@ -99,7 +103,6 @@ const PRINT_START_HOUR = 8;
 const LAST_START_HOUR = 23;
 const DELIVERY_CUTOFF_HOUR = 18;
 const GAP_MINUTES = 20;
-
 function isValidObjectId(value?: string) {
   return typeof value === "string" && value.length === 24;
 }
@@ -371,6 +374,7 @@ export default function PrintScheduleCalendar({
 }: PrintScheduleCalendarProps) {
   const router = useRouter();
   const { showAlert, showConfirm } = useDialog();
+  const isCompactCalendar = useCompactCalendarMode();
   const [queue, setQueue] = useState<QueueSale[]>([]);
   const [currentPrint, setCurrentPrint] = useState<QueueSale | null>(null);
   const [serviceSales, setServiceSales] = useState<QueueSale[]>([]);
@@ -458,6 +462,14 @@ export default function PrintScheduleCalendar({
   const showModeToggle = shouldShowDesign && shouldShowPaint && !readOnly;
   const showServiceBadge = !readOnly && !showModeToggle;
   const showResponsibleSummary = !readOnly;
+  const {
+    buttonText: calendarButtonText,
+    dayHeaderFormat: calendarDayHeaderFormat,
+    headerToolbar: calendarToolbar,
+    initialView: calendarInitialView,
+    titleFormat: calendarTitleFormat,
+    wrapperClassName: calendarWrapperClassName,
+  } = getResponsiveCalendarConfig(isCompactCalendar);
   const serviceModeLabel = serviceMode === "design" ? "Design" : "Pintura";
   const serviceBadgeClass =
     serviceMode === "design"
@@ -2165,15 +2177,15 @@ export default function PrintScheduleCalendar({
 
   return (
     <div
-      className={`grid grid-cols-1 ${shouldSplit ? "xl:grid-cols-2" : ""} gap-6`}
+      className={`grid grid-cols-1 ${shouldSplit ? "xl:grid-cols-2" : ""} gap-4 md:gap-6`}
     >
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-        <div className="flex items-center justify-between mb-4">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 md:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
           <div>
-            <h3 className="text-lg font-bold text-gray-800">
+            <h3 className="text-base md:text-lg font-bold text-gray-800">
               Agenda de impressao
             </h3>
-            <p className="text-sm text-gray-500">
+            <p className="text-xs md:text-sm text-gray-500">
               Sugestao baseada na fila e no horario de trabalho.
             </p>
           </div>
@@ -2183,20 +2195,20 @@ export default function PrintScheduleCalendar({
         </div>
 
         {showSuggestionSummary && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+            <div className="bg-gray-50 rounded-xl border border-gray-100 p-3 md:p-4">
               <p className="text-xs text-gray-500 uppercase font-semibold mb-1">
                 Inicio sugerido
               </p>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-xl md:text-2xl font-bold text-gray-900">
                 {suggestedStartLabel}
               </p>
             </div>
-            <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
+            <div className="bg-gray-50 rounded-xl border border-gray-100 p-3 md:p-4">
               <p className="text-xs text-gray-500 uppercase font-semibold mb-1">
                 Entrega sugerida
               </p>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-xl md:text-2xl font-bold text-gray-900">
                 {suggestedDeliveryLabel}
               </p>
             </div>
@@ -2264,20 +2276,21 @@ export default function PrintScheduleCalendar({
           <div className="mt-3 text-xs text-red-600">{selectionError}</div>
         )}
 
-        <div className="mt-4">
+        <div className={`mt-4 ${calendarWrapperClassName}`}>
           <FullCalendar
+            key={`print-calendar-${isCompactCalendar ? "compact" : "default"}`}
             plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
-            initialView="timeGridWeek"
-            headerToolbar={{
-              left: "prev,next today",
-              center: "title",
-              right: "timeGridWeek,timeGridDay",
-            }}
+            initialView={calendarInitialView}
+            headerToolbar={calendarToolbar}
+            buttonText={calendarButtonText}
+            titleFormat={calendarTitleFormat}
+            dayHeaderFormat={calendarDayHeaderFormat}
             height="auto"
             allDaySlot={false}
             selectable={!readOnly && Boolean(onChange)}
             selectMirror
             dayMaxEvents
+            stickyHeaderDates
             editable={dragEnabled}
             eventDurationEditable={false}
             slotMinTime="08:00:00"
@@ -2305,13 +2318,15 @@ export default function PrintScheduleCalendar({
       </div>
 
       {shouldShowServices && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 md:p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
             <div>
-              <h3 className="text-lg font-bold text-gray-800">
+              <h3 className="text-base md:text-lg font-bold text-gray-800">
                 Agenda de servicos
               </h3>
-              <p className="text-sm text-gray-500">{serviceDescription}</p>
+              <p className="text-xs md:text-sm text-gray-500">
+                {serviceDescription}
+              </p>
               {showResponsibleSummary && (
                 <div className="text-xs text-gray-500 mt-1 space-y-1">
                   {shouldShowDesign && (
@@ -2388,20 +2403,21 @@ export default function PrintScheduleCalendar({
             </div>
           )}
 
-          <div className="mt-4">
+          <div className={`mt-4 ${calendarWrapperClassName}`}>
             <FullCalendar
+              key={`service-calendar-${isCompactCalendar ? "compact" : "default"}`}
               plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
-              initialView="timeGridWeek"
-              headerToolbar={{
-                left: "prev,next today",
-                center: "title",
-                right: "timeGridWeek,timeGridDay",
-              }}
+              initialView={calendarInitialView}
+              headerToolbar={calendarToolbar}
+              buttonText={calendarButtonText}
+              titleFormat={calendarTitleFormat}
+              dayHeaderFormat={calendarDayHeaderFormat}
               height="auto"
               allDaySlot={false}
               selectable={canSelectService}
               selectMirror
               dayMaxEvents
+              stickyHeaderDates
               editable={dragEnabled}
               eventDurationEditable={false}
               slotMinTime="00:00:00"
@@ -2424,7 +2440,7 @@ export default function PrintScheduleCalendar({
       {hoverCard && portalRoot
         ? createPortal(
             <div
-              className="fixed z-[9999]"
+              className="fixed z-9999"
               style={{ left: hoverCard.x, top: hoverCard.y }}
             >
               <div
