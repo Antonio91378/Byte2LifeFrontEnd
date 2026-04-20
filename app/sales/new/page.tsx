@@ -5,8 +5,8 @@ import PrintScheduleCalendar from "@/components/PrintScheduleCalendar";
 import { DETAIL_LEVELS } from "@/constants/printQuality";
 import { useDialog } from "@/context/DialogContext";
 import {
-  formatSaleProfitPercentage,
-  getSaleProfitValue,
+    formatSaleProfitPercentage,
+    getSaleProfitValue,
 } from "@/utils/saleFinancials";
 import { parseDurationToHours } from "@/utils/time";
 import axios from "axios";
@@ -277,7 +277,9 @@ function NewSaleContent() {
       })
     : "Nenhum horário selecionado";
   const mobileAdvancedSummary = `${formData.printQuality} • ${printStatusLabels[formData.printStatus] ?? formData.printStatus}`;
-  const productionCostValue = Number(formData.productionCost || formData.baseCost || 0);
+  const productionCostValue = Number(
+    formData.productionCost || formData.baseCost || 0,
+  );
 
   useEffect(() => {
     if (formData.filamentId === "") return;
@@ -385,7 +387,8 @@ function NewSaleContent() {
 
   useEffect(() => {
     setFormData((prev) => {
-      const totalCost = parseNumericValue(prev.baseCost) + parseNumericValue(prev.shippingCost);
+      const totalCost =
+        parseNumericValue(prev.baseCost) + parseNumericValue(prev.shippingCost);
       return prev.cost === totalCost ? prev : { ...prev, cost: totalCost };
     });
   }, [formData.baseCost, formData.shippingCost]);
@@ -1045,53 +1048,57 @@ function NewSaleContent() {
             </div>
 
             {(!isMobile || showMobileCostDetails) &&
-              (formData.costDetails || formData.shippingCost > 0 || formData.cost > 0) && (
-              <div className="space-y-3">
-                {formData.costDetails && (
-                  <>
-                    <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
-                      <span>Material</span>
-                      <span className="font-medium">
-                        R$ {(formData.costDetails.materialCost || 0).toFixed(2)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
-                      <span>Energia</span>
-                      <span className="font-medium">
-                        R$ {(formData.costDetails.energyCost || 0).toFixed(2)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
-                      <span>Máquina (Depreciação)</span>
-                      <span className="font-medium">
-                        R$ {(formData.costDetails.machineCost || 0).toFixed(2)}
-                      </span>
-                    </div>
-                  </>
-                )}
-                <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
-                  <span>Frete</span>
-                  <span className="font-medium">
-                    R$ {(formData.shippingCost || 0).toFixed(2)}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm text-gray-800 font-semibold border-b border-gray-200 pb-2">
-                  <span>Custo Total</span>
-                  <span>R$ {(formData.cost || 0).toFixed(2)}</span>
-                </div>
-
-                {formData.costDetails && (
-                  <div className="mt-3 pt-2">
-                    <p className="text-xs font-bold text-gray-700 mb-1">
-                      Cálculo da Margem:
-                    </p>
-                    <pre className="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-white p-2 rounded border border-gray-100">
-                      {formData.costDetails.breakdown}
-                    </pre>
+              (formData.costDetails ||
+                formData.shippingCost > 0 ||
+                formData.cost > 0) && (
+                <div className="space-y-3">
+                  {formData.costDetails && (
+                    <>
+                      <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
+                        <span>Material</span>
+                        <span className="font-medium">
+                          R${" "}
+                          {(formData.costDetails.materialCost || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
+                        <span>Energia</span>
+                        <span className="font-medium">
+                          R$ {(formData.costDetails.energyCost || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
+                        <span>Máquina (Depreciação)</span>
+                        <span className="font-medium">
+                          R${" "}
+                          {(formData.costDetails.machineCost || 0).toFixed(2)}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                  <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
+                    <span>Frete</span>
+                    <span className="font-medium">
+                      R$ {(formData.shippingCost || 0).toFixed(2)}
+                    </span>
                   </div>
-                )}
-              </div>
-            )}
+                  <div className="flex justify-between text-sm text-gray-800 font-semibold border-b border-gray-200 pb-2">
+                    <span>Custo Total</span>
+                    <span>R$ {(formData.cost || 0).toFixed(2)}</span>
+                  </div>
+
+                  {formData.costDetails && (
+                    <div className="mt-3 pt-2">
+                      <p className="text-xs font-bold text-gray-700 mb-1">
+                        Cálculo da Margem:
+                      </p>
+                      <pre className="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-white p-2 rounded border border-gray-100">
+                        {formData.costDetails.breakdown}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
           </div>
 
           {/* Sale Value & Profit */}
@@ -1134,7 +1141,8 @@ function NewSaleContent() {
                 </span>
               </div>
               <p className="mt-2 text-xs text-gray-500">
-                Margem calculada sobre o custo de producao. O frete fica fora da base percentual.
+                Margem calculada sobre o custo de producao. O frete fica fora da
+                base percentual.
               </p>
             </div>
           </div>

@@ -63,7 +63,9 @@ export function getSaleProfitValue(input: SaleFinancialInput): number {
   return toSaleNumber(input.saleValue) - getSaleTotalCost(input);
 }
 
-export function getSaleProfitPercentageValue(input: SaleFinancialInput): number {
+export function getSaleProfitPercentageValue(
+  input: SaleFinancialInput,
+): number {
   const baseCost = getSaleBaseCost(input);
   if (baseCost <= 0) {
     return 0;
