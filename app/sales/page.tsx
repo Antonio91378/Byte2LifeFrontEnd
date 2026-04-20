@@ -48,6 +48,7 @@ interface Sale {
   printQuality?: string;
   massGrams?: number;
   cost?: number;
+  shippingCost?: number;
   designPrintTime?: string;
   incidents?: any[];
 }
@@ -398,10 +399,15 @@ function SalesPageContent() {
         <p>{sale.designPrintTime || "-"}</p>
       </div>
       <div>
-        <p className="font-bold text-brand-purple mb-1">Massa / Custo</p>
+        <p className="font-bold text-brand-purple mb-1">Massa / Custo Total</p>
         <p>
           {sale.massGrams}g / R$ {sale.cost?.toFixed(2)}
         </p>
+        {Number(sale.shippingCost || 0) > 0 && (
+          <p className="mt-1 text-xs text-gray-500">
+            Frete: R$ {(sale.shippingCost || 0).toFixed(2)}
+          </p>
+        )}
       </div>
       <div className="md:col-span-3 flex flex-col sm:flex-row sm:justify-end mt-4 pt-4 border-t border-purple-100 gap-3">
         <button

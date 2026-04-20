@@ -4,6 +4,10 @@ import FilamentSelect from "@/components/FilamentSelect";
 import PrintScheduleCalendar from "@/components/PrintScheduleCalendar";
 import { DETAIL_LEVELS } from "@/constants/printQuality";
 import { useDialog } from "@/context/DialogContext";
+import {
+  formatSaleProfitPercentage,
+  getSaleProfitValue,
+} from "@/utils/saleFinancials";
 import { parseDurationToHours } from "@/utils/time";
 import axios from "axios";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -65,11 +69,12 @@ function NewSaleContent() {
   const [showMobileAdvanced, setShowMobileAdvanced] = useState(false);
   const [showMobileCostDetails, setShowMobileCostDetails] = useState(false);
 
-  const parseMassGrams = (value: string | number) => {
+  const parseNumericValue = (value: string | number) => {
     const normalized = String(value ?? "").replace(",", ".");
     const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : 0;
   };
+  const parseMassGrams = (value: string | number) => parseNumericValue(value);
   const [filaments, setFilaments] = useState<Filament[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [serviceProviders, setServiceProviders] = useState<ServiceProvider[]>(
@@ -83,6 +88,7 @@ function NewSaleContent() {
     printQuality: "Normal",
     massGrams: 0,
     cost: 0,
+    shippingCost: 0,
     saleValue: 0,
     profit: 0,
     profitPercentage: "",
@@ -106,6 +112,7 @@ function NewSaleContent() {
     paintResponsible: "",
     paintStartConfirmedAt: "",
     productionCost: 0,
+    baseCost: 0,
     nozzleDiameter: "",
     layerHeight: "",
     printStartConfirmedAt: "",
@@ -194,7 +201,8 @@ function NewSaleContent() {
             description: stockItem.description,
             filamentId: stockItem.filamentId,
             massGrams: stockItem.weightGrams,
-            cost: stockItem.cost, // This might be overwritten by calculation, but that's fine as it should match
+            baseCost: stockItem.productionCost || 0,
+            productionCost: stockItem.productionCost || 0,
             designPrintTime: stockItem.printTime,
             printQuality: quality,
             printStatus: "Concluded", // Stock items are already printed
@@ -269,6 +277,7 @@ function NewSaleContent() {
       })
     : "Nenhum horário selecionado";
   const mobileAdvancedSummary = `${formData.printQuality} • ${printStatusLabels[formData.printStatus] ?? formData.printStatus}`;
+  const productionCostValue = Number(formData.productionCost || formData.baseCost || 0);
 
   useEffect(() => {
     if (formData.filamentId === "") return;
@@ -315,7 +324,7 @@ function NewSaleContent() {
 
         setFormData((prev) => ({
           ...prev,
-          cost: res.data.materialCost, // Keep using material cost for "Custo Material" field if that's what it means, OR switch to TotalProductionCost
+          baseCost: res.data.totalProductionCost,
           productionCost: res.data.totalProductionCost,
           saleValue: res.data.totalPrice,
           nozzleDiameter: res.data.nozzleDiameter,
@@ -364,22 +373,37 @@ function NewSaleContent() {
         if (
           name === "paintTimeHours" ||
           name === "designTimeHours" ||
-          name === "designValue"
+          name === "designValue" ||
+          name === "shippingCost"
         ) {
-          return { ...prev, [name]: Number(value) };
+          return { ...prev, [name]: parseNumericValue(value) };
         }
         return { ...prev, [name]: value };
       });
     }
   };
 
+  useEffect(() => {
+    setFormData((prev) => {
+      const totalCost = parseNumericValue(prev.baseCost) + parseNumericValue(prev.shippingCost);
+      return prev.cost === totalCost ? prev : { ...prev, cost: totalCost };
+    });
+  }, [formData.baseCost, formData.shippingCost]);
+
   // Auto-calculate profit (UI only, based on current form values)
   useEffect(() => {
-    const profit = Number(formData.saleValue) - Number(formData.cost);
-    const profitPercent =
-      formData.cost > 0
-        ? ((profit / Number(formData.cost)) * 100).toFixed(2) + "%"
-        : "0%";
+    const profit = getSaleProfitValue({
+      saleValue: formData.saleValue,
+      cost: formData.cost,
+      shippingCost: formData.shippingCost,
+      baseCost: formData.baseCost,
+    });
+    const profitPercent = formatSaleProfitPercentage({
+      saleValue: formData.saleValue,
+      cost: formData.cost,
+      shippingCost: formData.shippingCost,
+      baseCost: formData.baseCost,
+    });
 
     setFormData((prev) => ({
       ...prev,
@@ -392,8 +416,9 @@ function NewSaleContent() {
     e.preventDefault();
     setLoading(true);
     try {
+      const { baseCost, costDetails, ...saleData } = formData;
       const payload = {
-        ...formData,
+        ...saleData,
         massGrams: massGramsValue,
         printTimeHours: parseDurationToHours(formData.designPrintTime),
         deliveryDate:
@@ -951,13 +976,40 @@ function NewSaleContent() {
               )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 mb-4">
               <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
                 <span className="block text-xs text-gray-500 uppercase font-bold mb-1">
                   Custo de Produção
                 </span>
                 <span className="text-lg font-bold text-gray-800">
-                  R$ {(formData.productionCost || 0).toFixed(2)}
+                  R$ {productionCostValue.toFixed(2)}
+                </span>
+              </div>
+              <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+                <label
+                  htmlFor="sale-shipping-cost"
+                  className="block text-xs text-gray-500 uppercase font-bold mb-1"
+                >
+                  Frete
+                </label>
+                <input
+                  id="sale-shipping-cost"
+                  type="number"
+                  name="shippingCost"
+                  step="0.01"
+                  min="0"
+                  value={formData.shippingCost}
+                  onChange={handleChange}
+                  className="w-full text-sm font-medium text-gray-800 border-b border-gray-200 focus:border-brand-purple focus:outline-none"
+                  placeholder="0.00"
+                />
+              </div>
+              <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">
+                  Custo Total
+                </span>
+                <span className="text-lg font-bold text-gray-800">
+                  R$ {(formData.cost || 0).toFixed(2)}
                 </span>
               </div>
               <div
@@ -992,35 +1044,52 @@ function NewSaleContent() {
               </div>
             </div>
 
-            {formData.costDetails && (!isMobile || showMobileCostDetails) && (
+            {(!isMobile || showMobileCostDetails) &&
+              (formData.costDetails || formData.shippingCost > 0 || formData.cost > 0) && (
               <div className="space-y-3">
+                {formData.costDetails && (
+                  <>
+                    <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
+                      <span>Material</span>
+                      <span className="font-medium">
+                        R$ {(formData.costDetails.materialCost || 0).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
+                      <span>Energia</span>
+                      <span className="font-medium">
+                        R$ {(formData.costDetails.energyCost || 0).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
+                      <span>Máquina (Depreciação)</span>
+                      <span className="font-medium">
+                        R$ {(formData.costDetails.machineCost || 0).toFixed(2)}
+                      </span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
-                  <span>Material</span>
+                  <span>Frete</span>
                   <span className="font-medium">
-                    R$ {(formData.costDetails.materialCost || 0).toFixed(2)}
+                    R$ {(formData.shippingCost || 0).toFixed(2)}
                   </span>
                 </div>
-                <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
-                  <span>Energia</span>
-                  <span className="font-medium">
-                    R$ {(formData.costDetails.energyCost || 0).toFixed(2)}
-                  </span>
-                </div>
-                <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
-                  <span>Máquina (Depreciação)</span>
-                  <span className="font-medium">
-                    R$ {(formData.costDetails.machineCost || 0).toFixed(2)}
-                  </span>
+                <div className="flex justify-between text-sm text-gray-800 font-semibold border-b border-gray-200 pb-2">
+                  <span>Custo Total</span>
+                  <span>R$ {(formData.cost || 0).toFixed(2)}</span>
                 </div>
 
-                <div className="mt-3 pt-2">
-                  <p className="text-xs font-bold text-gray-700 mb-1">
-                    Cálculo da Margem:
-                  </p>
-                  <pre className="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-white p-2 rounded border border-gray-100">
-                    {formData.costDetails.breakdown}
-                  </pre>
-                </div>
+                {formData.costDetails && (
+                  <div className="mt-3 pt-2">
+                    <p className="text-xs font-bold text-gray-700 mb-1">
+                      Cálculo da Margem:
+                    </p>
+                    <pre className="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-white p-2 rounded border border-gray-100">
+                      {formData.costDetails.breakdown}
+                    </pre>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1064,6 +1133,9 @@ function NewSaleContent() {
                   {formData.profitPercentage}
                 </span>
               </div>
+              <p className="mt-2 text-xs text-gray-500">
+                Margem calculada sobre o custo de producao. O frete fica fora da base percentual.
+              </p>
             </div>
           </div>
         </div>
