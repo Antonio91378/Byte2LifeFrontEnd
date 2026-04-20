@@ -81,6 +81,8 @@ function SalesPageContent() {
   );
   const [isStatusFilterOpen, setIsStatusFilterOpen] = useState(false);
   const [filterClientId, setFilterClientId] = useState<string>("");
+  const [filterClientName, setFilterClientName] = useState("");
+  const [filterProductName, setFilterProductName] = useState("");
   const [showIncidentsModal, setShowIncidentsModal] = useState<Sale | null>(
     null,
   );
@@ -122,6 +124,14 @@ function SalesPageContent() {
     const nextFilterClientId = searchParams.get("filterClientId");
     if (nextFilterClientId !== null) {
       setFilterClientId(nextFilterClientId);
+    }
+    const nextFilterClientName = searchParams.get("filterClientName");
+    if (nextFilterClientName !== null) {
+      setFilterClientName(nextFilterClientName);
+    }
+    const nextFilterProductName = searchParams.get("filterProductName");
+    if (nextFilterProductName !== null) {
+      setFilterProductName(nextFilterProductName);
     }
     const nextPaymentStatus = searchParams.get("paymentStatus");
     if (nextPaymentStatus === "paid" || nextPaymentStatus === "unpaid") {
@@ -165,6 +175,19 @@ function SalesPageContent() {
     };
   }, [isStatusFilterOpen]);
 
+  useEffect(() => {
+    if (!filterClientId || filterClientName || clients.length === 0) {
+      return;
+    }
+
+    const selectedClient = clients.find(
+      (client) => client.id === filterClientId,
+    );
+    if (selectedClient) {
+      setFilterClientName(selectedClient.name);
+    }
+  }, [clients, filterClientId, filterClientName]);
+
   const toggleExpand = (id: string) => {
     setExpandedSaleId(expandedSaleId === id ? null : id);
   };
@@ -193,6 +216,21 @@ function SalesPageContent() {
 
   const togglePrintFilter = (value: "printed" | "pending") => {
     setPrintFilter((prev) => (prev === value ? "all" : value));
+  };
+
+  const handleClientFilterChange = (value: string) => {
+    setFilterClientName(value);
+
+    const normalizedValue = value.trim().toLowerCase();
+    if (!normalizedValue) {
+      setFilterClientId("");
+      return;
+    }
+
+    const exactMatch = clients.find(
+      (client) => client.name.trim().toLowerCase() === normalizedValue,
+    );
+    setFilterClientId(exactMatch?.id || "");
   };
 
   const handleMoveToStock = (id: string) => {
@@ -311,8 +349,24 @@ function SalesPageContent() {
   };
 
   const filteredSales = sales.filter((s) => {
-    // Filtro por cliente
-    if (filterClientId && s.clientId !== filterClientId) return false;
+    const normalizedClientFilter = filterClientName.trim().toLowerCase();
+    const normalizedProductFilter = filterProductName.trim().toLowerCase();
+
+    if (
+      filterClientId &&
+      !normalizedClientFilter &&
+      s.clientId !== filterClientId
+    ) {
+      return false;
+    }
+    if (normalizedClientFilter) {
+      const clientName = getClientName(s.clientId).toLowerCase();
+      if (!clientName.includes(normalizedClientFilter)) return false;
+    }
+    if (normalizedProductFilter) {
+      const description = (s.description || "").toLowerCase();
+      if (!description.includes(normalizedProductFilter)) return false;
+    }
     if (paymentFilter === "paid" && !s.isPaid) return false;
     if (paymentFilter === "unpaid" && s.isPaid) return false;
     if (deliveryFilter === "delivered" && !s.isDelivered) return false;
@@ -342,8 +396,14 @@ function SalesPageContent() {
   if (filterDate) {
     filterQuery.set("filterDate", filterDate);
   }
+  if (filterClientName) {
+    filterQuery.set("filterClientName", filterClientName);
+  }
   if (filterClientId) {
     filterQuery.set("filterClientId", filterClientId);
+  }
+  if (filterProductName) {
+    filterQuery.set("filterProductName", filterProductName);
   }
   if (paymentFilter !== "all") {
     filterQuery.set("paymentStatus", paymentFilter);
@@ -362,7 +422,9 @@ function SalesPageContent() {
       ? `/sales/${id}?${filterQuery.toString()}`
       : `/sales/${id}`;
   const hasActiveFilters =
-    Boolean(filterDate || filterClientId) || activeStatusFilters > 0;
+    Boolean(
+      filterDate || filterClientId || filterClientName || filterProductName,
+    ) || activeStatusFilters > 0;
   const formatDisplayDate = (value?: string) =>
     value ? new Date(value).toLocaleDateString("pt-BR") : "-";
   const renderExpandedSaleDetails = (sale: Sale) => (
@@ -496,19 +558,75 @@ function SalesPageContent() {
                 <option value="month">Mês</option>
               </select>
               <div className="hidden md:block h-4 w-px bg-gray-300 mx-1"></div>
-              <select
-                value={filterClientId || ""}
-                onChange={(e) => setFilterClientId(e.target.value)}
-                className="border-none text-sm text-gray-600 focus:ring-0 bg-transparent cursor-pointer font-medium"
-                style={{ minWidth: 120 }}
-              >
-                <option value="">Todos os Clientes</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2 min-w-0 w-full md:w-auto md:min-w-[180px]">
+                <input
+                  type="text"
+                  list="sales-client-filter-options"
+                  value={filterClientName}
+                  onChange={(e) => handleClientFilterChange(e.target.value)}
+                  placeholder="Cliente"
+                  className="border-0 p-0 text-sm text-gray-600 focus:ring-0 bg-transparent w-full font-medium"
+                />
+                {(filterClientName || filterClientId) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFilterClientName("");
+                      setFilterClientId("");
+                    }}
+                    className="text-gray-400 hover:text-red-500 transition-colors"
+                    title="Limpar cliente"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M6 18L18 6M6 6l12 12"
+                      ></path>
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              <div className="hidden md:block h-4 w-px bg-gray-300 mx-1"></div>
+
+              <div className="flex items-center gap-2 min-w-0 w-full md:w-auto md:min-w-[180px]">
+                <input
+                  type="text"
+                  value={filterProductName}
+                  onChange={(e) => setFilterProductName(e.target.value)}
+                  placeholder="Produto"
+                  className="border-0 p-0 text-sm text-gray-600 focus:ring-0 bg-transparent w-full font-medium"
+                />
+                {filterProductName && (
+                  <button
+                    type="button"
+                    onClick={() => setFilterProductName("")}
+                    className="text-gray-400 hover:text-red-500 transition-colors"
+                    title="Limpar produto"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M6 18L18 6M6 6l12 12"
+                      ></path>
+                    </svg>
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="hidden md:block h-4 w-px bg-gray-300 mx-1"></div>
@@ -544,6 +662,12 @@ function SalesPageContent() {
               )}
             </div>
           </div>
+
+          <datalist id="sales-client-filter-options">
+            {clients.map((client) => (
+              <option key={client.id} value={client.name} />
+            ))}
+          </datalist>
 
           <div className="relative" ref={filterMenuRef}>
             <button

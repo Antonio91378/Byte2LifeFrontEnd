@@ -155,9 +155,17 @@ function EditSaleContent({ params }: { params: Promise<{ id: string }> }) {
     if (filterDate) {
       params.set("filterDate", filterDate);
     }
+    const filterClientName = searchParams.get("filterClientName");
+    if (filterClientName) {
+      params.set("filterClientName", filterClientName);
+    }
     const filterClientId = searchParams.get("filterClientId");
     if (filterClientId) {
       params.set("filterClientId", filterClientId);
+    }
+    const filterProductName = searchParams.get("filterProductName");
+    if (filterProductName) {
+      params.set("filterProductName", filterProductName);
     }
     const paymentStatus = searchParams.get("paymentStatus");
     if (paymentStatus === "paid" || paymentStatus === "unpaid") {
@@ -1243,7 +1251,7 @@ function EditSaleContent({ params }: { params: Promise<{ id: string }> }) {
         <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 sm:gap-4 pt-6">
           <button
             type="button"
-            onClick={() => router.back()}
+            onClick={() => router.push(buildReturnToSalesUrl())}
             className="w-full sm:w-auto px-6 py-3 sm:py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
           >
             Cancelar
