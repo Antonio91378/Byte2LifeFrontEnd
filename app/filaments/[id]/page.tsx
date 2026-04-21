@@ -126,6 +126,65 @@ export default function EditFilamentPage({
     }
   };
 
+  const formatSaleDate = (date?: string) => {
+    return date
+      ? new Date(date).toLocaleDateString("pt-BR")
+      : "Data não informada";
+  };
+
+  const formatIncidentTimestamp = (timestamp?: string) => {
+    return timestamp
+      ? new Date(timestamp).toLocaleString("pt-BR")
+      : "Sem data";
+  };
+
+  const getSaleStatusLabel = (sale: Sale) => {
+    return sale.isPrintConcluded ? "Concluído" : sale.printStatus || "Pendente";
+  };
+
+  const getSaleStatusClassName = (sale: Sale) => {
+    return sale.isPrintConcluded
+      ? "bg-green-100 text-green-800"
+      : "bg-yellow-100 text-yellow-800";
+  };
+
+  const renderIncidents = (sale: Sale, compact = false) => {
+    if (!sale.incidents || sale.incidents.length === 0) {
+      return (
+        <span className="text-xs text-gray-400">Nenhuma falha registrada.</span>
+      );
+    }
+
+    return (
+      <div className={compact ? "max-h-44 space-y-3 overflow-y-auto pr-1" : "space-y-3"}>
+        {sale.incidents.map((incident, index) => (
+          <div
+            key={`${sale.id}-${incident.timestamp}-${index}`}
+            className="rounded-lg border border-amber-100 bg-amber-50/70 px-3 py-2"
+          >
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+              <span className="text-xs font-semibold text-amber-800">
+                {INCIDENT_REASONS[incident.reason] || incident.reason}
+              </span>
+              <span className="text-[11px] text-gray-500">
+                {formatIncidentTimestamp(incident.timestamp)}
+              </span>
+            </div>
+            <p className="mt-1 wrap-break-word text-xs text-gray-700">
+              {incident.comment || "Sem comentário adicional."}
+            </p>
+            {typeof incident.wastedFilamentGrams === "number" &&
+            incident.wastedFilamentGrams > 0 ? (
+              <p className="mt-1 text-[11px] font-medium text-amber-700">
+                Desperdício: {incident.wastedFilamentGrams} g
+              </p>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   if (loading) return <div className="text-center py-12">Carregando...</div>;
 
   return (
@@ -334,111 +393,134 @@ export default function EditFilamentPage({
           Histórico de Uso
         </h2>
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Venda
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Consumo (g)
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Valor Venda
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Falhas e Desperdício
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {sales.map((sale) => (
-                <tr key={sale.id}>
-                  <td className="px-6 py-4 text-sm text-gray-900">
-                    <div className="font-medium">{sale.description}</div>
-                    <div className="mt-1 text-xs text-gray-500">
-                      {sale.saleDate
-                        ? new Date(sale.saleDate).toLocaleDateString("pt-BR")
-                        : "Data não informada"}
+          <div className="divide-y divide-gray-200 md:hidden">
+            {sales.map((sale) => (
+              <article key={sale.id} className="space-y-4 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="wrap-break-word text-sm font-semibold text-gray-900">
+                      {sale.description}
+                    </h3>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {formatSaleDate(sale.saleDate)}
+                    </p>
+                  </div>
+                  <span
+                    className={`inline-flex shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${getSaleStatusClassName(sale)}`}
+                  >
+                    {getSaleStatusLabel(sale)}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-gray-50 px-3 py-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
+                      Consumo
+                    </p>
+                    <div className="mt-1 text-sm font-semibold text-gray-900">
+                      {sale.massGrams}g
                     </div>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-900 font-medium">
-                    <div>{sale.massGrams}g</div>
                     {typeof sale.wastedFilamentGrams === "number" &&
                     sale.wastedFilamentGrams > 0 ? (
                       <div className="mt-1 text-xs font-medium text-amber-700">
                         + {sale.wastedFilamentGrams}g desperdiçados
                       </div>
                     ) : null}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    R$ {sale.saleValue.toFixed(2)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span
-                      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${sale.isPrintConcluded ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}
-                    >
-                      {sale.isPrintConcluded
-                        ? "Concluído"
-                        : sale.printStatus || "Pendente"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
-                    {sale.incidents && sale.incidents.length > 0 ? (
-                      <div className="space-y-3">
-                        {sale.incidents.map((incident, index) => (
-                          <div
-                            key={`${sale.id}-${incident.timestamp}-${index}`}
-                            className="rounded-lg border border-amber-100 bg-amber-50/70 px-3 py-2"
-                          >
-                            <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                              <span className="text-xs font-semibold text-amber-800">
-                                {INCIDENT_REASONS[incident.reason] ||
-                                  incident.reason}
-                              </span>
-                              <span className="text-[11px] text-gray-500">
-                                {incident.timestamp
-                                  ? new Date(incident.timestamp).toLocaleString(
-                                      "pt-BR",
-                                    )
-                                  : "Sem data"}
-                              </span>
-                            </div>
-                            <p className="mt-1 text-xs text-gray-700">
-                              {incident.comment || "Sem comentário adicional."}
-                            </p>
-                            {typeof incident.wastedFilamentGrams === "number" &&
-                            incident.wastedFilamentGrams > 0 ? (
-                              <p className="mt-1 text-[11px] font-medium text-amber-700">
-                                Desperdício: {incident.wastedFilamentGrams} g
-                              </p>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-xs text-gray-400">
-                        Nenhuma falha registrada.
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {sales.length === 0 && (
+                  </div>
+
+                  <div className="rounded-lg bg-gray-50 px-3 py-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
+                      Valor venda
+                    </p>
+                    <div className="mt-1 text-sm font-semibold text-gray-900">
+                      R$ {sale.saleValue.toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
+                    Falhas e Desperdício
+                  </p>
+                  <div className="mt-3">{renderIncidents(sale, true)}</div>
+                </div>
+              </article>
+            ))}
+
+            {sales.length === 0 && (
+              <div className="px-6 py-4 text-center text-sm text-gray-500">
+                Nenhuma venda registrada com este filamento.
+              </div>
+            )}
+          </div>
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
                 <tr>
-                  <td
-                    colSpan={5}
-                    className="px-6 py-4 text-center text-sm text-gray-500"
-                  >
-                    Nenhuma venda registrada com este filamento.
-                  </td>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Venda
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Consumo (g)
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Valor Venda
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Falhas e Desperdício
+                  </th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {sales.map((sale) => (
+                  <tr key={sale.id}>
+                    <td className="px-6 py-4 text-sm text-gray-900">
+                      <div className="font-medium">{sale.description}</div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        {formatSaleDate(sale.saleDate)}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 font-medium">
+                      <div>{sale.massGrams}g</div>
+                      {typeof sale.wastedFilamentGrams === "number" &&
+                      sale.wastedFilamentGrams > 0 ? (
+                        <div className="mt-1 text-xs font-medium text-amber-700">
+                          + {sale.wastedFilamentGrams}g desperdiçados
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      R$ {sale.saleValue.toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span
+                        className={`inline-flex rounded-full px-2 text-xs leading-5 font-semibold ${getSaleStatusClassName(sale)}`}
+                      >
+                        {getSaleStatusLabel(sale)}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-600">
+                      {renderIncidents(sale)}
+                    </td>
+                  </tr>
+                ))}
+                {sales.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-6 py-4 text-center text-sm text-gray-500"
+                    >
+                      Nenhuma venda registrada com este filamento.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
