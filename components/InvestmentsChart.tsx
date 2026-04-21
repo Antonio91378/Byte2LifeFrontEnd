@@ -31,14 +31,18 @@ interface ChartEntry {
 interface InvestmentsChartProps {
   sales: ChartEntry[];
   investments: ChartEntry[];
-  month: string;
+  labels: string[];
+  summaryLabel: string;
+  title: string;
 }
 
 export default function InvestmentsChart({
   sales,
   investments,
-  month,
-}: InvestmentsChartProps) {
+  labels,
+  summaryLabel,
+  title,
+}: Readonly<InvestmentsChartProps>) {
   const totalSales = sales.reduce(
     (acc, item) => acc + (Number(item.value) || 0),
     0,
@@ -47,22 +51,6 @@ export default function InvestmentsChart({
     (acc, item) => acc + (Number(item.value) || 0),
     0,
   );
-
-  // Gera todos os dias do mês selecionado
-  function getAllDaysOfMonth(month: string) {
-    const [year, m] = month.split("-").map(Number);
-    const days: string[] = [];
-    const date = new Date(year, m - 1, 1);
-    while (date.getMonth() === m - 1) {
-      days.push(
-        `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`,
-      );
-      date.setDate(date.getDate() + 1);
-    }
-    return days;
-  }
-
-  const labels = getAllDaysOfMonth(month);
 
   const data = {
     labels,
@@ -105,7 +93,7 @@ export default function InvestmentsChart({
       },
       title: {
         display: true,
-        text: `Lucro x Investimentos - ${month}`,
+        text: title,
       },
       tooltip: {
         callbacks: {
@@ -133,7 +121,7 @@ export default function InvestmentsChart({
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-8">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-        <div className="text-sm text-gray-600">Resumo do mes</div>
+        <div className="text-sm text-gray-600">{summaryLabel}</div>
         <div className="flex flex-wrap gap-2">
           <span className="px-3 py-1 rounded-full bg-green-50 text-green-700 text-xs font-medium">
             Lucro:{" "}

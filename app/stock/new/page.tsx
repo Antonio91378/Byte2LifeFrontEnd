@@ -22,6 +22,7 @@ export default function NewStockItemPage() {
   const router = useRouter();
   const { showAlert } = useDialog();
   const [filaments, setFilaments] = useState<Filament[]>([]);
+  const [filamentsLoading, setFilamentsLoading] = useState(true);
   const [isTimeManual, setIsTimeManual] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -41,6 +42,7 @@ export default function NewStockItemPage() {
   });
 
   const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [costDetails, setCostDetails] = useState<{
     breakdown: string;
     nozzleDiameter: string;
@@ -52,10 +54,20 @@ export default function NewStockItemPage() {
   } | null>(null);
 
   useEffect(() => {
-    axios
-      .get("http://localhost:5000/api/filaments")
-      .then((res) => setFilaments(res.data))
-      .catch((err) => console.error(err));
+    const fetchFilaments = async () => {
+      setFilamentsLoading(true);
+
+      try {
+        const response = await axios.get("http://localhost:5000/api/filaments");
+        setFilaments(response.data);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setFilamentsLoading(false);
+      }
+    };
+
+    void fetchFilaments();
   }, []);
 
   // Calculate cost automatically when relevant fields change
@@ -178,6 +190,8 @@ export default function NewStockItemPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSaving(true);
+
     try {
       await axios.post("http://localhost:5000/api/stock", formData);
       await showAlert("Sucesso", "Item adicionado ao estoque!", "success");
@@ -185,6 +199,8 @@ export default function NewStockItemPage() {
     } catch (error) {
       console.error(error);
       showAlert("Erro", "Erro ao salvar item", "error");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -281,14 +297,36 @@ export default function NewStockItemPage() {
                   Filamento Utilizado
                 </label>
                 <FilamentSelect
+                  id="new-stock-filament-select"
                   filaments={filaments}
                   value={formData.filamentId}
                   onChange={(value) =>
                     setFormData({ ...formData, filamentId: value })
                   }
+                  loading={filamentsLoading}
+                  loadingMessage="Buscando filamentos cadastrados..."
+                  emptyMessage="Nenhum filamento cadastrado no momento."
                   placeholder="Selecione o filamento..."
                   showType
                 />
+                {filamentsLoading && (
+                  <div className="mt-2 flex items-center gap-2 text-sm text-brand-purple">
+                    <svg
+                      className="h-4 w-4 animate-spin"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      ></path>
+                    </svg>
+                    <span>Atualizando opções do backend...</span>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -667,7 +705,8 @@ export default function NewStockItemPage() {
           <div className="flex flex-col gap-3 pt-4">
             <button
               type="submit"
-              className="w-full py-3 bg-brand-purple text-white rounded-xl hover:bg-purple-800 transition-all shadow-md hover:shadow-lg font-medium flex items-center justify-center gap-2"
+              disabled={saving || uploading}
+              className="w-full py-3 bg-brand-purple text-white rounded-xl hover:bg-purple-800 transition-all shadow-md hover:shadow-lg font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <svg
                 className="w-5 h-5"
@@ -682,7 +721,7 @@ export default function NewStockItemPage() {
                   d="M5 13l4 4L19 7"
                 ></path>
               </svg>
-              Salvar Item
+              {saving ? "Salvando..." : "Salvar Item"}
             </button>
             <button
               type="button"

@@ -90,6 +90,7 @@ function NewSaleContent() {
   const [serviceProviders, setServiceProviders] = useState<ServiceProvider[]>(
     [],
   );
+  const [optionsLoading, setOptionsLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [existingAttachments, setExistingAttachments] = useState<
     SaleAttachment[]
@@ -330,6 +331,8 @@ function NewSaleContent() {
 
   useEffect(() => {
     const fetchData = async () => {
+      setOptionsLoading(true);
+
       try {
         const [filamentsRes, clientsRes, providersRes] = await Promise.all([
           axios.get("http://localhost:5000/api/filaments"),
@@ -374,6 +377,8 @@ function NewSaleContent() {
         }
       } catch (error) {
         console.error("Error fetching data:", error);
+      } finally {
+        setOptionsLoading(false);
       }
     };
     fetchData();
@@ -633,6 +638,33 @@ function NewSaleContent() {
         onSubmit={handleSubmit}
         className="bg-white p-3 md:p-8 rounded-xl shadow-sm border border-gray-100 space-y-5 md:space-y-6"
       >
+        {optionsLoading && (
+          <div className="rounded-xl border border-brand-purple/10 bg-brand-purple/5 px-4 py-3 text-sm text-brand-purple flex items-start gap-3">
+            <svg
+              className="mt-0.5 h-4 w-4 animate-spin shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              ></path>
+            </svg>
+            <div>
+              <p className="font-medium">
+                Carregando dados auxiliares da venda...
+              </p>
+              <p className="text-xs text-brand-purple/80">
+                Filamentos, clientes e prestadores serão liberados assim que o
+                backend responder.
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
           {/* Description */}
           <div className="col-span-1 md:col-span-2">
@@ -670,10 +702,18 @@ function NewSaleContent() {
               Filamento
             </label>
             <FilamentSelect
+              id="new-sale-filament-select"
               filaments={filteredFilaments}
               value={formData.filamentId}
               onChange={(value) =>
                 setFormData((prev) => ({ ...prev, filamentId: value }))
+              }
+              loading={optionsLoading}
+              loadingMessage="Buscando filamentos disponíveis..."
+              emptyMessage={
+                formData.massGrams > 0
+                  ? "Nenhum filamento compatível com a massa informada."
+                  : "Informe a massa para listar filamentos."
               }
               placeholder={
                 formData.massGrams > 0
@@ -695,9 +735,16 @@ function NewSaleContent() {
               name="clientId"
               value={formData.clientId}
               onChange={handleChange}
+              disabled={optionsLoading && clients.length === 0}
               className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
             >
-              <option value="">Selecione um cliente...</option>
+              <option value="">
+                {optionsLoading && clients.length === 0
+                  ? "Carregando clientes..."
+                  : clients.length === 0
+                    ? "Nenhum cliente cadastrado"
+                    : "Selecione um cliente..."}
+              </option>
               {clients.map((client) => (
                 <option key={client.id} value={client.id}>
                   {client.name || client.phoneNumber}
@@ -800,9 +847,16 @@ function NewSaleContent() {
                   name="designResponsible"
                   value={formData.designResponsible}
                   onChange={handleChange}
+                  disabled={optionsLoading && designerProviders.length === 0}
                   className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
                 >
-                  <option value="">Selecione um responsavel...</option>
+                  <option value="">
+                    {optionsLoading && designerProviders.length === 0
+                      ? "Carregando responsaveis..."
+                      : designerProviders.length === 0
+                        ? "Nenhum responsavel disponível"
+                        : "Selecione um responsavel..."}
+                  </option>
                   {!hasDesignOption && formData.designResponsible && (
                     <option value={formData.designResponsible}>
                       {formData.designResponsible}
@@ -856,9 +910,16 @@ function NewSaleContent() {
                   name="paintResponsible"
                   value={formData.paintResponsible}
                   onChange={handleChange}
+                  disabled={optionsLoading && painterProviders.length === 0}
                   className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
                 >
-                  <option value="">Selecione um responsavel...</option>
+                  <option value="">
+                    {optionsLoading && painterProviders.length === 0
+                      ? "Carregando responsaveis..."
+                      : painterProviders.length === 0
+                        ? "Nenhum responsavel disponível"
+                        : "Selecione um responsavel..."}
+                  </option>
                   {!hasPaintOption && formData.paintResponsible && (
                     <option value={formData.paintResponsible}>
                       {formData.paintResponsible}

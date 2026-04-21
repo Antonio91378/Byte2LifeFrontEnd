@@ -1,6 +1,7 @@
 "use client";
 
 import FilamentSelect from "@/components/FilamentSelect";
+import LoadingPanel from "@/components/LoadingPanel";
 import PrintScheduleCalendar from "@/components/PrintScheduleCalendar";
 import SaleAttachmentsPanel from "@/components/sale/SaleAttachmentsPanel";
 import { DETAIL_LEVELS } from "@/constants/printQuality";
@@ -67,7 +68,15 @@ export default function EditSalePage({
   readonly params: Promise<{ id: string }>;
 }) {
   return (
-    <Suspense fallback={<div>Carregando...</div>}>
+    <Suspense
+      fallback={
+        <LoadingPanel
+          compact
+          title="Preparando edição"
+          description="Carregando a venda e os dados auxiliares..."
+        />
+      }
+    >
       <EditSaleContent params={params} />
     </Suspense>
   );
@@ -95,7 +104,8 @@ function EditSaleContent({ params }: { params: Promise<{ id: string }> }) {
   const [serviceProviders, setServiceProviders] = useState<ServiceProvider[]>(
     [],
   );
-  const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [existingAttachments, setExistingAttachments] = useState<
     SaleAttachment[]
   >([]);
@@ -421,7 +431,7 @@ function EditSaleContent({ params }: { params: Promise<{ id: string }> }) {
         console.error("Error fetching data:", error);
         await showAlert("Erro", "Erro ao carregar dados da venda", "error");
       } finally {
-        setLoading(false);
+        setPageLoading(false);
       }
     };
     fetchData();
@@ -554,7 +564,7 @@ function EditSaleContent({ params }: { params: Promise<{ id: string }> }) {
       }
     };
 
-    if (!loading) {
+    if (!pageLoading) {
       const timeoutId = setTimeout(() => {
         calculatePrice();
       }, 500);
@@ -570,7 +580,7 @@ function EditSaleContent({ params }: { params: Promise<{ id: string }> }) {
     formData.hasVarnish,
     formData.nozzleDiameter,
     formData.layerHeight,
-    loading,
+    pageLoading,
   ]);
 
   const handleChange = (
@@ -636,7 +646,7 @@ function EditSaleContent({ params }: { params: Promise<{ id: string }> }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setSaving(true);
     try {
       const payload = buildSalePayload();
       const multipartData = new FormData();
@@ -662,11 +672,18 @@ function EditSaleContent({ params }: { params: Promise<{ id: string }> }) {
         "error",
       );
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  if (loading) return <div className="text-center py-12">Carregando...</div>;
+  if (pageLoading) {
+    return (
+      <LoadingPanel
+        title="Carregando venda"
+        description="Buscando detalhes, filamentos, clientes e anexos..."
+      />
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto px-3 sm:px-4 md:px-0">
@@ -1406,10 +1423,10 @@ function EditSaleContent({ params }: { params: Promise<{ id: string }> }) {
           </button>
           <button
             type="submit"
-            disabled={loading}
+            disabled={saving}
             className="w-full sm:w-auto px-6 py-3 sm:py-2 bg-brand-purple text-white rounded-lg hover:bg-purple-800 transition-colors disabled:opacity-50"
           >
-            {loading ? "Salvando..." : "Salvar Alterações"}
+            {saving ? "Salvando..." : "Salvar Alterações"}
           </button>
         </div>
       </form>

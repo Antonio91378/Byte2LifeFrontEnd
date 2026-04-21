@@ -1,6 +1,7 @@
 "use client";
 
 import FilamentSelect from "@/components/FilamentSelect";
+import LoadingPanel from "@/components/LoadingPanel";
 import { DETAIL_LEVELS } from "@/constants/printQuality";
 import { useDialog } from "@/context/DialogContext";
 import { resolveAssetUrl } from "@/utils/api";
@@ -43,7 +44,8 @@ export default function EditStockItemPage() {
   });
 
   const [uploading, setUploading] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [costDetails, setCostDetails] = useState<{
     breakdown: string;
     nozzleDiameter: string;
@@ -79,7 +81,7 @@ export default function EditStockItemPage() {
         showAlert("Erro", "Erro ao carregar dados do item", "error");
         router.push("/stock");
       } finally {
-        setLoading(false);
+        setPageLoading(false);
       }
     };
     fetchData();
@@ -159,7 +161,7 @@ export default function EditStockItemPage() {
 
     // Only calculate if not loading (to avoid overwriting initial data immediately if we wanted to preserve it,
     // but user wants "always use simulation rules", so recalculating on load is actually correct to update old prices)
-    if (!loading) {
+    if (!pageLoading) {
       const timeoutId = setTimeout(() => {
         calculateCost();
       }, 500);
@@ -175,7 +177,7 @@ export default function EditStockItemPage() {
     formData.hasVarnish,
     formData.nozzleDiameter,
     formData.layerHeight,
-    loading,
+    pageLoading,
     isTimeManual,
   ]);
 
@@ -209,6 +211,8 @@ export default function EditStockItemPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSaving(true);
+
     try {
       await axios.put(`http://localhost:5000/api/stock/${params.id}`, formData);
       await showAlert("Sucesso", "Item atualizado com sucesso!", "success");
@@ -216,11 +220,18 @@ export default function EditStockItemPage() {
     } catch (error) {
       console.error(error);
       showAlert("Erro", "Erro ao atualizar item", "error");
+    } finally {
+      setSaving(false);
     }
   };
 
-  if (loading) {
-    return <div className="text-center py-12">Carregando...</div>;
+  if (pageLoading) {
+    return (
+      <LoadingPanel
+        title="Carregando item de estoque"
+        description="Buscando os dados do item e os filamentos cadastrados..."
+      />
+    );
   }
 
   return (
@@ -732,7 +743,8 @@ export default function EditStockItemPage() {
           <div className="flex flex-col gap-3 pt-4">
             <button
               type="submit"
-              className="w-full py-3 bg-brand-purple text-white rounded-xl hover:bg-purple-800 transition-all shadow-md hover:shadow-lg font-medium flex items-center justify-center gap-2"
+              disabled={saving}
+              className="w-full py-3 bg-brand-purple text-white rounded-xl hover:bg-purple-800 transition-all shadow-md hover:shadow-lg font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <svg
                 className="w-5 h-5"
@@ -747,7 +759,7 @@ export default function EditStockItemPage() {
                   d="M5 13l4 4L19 7"
                 ></path>
               </svg>
-              Salvar Alterações
+              {saving ? "Salvando..." : "Salvar Alterações"}
             </button>
             <button
               type="button"
