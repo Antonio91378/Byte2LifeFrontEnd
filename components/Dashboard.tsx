@@ -1468,7 +1468,7 @@ export default function Dashboard() {
 
                       <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row sm:gap-4">
                         <Link
-                          href={`/sales/${currentPrint.id}`}
+                          href={`/sales/view/${currentPrint.id}`}
                           className="flex w-full items-center justify-center gap-2 rounded-lg border border-brand-purple px-6 py-3 text-base font-semibold text-brand-purple shadow-sm transition-colors hover:bg-purple-50 sm:w-auto sm:py-2 sm:text-sm"
                         >
                           <svg
@@ -1541,7 +1541,7 @@ export default function Dashboard() {
 
                       <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row sm:gap-4">
                         <Link
-                          href={`/sales/${currentPrint.id}`}
+                          href={`/sales/view/${currentPrint.id}`}
                           className="flex w-full items-center justify-center gap-2 rounded-lg border border-brand-purple px-6 py-3 text-base font-bold text-brand-purple shadow-sm transition-colors hover:bg-purple-50 sm:w-auto sm:text-lg"
                         >
                           <svg
@@ -1658,7 +1658,7 @@ export default function Dashboard() {
                           <div className="mt-4 flex flex-wrap gap-3">
                             {activeServiceTab.items[0].saleId && (
                               <Link
-                                href={`/sales/${activeServiceTab.items[0].saleId}`}
+                                href={`/sales/view/${activeServiceTab.items[0].saleId}`}
                                 className="px-4 py-2 border border-brand-purple text-brand-purple rounded-lg hover:bg-purple-50 transition-colors text-sm font-semibold"
                               >
                                 Ver venda
@@ -1787,11 +1787,11 @@ export default function Dashboard() {
 
                     const detailHref =
                       item.type === "print"
-                        ? `/sales/${item.saleId}`
+                        ? `/sales/view/${item.saleId}`
                         : item.source === "task"
                           ? `/services/manage?editType=${item.type}&editId=${item.taskId}`
                           : item.saleId
-                            ? `/sales/${item.saleId}`
+                            ? `/sales/view/${item.saleId}`
                             : "#";
 
                     const scheduleLabel =

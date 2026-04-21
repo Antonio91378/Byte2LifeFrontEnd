@@ -2,8 +2,18 @@
 
 import FilamentSelect from "@/components/FilamentSelect";
 import PrintScheduleCalendar from "@/components/PrintScheduleCalendar";
+import SaleAttachmentsPanel from "@/components/sale/SaleAttachmentsPanel";
 import { DETAIL_LEVELS } from "@/constants/printQuality";
 import { useDialog } from "@/context/DialogContext";
+import {
+    appendPendingAttachmentsToFormData,
+    buildPendingSaleAttachments,
+    PendingSaleAttachment,
+    revokePendingSaleAttachmentPreview,
+    revokePendingSaleAttachmentPreviews,
+    SaleAttachment,
+    SaleAttachmentCategory,
+} from "@/utils/saleAttachments";
 import {
     formatSaleProfitPercentage,
     getSaleProfitValue,
@@ -11,7 +21,7 @@ import {
 import { parseDurationToHours } from "@/utils/time";
 import axios from "axios";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 
 interface Filament {
   id: string;
@@ -81,6 +91,16 @@ function NewSaleContent() {
     [],
   );
   const [loading, setLoading] = useState(false);
+  const [existingAttachments, setExistingAttachments] = useState<
+    SaleAttachment[]
+  >([]);
+  const [pendingAttachments, setPendingAttachments] = useState<
+    PendingSaleAttachment[]
+  >([]);
+  const [processingCategories, setProcessingCategories] = useState<
+    SaleAttachmentCategory[]
+  >([]);
+  const pendingAttachmentsRef = useRef<PendingSaleAttachment[]>([]);
 
   const [formData, setFormData] = useState({
     description: "",
@@ -131,6 +151,16 @@ function NewSaleContent() {
     return () => mediaQuery.removeEventListener("change", syncViewport);
   }, []);
 
+  useEffect(() => {
+    pendingAttachmentsRef.current = pendingAttachments;
+  }, [pendingAttachments]);
+
+  useEffect(() => {
+    return () => {
+      revokePendingSaleAttachmentPreviews(pendingAttachmentsRef.current);
+    };
+  }, []);
+
   const buildReturnToSalesUrl = () => {
     if (!searchParams) {
       return "/sales";
@@ -174,6 +204,128 @@ function NewSaleContent() {
     }
     const query = params.toString();
     return query ? `/sales?${query}` : "/sales";
+  };
+
+  const getApiErrorMessage = (error: unknown, fallbackMessage: string) => {
+    if (axios.isAxiosError(error)) {
+      const responseData = error.response?.data;
+      if (typeof responseData === "string" && responseData.trim() !== "") {
+        return responseData;
+      }
+
+      if (
+        responseData &&
+        typeof responseData === "object" &&
+        "message" in responseData &&
+        typeof responseData.message === "string"
+      ) {
+        return responseData.message;
+      }
+    }
+
+    return fallbackMessage;
+  };
+
+  const setCategoryProcessing = (
+    category: SaleAttachmentCategory,
+    active: boolean,
+  ) => {
+    setProcessingCategories((prev) => {
+      if (active) {
+        return prev.includes(category) ? prev : [...prev, category];
+      }
+
+      return prev.filter((item) => item !== category);
+    });
+  };
+
+  const handleFilesSelected = async (
+    category: SaleAttachmentCategory,
+    files: File[],
+  ) => {
+    setCategoryProcessing(category, true);
+
+    try {
+      const nextPendingAttachments = await buildPendingSaleAttachments(
+        files,
+        category,
+      );
+      setPendingAttachments((prev) => [...prev, ...nextPendingAttachments]);
+    } catch (error) {
+      await showAlert(
+        "Erro",
+        error instanceof Error
+          ? error.message
+          : "Falha ao preparar os arquivos.",
+        "error",
+      );
+    } finally {
+      setCategoryProcessing(category, false);
+    }
+  };
+
+  const handleRemoveExistingAttachment = (storageId: string) => {
+    setExistingAttachments((prev) =>
+      prev.filter((attachment) => attachment.storageId !== storageId),
+    );
+  };
+
+  const handleRemovePendingAttachment = (localId: string) => {
+    setPendingAttachments((prev) => {
+      const targetAttachment = prev.find(
+        (attachment) => attachment.localId === localId,
+      );
+
+      if (targetAttachment) {
+        revokePendingSaleAttachmentPreview(targetAttachment);
+      }
+
+      return prev.filter((attachment) => attachment.localId !== localId);
+    });
+  };
+
+  const clearPendingAttachments = () => {
+    revokePendingSaleAttachmentPreviews(pendingAttachmentsRef.current);
+    pendingAttachmentsRef.current = [];
+    setPendingAttachments([]);
+  };
+
+  const buildSalePayload = () => {
+    const { baseCost, costDetails, ...saleData } = formData;
+
+    return {
+      ...saleData,
+      attachments: existingAttachments,
+      massGrams: massGramsValue,
+      printTimeHours: parseDurationToHours(formData.designPrintTime),
+      deliveryDate: formData.deliveryDate === "" ? null : formData.deliveryDate,
+      printStartConfirmedAt:
+        formData.printStartConfirmedAt === ""
+          ? null
+          : formData.printStartConfirmedAt,
+      designStartConfirmedAt:
+        formData.designStartConfirmedAt === ""
+          ? null
+          : formData.designStartConfirmedAt,
+      designTimeHours: Number(formData.designTimeHours) || 0,
+      designResponsible: formData.designResponsible || "",
+      designValue: Number(formData.designValue) || 0,
+      paintStartConfirmedAt:
+        formData.paintStartConfirmedAt === ""
+          ? null
+          : formData.paintStartConfirmedAt,
+      paintTimeHours: Number(formData.paintTimeHours) || 0,
+      paintResponsible: formData.paintResponsible || "",
+      filamentId:
+        formData.filamentId && formData.filamentId.length === 24
+          ? formData.filamentId
+          : null,
+      clientId:
+        formData.clientId && formData.clientId.length === 24
+          ? formData.clientId
+          : null,
+      stockItemId: stockId || null,
+    };
   };
 
   useEffect(() => {
@@ -427,41 +579,21 @@ function NewSaleContent() {
     e.preventDefault();
     setLoading(true);
     try {
-      const { baseCost, costDetails, ...saleData } = formData;
-      const payload = {
-        ...saleData,
-        massGrams: massGramsValue,
-        printTimeHours: parseDurationToHours(formData.designPrintTime),
-        deliveryDate:
-          formData.deliveryDate === "" ? null : formData.deliveryDate,
-        printStartConfirmedAt:
-          formData.printStartConfirmedAt === ""
-            ? null
-            : formData.printStartConfirmedAt,
-        designStartConfirmedAt:
-          formData.designStartConfirmedAt === ""
-            ? null
-            : formData.designStartConfirmedAt,
-        designTimeHours: Number(formData.designTimeHours) || 0,
-        designResponsible: formData.designResponsible || "",
-        designValue: Number(formData.designValue) || 0,
-        paintStartConfirmedAt:
-          formData.paintStartConfirmedAt === ""
-            ? null
-            : formData.paintStartConfirmedAt,
-        paintTimeHours: Number(formData.paintTimeHours) || 0,
-        paintResponsible: formData.paintResponsible || "",
-        filamentId:
-          formData.filamentId && formData.filamentId.length === 24
-            ? formData.filamentId
-            : null,
-        clientId:
-          formData.clientId && formData.clientId.length === 24
-            ? formData.clientId
-            : null,
-        stockItemId: stockId || null,
-      };
-      await axios.post("http://localhost:5000/api/sales", payload);
+      const payload = buildSalePayload();
+      const multipartData = new FormData();
+      multipartData.append("sale", JSON.stringify(payload));
+      appendPendingAttachmentsToFormData(multipartData, pendingAttachments);
+
+      await axios.post(
+        "http://localhost:5000/api/sales/with-media",
+        multipartData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        },
+      );
+      clearPendingAttachments();
 
       // If it came from stock, update stock status to Sold
       if (stockId) {
@@ -481,7 +613,11 @@ function NewSaleContent() {
       router.push(buildReturnToSalesUrl());
     } catch (error) {
       console.error("Error creating sale:", error);
-      await showAlert("Erro", "Erro ao criar venda", "error");
+      await showAlert(
+        "Erro",
+        getApiErrorMessage(error, "Erro ao criar venda"),
+        "error",
+      );
     } finally {
       setLoading(false);
     }
@@ -1154,6 +1290,15 @@ function NewSaleContent() {
               </p>
             </div>
           </div>
+
+          <SaleAttachmentsPanel
+            existingAttachments={existingAttachments}
+            pendingAttachments={pendingAttachments}
+            processingCategories={processingCategories}
+            onFilesSelected={handleFilesSelected}
+            onRemoveExisting={handleRemoveExistingAttachment}
+            onRemovePending={handleRemovePendingAttachment}
+          />
         </div>
 
         {/* Checkboxes */}

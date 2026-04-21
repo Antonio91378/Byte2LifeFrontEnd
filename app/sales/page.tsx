@@ -2,8 +2,19 @@
 
 import Modal from "@/components/Modal";
 import { useDialog } from "@/context/DialogContext";
+import {
+    getFirstProductImageUrl,
+    SaleAttachment,
+} from "@/utils/saleAttachments";
 import axios from "axios";
-import { Fragment, Suspense, useEffect, useRef, useState } from "react";
+import {
+    Fragment,
+    Suspense,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -51,6 +62,7 @@ interface Sale {
   shippingCost?: number;
   designPrintTime?: string;
   incidents?: any[];
+  attachments?: SaleAttachment[];
 }
 
 export default function SalesPage() {
@@ -90,6 +102,7 @@ function SalesPageContent() {
   const [newIncidentReason, setNewIncidentReason] = useState("Other");
   const [newIncidentComment, setNewIncidentComment] = useState("");
   const [hideProfit, setHideProfit] = useState(false);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
   const { showAlert, showConfirm } = useDialog();
 
@@ -157,6 +170,11 @@ function SalesPageContent() {
     const nextPrintStatus = searchParams.get("printStatus");
     if (nextPrintStatus === "printed" || nextPrintStatus === "pending") {
       setPrintFilter(nextPrintStatus);
+    }
+
+    const nextSortDirection = searchParams.get("sortDirection");
+    if (nextSortDirection === "asc" || nextSortDirection === "desc") {
+      setSortDirection(nextSortDirection);
     }
   }, [searchParams]);
 
@@ -291,6 +309,7 @@ function SalesPageContent() {
   const handleClone = async (sale: Sale) => {
     const payload: any = { ...sale };
     delete payload.id;
+    payload.attachments = [];
     try {
       const res = await axios.post("http://localhost:5000/api/sales", payload);
       const created = res.data;
@@ -348,37 +367,75 @@ function SalesPageContent() {
     }
   };
 
-  const filteredSales = sales.filter((s) => {
-    const normalizedClientFilter = filterClientName.trim().toLowerCase();
-    const normalizedProductFilter = filterProductName.trim().toLowerCase();
+  const getSaleSortValue = (sale: Sale) => {
+    if (sale.saleDate) {
+      const parsedSaleDate = new Date(sale.saleDate).getTime();
+      if (!Number.isNaN(parsedSaleDate)) {
+        return parsedSaleDate;
+      }
+    }
 
-    if (
-      filterClientId &&
-      !normalizedClientFilter &&
-      s.clientId !== filterClientId
-    ) {
-      return false;
+    const objectIdPrefix = sale.id?.slice(0, 8);
+    if (objectIdPrefix && /^[0-9a-fA-F]{8}$/.test(objectIdPrefix)) {
+      return Number.parseInt(objectIdPrefix, 16) * 1000;
     }
-    if (normalizedClientFilter) {
-      const clientName = getClientName(s.clientId).toLowerCase();
-      if (!clientName.includes(normalizedClientFilter)) return false;
-    }
-    if (normalizedProductFilter) {
-      const description = (s.description || "").toLowerCase();
-      if (!description.includes(normalizedProductFilter)) return false;
-    }
-    if (paymentFilter === "paid" && !s.isPaid) return false;
-    if (paymentFilter === "unpaid" && s.isPaid) return false;
-    if (deliveryFilter === "delivered" && !s.isDelivered) return false;
-    if (deliveryFilter === "undelivered" && s.isDelivered) return false;
-    if (printFilter === "printed" && !s.isPrintConcluded) return false;
-    if (printFilter === "pending" && s.isPrintConcluded) return false;
 
-    if (!filterDate) return true;
-    if (!s.saleDate) return false;
-    // Compare dates (YYYY-MM-DD) or Month (YYYY-MM)
-    return s.saleDate.startsWith(filterDate);
-  });
+    return 0;
+  };
+
+  const filteredSales = useMemo(() => {
+    return sales.filter((s) => {
+      const normalizedClientFilter = filterClientName.trim().toLowerCase();
+      const normalizedProductFilter = filterProductName.trim().toLowerCase();
+
+      if (
+        filterClientId &&
+        !normalizedClientFilter &&
+        s.clientId !== filterClientId
+      ) {
+        return false;
+      }
+      if (normalizedClientFilter) {
+        const clientName = getClientName(s.clientId).toLowerCase();
+        if (!clientName.includes(normalizedClientFilter)) return false;
+      }
+      if (normalizedProductFilter) {
+        const description = (s.description || "").toLowerCase();
+        if (!description.includes(normalizedProductFilter)) return false;
+      }
+      if (paymentFilter === "paid" && !s.isPaid) return false;
+      if (paymentFilter === "unpaid" && s.isPaid) return false;
+      if (deliveryFilter === "delivered" && !s.isDelivered) return false;
+      if (deliveryFilter === "undelivered" && s.isDelivered) return false;
+      if (printFilter === "printed" && !s.isPrintConcluded) return false;
+      if (printFilter === "pending" && s.isPrintConcluded) return false;
+
+      if (!filterDate) return true;
+      if (!s.saleDate) return false;
+      return s.saleDate.startsWith(filterDate);
+    });
+  }, [
+    clients,
+    deliveryFilter,
+    filterClientId,
+    filterClientName,
+    filterDate,
+    filterProductName,
+    paymentFilter,
+    printFilter,
+    sales,
+  ]);
+
+  const sortedSales = useMemo(() => {
+    return [...filteredSales].sort((firstSale, secondSale) => {
+      const firstValue = getSaleSortValue(firstSale);
+      const secondValue = getSaleSortValue(secondSale);
+
+      return sortDirection === "desc"
+        ? secondValue - firstValue
+        : firstValue - secondValue;
+    });
+  }, [filteredSales, sortDirection]);
 
   const totalSales = filteredSales.reduce(
     (acc, curr) => acc + curr.saleValue,
@@ -414,9 +471,18 @@ function SalesPageContent() {
   if (printFilter !== "all") {
     filterQuery.set("printStatus", printFilter);
   }
+  filterQuery.set("sortDirection", sortDirection);
   const newSaleHref = filterQuery.toString()
     ? `/sales/new?${filterQuery.toString()}`
     : "/sales/new";
+  const mobileActionClass =
+    "flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition-colors";
+  const desktopActionClass =
+    "inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition-colors hover:border-brand-purple/30 hover:bg-purple-50 hover:text-brand-purple";
+  const buildViewHref = (id: string) =>
+    filterQuery.toString()
+      ? `/sales/view/${id}?${filterQuery.toString()}`
+      : `/sales/view/${id}`;
   const buildEditHref = (id: string) =>
     filterQuery.toString()
       ? `/sales/${id}?${filterQuery.toString()}`
@@ -519,12 +585,250 @@ function SalesPageContent() {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col md:flex-row justify-between items-center border-b-2 border-brand-orange pb-4 gap-4">
-        <h1 className="text-3xl font-bold text-brand-purple">
-          Registro de Vendas
-        </h1>
-        <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
-          <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 bg-white p-2 rounded-lg border border-gray-200 shadow-sm">
+      <div className="border-b-2 border-brand-orange pb-4">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <h1 className="text-3xl font-bold text-brand-purple">
+            Registro de Vendas
+          </h1>
+
+          <div className="flex flex-wrap items-stretch justify-end gap-3">
+            <div className="relative" ref={filterMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsStatusFilterOpen((prev) => !prev)}
+                className="flex h-full items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:border-gray-300 whitespace-nowrap"
+              >
+                <svg
+                  className="w-4 h-4 text-gray-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707L14 14.586V19a1 1 0 01-1.447.894l-4-2A1 1 0 018 16.618v-2.032L3.293 7.293A1 1 0 013 6.586V4z"
+                  ></path>
+                </svg>
+                <span>Filtros</span>
+                {activeStatusFilters > 0 && (
+                  <span className="rounded-full bg-brand-purple px-2 py-0.5 text-xs font-bold text-white">
+                    {activeStatusFilters}
+                  </span>
+                )}
+                <svg
+                  className={`w-4 h-4 text-gray-400 transition-transform ${isStatusFilterOpen ? "rotate-180" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M19 9l-7 7-7-7"
+                  ></path>
+                </svg>
+              </button>
+
+              {isStatusFilterOpen && (
+                <div className="absolute right-0 mt-2 z-10 w-72 rounded-xl border border-gray-200 bg-white p-4 shadow-lg">
+                  <div className="space-y-4">
+                    <div>
+                      <p className="mb-2 text-xs font-semibold uppercase text-gray-500">
+                        Pagamento
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => togglePaymentFilter("paid")}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                            paymentFilter === "paid"
+                              ? "bg-green-100 text-green-700 border-green-200"
+                              : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
+                          }`}
+                        >
+                          Pagas
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => togglePaymentFilter("unpaid")}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                            paymentFilter === "unpaid"
+                              ? "bg-red-100 text-red-700 border-red-200"
+                              : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
+                          }`}
+                        >
+                          Nao pagas
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="mb-2 text-xs font-semibold uppercase text-gray-500">
+                        Entrega
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleDeliveryFilter("delivered")}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                            deliveryFilter === "delivered"
+                              ? "bg-purple-100 text-purple-700 border-purple-200"
+                              : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
+                          }`}
+                        >
+                          Entregues
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleDeliveryFilter("undelivered")}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                            deliveryFilter === "undelivered"
+                              ? "bg-yellow-100 text-yellow-700 border-yellow-200"
+                              : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
+                          }`}
+                        >
+                          Nao entregues
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="mb-2 text-xs font-semibold uppercase text-gray-500">
+                        Impressao
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => togglePrintFilter("printed")}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                            printFilter === "printed"
+                              ? "bg-blue-100 text-blue-700 border-blue-200"
+                              : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
+                          }`}
+                        >
+                          Impressas
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => togglePrintFilter("pending")}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                            printFilter === "pending"
+                              ? "bg-gray-200 text-gray-700 border-gray-300"
+                              : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
+                          }`}
+                        >
+                          Nao impressas
+                        </button>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPaymentFilter("all");
+                        setDeliveryFilter("all");
+                        setPrintFilter("all");
+                      }}
+                      className="w-full border-t border-gray-100 pt-3 text-xs font-semibold text-gray-600 transition-colors hover:text-gray-800"
+                    >
+                      Limpar filtros
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setHideProfit((prev) => !prev)}
+              className="flex shrink-0 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-gray-300 whitespace-nowrap"
+            >
+              <svg
+                className="w-4 h-4 text-gray-500"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                ></path>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                ></path>
+              </svg>
+              <span className="hidden sm:inline">
+                {hideProfit ? "Mostrar lucro" : "Ocultar lucro"}
+              </span>
+              <span className="sm:hidden">Lucro</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                setSortDirection((previousDirection) =>
+                  previousDirection === "desc" ? "asc" : "desc",
+                )
+              }
+              className="flex shrink-0 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-gray-300 whitespace-nowrap"
+              title="Alternar ordenação das vendas"
+            >
+              <svg
+                className="w-4 h-4 text-gray-500"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M8 7h8M8 12h5m-5 5h2M16 6l3 3m0 0l3-3m-3 3V3M8 18l-3-3m0 0l-3 3m3-3v6"
+                ></path>
+              </svg>
+              <span className="hidden md:inline">
+                {sortDirection === "desc"
+                  ? "Mais novas primeiro"
+                  : "Mais antigas primeiro"}
+              </span>
+              <span className="md:hidden">
+                {sortDirection === "desc" ? "Mais novas" : "Mais antigas"}
+              </span>
+            </button>
+
+            <Link
+              href={newSaleHref}
+              className="flex shrink-0 items-center justify-center gap-2 rounded-lg bg-brand-purple px-4 py-2 text-white shadow-md transition-colors hover:bg-purple-800 whitespace-nowrap"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M12 4v16m8-8H4"
+                ></path>
+              </svg>
+              <span className="hidden sm:inline">Nova Venda</span>
+              <span className="sm:hidden">Nova</span>
+            </Link>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm lg:flex-row lg:items-center">
             <div className="flex items-center gap-2 justify-between md:justify-start">
               <label
                 htmlFor="dateFilter"
@@ -558,7 +862,7 @@ function SalesPageContent() {
                 <option value="month">Mês</option>
               </select>
               <div className="hidden md:block h-4 w-px bg-gray-300 mx-1"></div>
-              <div className="flex items-center gap-2 min-w-0 w-full md:w-auto md:min-w-[180px]">
+              <div className="flex min-w-0 w-full items-center gap-2 md:w-auto md:min-w-45">
                 <input
                   type="text"
                   list="sales-client-filter-options"
@@ -596,7 +900,7 @@ function SalesPageContent() {
 
               <div className="hidden md:block h-4 w-px bg-gray-300 mx-1"></div>
 
-              <div className="flex items-center gap-2 min-w-0 w-full md:w-auto md:min-w-[180px]">
+              <div className="flex min-w-0 w-full items-center gap-2 md:w-auto md:min-w-45">
                 <input
                   type="text"
                   value={filterProductName}
@@ -662,209 +966,13 @@ function SalesPageContent() {
               )}
             </div>
           </div>
-
-          <datalist id="sales-client-filter-options">
-            {clients.map((client) => (
-              <option key={client.id} value={client.name} />
-            ))}
-          </datalist>
-
-          <div className="relative" ref={filterMenuRef}>
-            <button
-              type="button"
-              onClick={() => setIsStatusFilterOpen((prev) => !prev)}
-              className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm hover:border-gray-300 transition-colors"
-            >
-              <svg
-                className="w-4 h-4 text-gray-500"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707L14 14.586V19a1 1 0 01-1.447.894l-4-2A1 1 0 018 16.618v-2.032L3.293 7.293A1 1 0 013 6.586V4z"
-                ></path>
-              </svg>
-              <span className="text-sm font-medium text-gray-700">Filtros</span>
-              {activeStatusFilters > 0 && (
-                <span className="text-xs font-bold text-white bg-brand-purple px-2 py-0.5 rounded-full">
-                  {activeStatusFilters}
-                </span>
-              )}
-              <svg
-                className={`w-4 h-4 text-gray-400 transition-transform ${isStatusFilterOpen ? "rotate-180" : ""}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M19 9l-7 7-7-7"
-                ></path>
-              </svg>
-            </button>
-
-            {isStatusFilterOpen && (
-              <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 rounded-xl shadow-lg p-4 z-10">
-                <div className="space-y-4">
-                  <div>
-                    <p className="text-xs font-semibold text-gray-500 uppercase mb-2">
-                      Pagamento
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => togglePaymentFilter("paid")}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
-                          paymentFilter === "paid"
-                            ? "bg-green-100 text-green-700 border-green-200"
-                            : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
-                        }`}
-                      >
-                        Pagas
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => togglePaymentFilter("unpaid")}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
-                          paymentFilter === "unpaid"
-                            ? "bg-red-100 text-red-700 border-red-200"
-                            : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
-                        }`}
-                      >
-                        Nao pagas
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-semibold text-gray-500 uppercase mb-2">
-                      Entrega
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => toggleDeliveryFilter("delivered")}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
-                          deliveryFilter === "delivered"
-                            ? "bg-purple-100 text-purple-700 border-purple-200"
-                            : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
-                        }`}
-                      >
-                        Entregues
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => toggleDeliveryFilter("undelivered")}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
-                          deliveryFilter === "undelivered"
-                            ? "bg-yellow-100 text-yellow-700 border-yellow-200"
-                            : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
-                        }`}
-                      >
-                        Nao entregues
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-semibold text-gray-500 uppercase mb-2">
-                      Impressao
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => togglePrintFilter("printed")}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
-                          printFilter === "printed"
-                            ? "bg-blue-100 text-blue-700 border-blue-200"
-                            : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
-                        }`}
-                      >
-                        Impressas
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => togglePrintFilter("pending")}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
-                          printFilter === "pending"
-                            ? "bg-gray-200 text-gray-700 border-gray-300"
-                            : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
-                        }`}
-                      >
-                        Nao impressas
-                      </button>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPaymentFilter("all");
-                      setDeliveryFilter("all");
-                      setPrintFilter("all");
-                    }}
-                    className="w-full text-xs font-semibold text-gray-600 hover:text-gray-800 transition-colors border-t border-gray-100 pt-3"
-                  >
-                    Limpar filtros
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setHideProfit((prev) => !prev)}
-            className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm hover:border-gray-300 transition-colors text-sm font-semibold text-gray-700"
-          >
-            <svg
-              className="w-4 h-4 text-gray-500"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-              ></path>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-              ></path>
-            </svg>
-            {hideProfit ? "Mostrar lucro" : "Ocultar lucro"}
-          </button>
-
-          <Link
-            href={newSaleHref}
-            className="bg-brand-purple hover:bg-purple-800 text-white px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M12 4v16m8-8H4"
-              ></path>
-            </svg>
-            Nova Venda
-          </Link>
         </div>
+
+        <datalist id="sales-client-filter-options">
+          {clients.map((client) => (
+            <option key={client.id} value={client.name} />
+          ))}
+        </datalist>
       </div>
 
       <div
@@ -898,25 +1006,34 @@ function SalesPageContent() {
         </div>
       </div>
 
-      {filteredSales.length > 0 ? (
+      {sortedSales.length > 0 ? (
         <>
           <div className="md:hidden space-y-4">
-            {filteredSales.map((s) => (
+            {sortedSales.map((s) => (
               <div
                 key={s.id}
                 className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-4"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      Venda em {formatDisplayDate(s.saleDate)}
-                    </p>
-                    <h3 className="mt-1 text-base font-bold text-gray-900 wrap-break-word">
-                      {s.description}
-                    </h3>
-                    <p className="mt-1 text-xs text-gray-500">
-                      Entrega: {formatDisplayDate(s.deliveryDate)}
-                    </p>
+                  <div className="flex min-w-0 items-start gap-3">
+                    {getFirstProductImageUrl(s.attachments) && (
+                      <img
+                        src={getFirstProductImageUrl(s.attachments)}
+                        alt={s.description}
+                        className="h-14 w-14 shrink-0 rounded-xl border border-gray-200 object-cover"
+                      />
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Venda em {formatDisplayDate(s.saleDate)}
+                      </p>
+                      <h3 className="mt-1 text-base font-bold text-gray-900 wrap-break-word">
+                        {s.description}
+                      </h3>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Entrega: {formatDisplayDate(s.deliveryDate)}
+                      </p>
+                    </div>
                   </div>
                   {s.incidents && s.incidents.length > 0 && (
                     <button
@@ -993,23 +1110,87 @@ function SalesPageContent() {
 
                 <div className="grid grid-cols-2 gap-2">
                   <Link
-                    href={buildEditHref(s.id)}
-                    className="flex items-center justify-center rounded-lg border border-brand-purple/20 bg-brand-purple/5 px-3 py-2 text-sm font-semibold text-brand-purple"
+                    href={buildViewHref(s.id)}
+                    className={`${mobileActionClass} border border-gray-200 bg-white text-gray-700`}
                   >
+                    <svg
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                      ></path>
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                      ></path>
+                    </svg>
+                    Visualizar
+                  </Link>
+                  <Link
+                    href={buildEditHref(s.id)}
+                    className={`${mobileActionClass} border border-brand-purple/20 bg-brand-purple/5 text-brand-purple`}
+                  >
+                    <svg
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                      ></path>
+                    </svg>
                     Editar
                   </Link>
                   <button
                     type="button"
                     onClick={() => handleDelete(s.id)}
-                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700"
+                    className={`${mobileActionClass} border border-red-200 bg-red-50 text-red-700`}
                   >
+                    <svg
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16"
+                      ></path>
+                    </svg>
                     Excluir
                   </button>
                   <button
                     type="button"
                     onClick={() => handleClone(s)}
-                    className="col-span-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700"
+                    className={`${mobileActionClass} col-span-2 border border-gray-200 bg-white text-gray-700`}
                   >
+                    <svg
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M8 7a2 2 0 012-2h7a2 2 0 012 2v9a2 2 0 01-2 2h-7a2 2 0 01-2-2V7zm-4 4a2 2 0 012-2h1v7a2 2 0 002 2h5v1a2 2 0 01-2 2H6a2 2 0 01-2-2v-8z"
+                      ></path>
+                    </svg>
                     Clonar venda
                   </button>
                 </div>
@@ -1055,16 +1236,16 @@ function SalesPageContent() {
                     >
                       Lucro
                     </th>
-                    <th className="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="w-52 px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Status
                     </th>
-                    <th className="px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="w-40 px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Ações
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredSales.map((s) => (
+                  {sortedSales.map((s) => (
                     <Fragment key={s.id}>
                       <tr
                         onClick={() => toggleExpand(s.id)}
@@ -1112,6 +1293,13 @@ function SalesPageContent() {
                               ></path>
                             </svg>
                           )}
+                          {getFirstProductImageUrl(s.attachments) && (
+                            <img
+                              src={getFirstProductImageUrl(s.attachments)}
+                              alt={s.description}
+                              className="h-10 w-10 shrink-0 rounded-lg border border-gray-200 object-cover"
+                            />
+                          )}
                           <div className="flex-1 min-w-0 max-w-65 overflow-x-auto whitespace-nowrap">
                             {s.description}
                           </div>
@@ -1148,7 +1336,7 @@ function SalesPageContent() {
                         >
                           R$ {s.profit.toFixed(2)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-center space-x-2">
+                        <td className="w-52 px-6 py-4 whitespace-nowrap text-sm text-center space-x-2">
                           <span
                             role="button"
                             tabIndex={0}
@@ -1187,44 +1375,102 @@ function SalesPageContent() {
                           </span>
                         </td>
                         <td
-                          className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium"
+                          className="w-40 px-6 py-4 whitespace-nowrap text-right text-sm font-medium"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleClone(s);
-                            }}
-                            className="mr-3 text-gray-400 hover:text-brand-purple transition-colors"
-                            title="Clonar venda"
-                          >
-                            <svg
-                              className="w-4 h-4"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Link
+                              href={buildViewHref(s.id)}
+                              className={desktopActionClass}
+                              title="Visualizar venda"
+                              aria-label="Visualizar venda"
                             >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth="2"
-                                d="M8 7a2 2 0 012-2h7a2 2 0 012 2v9a2 2 0 01-2 2h-7a2 2 0 01-2-2V7zm-4 4a2 2 0 012-2h1v7a2 2 0 002 2h5v1a2 2 0 01-2 2H6a2 2 0 01-2-2v-8z"
-                              ></path>
-                            </svg>
-                          </button>
-                          <Link
-                            href={buildEditHref(s.id)}
-                            className="text-brand-purple hover:text-purple-900 mr-4"
-                          >
-                            Editar
-                          </Link>
-                          <button
-                            onClick={() => handleDelete(s.id)}
-                            className="text-red-600 hover:text-red-900"
-                          >
-                            Excluir
-                          </button>
+                              <svg
+                                className="w-4 h-4"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="2"
+                                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                                ></path>
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="2"
+                                  d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                                ></path>
+                              </svg>
+                            </Link>
+                            <Link
+                              href={buildEditHref(s.id)}
+                              className={desktopActionClass}
+                              title="Editar venda"
+                              aria-label="Editar venda"
+                            >
+                              <svg
+                                className="w-4 h-4"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="2"
+                                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                                ></path>
+                              </svg>
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleClone(s);
+                              }}
+                              className={desktopActionClass}
+                              title="Clonar venda"
+                              aria-label="Clonar venda"
+                            >
+                              <svg
+                                className="w-4 h-4"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="2"
+                                  d="M8 7a2 2 0 012-2h7a2 2 0 012 2v9a2 2 0 01-2 2h-7a2 2 0 01-2-2V7zm-4 4a2 2 0 012-2h1v7a2 2 0 002 2h5v1a2 2 0 01-2 2H6a2 2 0 01-2-2v-8z"
+                                ></path>
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(s.id)}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-red-50 text-red-600 transition-colors hover:border-red-300 hover:bg-red-100 hover:text-red-700"
+                              title="Excluir venda"
+                              aria-label="Excluir venda"
+                            >
+                              <svg
+                                className="w-4 h-4"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="2"
+                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16"
+                                ></path>
+                              </svg>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                       {expandedSaleId === s.id && (
