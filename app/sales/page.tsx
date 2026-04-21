@@ -29,6 +29,13 @@ const INCIDENT_REASONS = [
   { value: "Other", label: "Outro" },
 ];
 
+interface PrintIncident {
+  timestamp: string;
+  reason: string;
+  comment: string;
+  wastedFilamentGrams?: number | null;
+}
+
 interface Filament {
   id: string;
   description: string;
@@ -61,7 +68,7 @@ interface Sale {
   cost?: number;
   shippingCost?: number;
   designPrintTime?: string;
-  incidents?: any[];
+  incidents?: PrintIncident[];
   attachments?: SaleAttachment[];
 }
 
@@ -1520,7 +1527,7 @@ function SalesPageContent() {
         onClose={() => {
           setShowIncidentsModal(null);
           setIsAddingIncident(false);
-          setNewIncidentReason("falha_impressao");
+          setNewIncidentReason("Other");
           setNewIncidentComment("");
         }}
         title="Ocorrências da Impressão"
@@ -1622,6 +1629,14 @@ function SalesPageContent() {
                       <p className="text-sm text-gray-700 mt-1">
                         {incident.comment}
                       </p>
+
+                      {typeof incident.wastedFilamentGrams === "number" &&
+                      incident.wastedFilamentGrams > 0 ? (
+                        <p className="mt-2 text-xs font-medium text-amber-700">
+                          Desperdício registrado: {incident.wastedFilamentGrams}{" "}
+                          g
+                        </p>
+                      ) : null}
                     </li>
                   ))}
                 </ul>

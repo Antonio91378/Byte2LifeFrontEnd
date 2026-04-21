@@ -16,6 +16,8 @@ interface PrintIncident {
   reason: string;
 
   comment: string;
+
+  wastedFilamentGrams?: number | null;
 }
 
 interface Sale {
@@ -58,6 +60,10 @@ interface Sale {
   deliveryDate?: string;
 
   incidents?: PrintIncident[];
+
+  errorReason?: string | null;
+
+  wastedFilamentGrams?: number | null;
 }
 
 type ServiceStatus = "Active" | "Concluded";
@@ -224,7 +230,191 @@ const INCIDENT_REASONS = [
   { value: "Other", label: "Outro" },
 ];
 
+const getDashboardFetchErrorMessage = (error: unknown) => {
+  if (axios.isAxiosError(error)) {
+    const responseMessage = error.response?.data?.message;
+
+    if (typeof responseMessage === "string" && responseMessage.trim()) {
+      return responseMessage;
+    }
+  }
+
+  return "O backend ainda pode estar acordando. Continuamos tentando sincronizar automaticamente.";
+};
+
+function DashboardLoadingState({
+  retryCount,
+  lastError,
+  onRetry,
+}: Readonly<{
+  retryCount: number;
+  lastError: string | null;
+  onRetry: () => void;
+}>) {
+  const isRetrying = retryCount > 0;
+
+  return (
+    <div className="relative overflow-hidden rounded-4xl border border-slate-200/80 bg-white/95 shadow-[0_30px_80px_-40px_rgba(76,29,149,0.45)]">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(249,115,22,0.14),transparent_36%),radial-gradient(circle_at_bottom_right,rgba(109,40,217,0.12),transparent_42%)]" />
+
+      <div className="relative grid gap-8 px-5 py-6 sm:px-7 sm:py-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] lg:items-center">
+        <div className="space-y-6">
+          <div className="inline-flex items-center gap-2 rounded-full border border-brand-purple/10 bg-brand-purple/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-brand-purple">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-orange/70" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-brand-orange" />
+            </span>
+            {isRetrying ? "Acordando backend" : "Carregando dashboard"}
+          </div>
+
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+            <div className="relative flex h-20 w-20 shrink-0 items-center justify-center rounded-[1.75rem] bg-slate-950 text-white shadow-lg shadow-brand-purple/15">
+              <span className="absolute inset-2 rounded-[1.2rem] border border-white/10" />
+              <span className="absolute inset-3 rounded-2xl border-2 border-transparent border-t-brand-orange border-r-brand-purple animate-spin" />
+              <span className="absolute inset-[1.15rem] rounded-[0.85rem] bg-white/10 animate-pulse" />
+              <svg
+                className="relative h-8 w-8"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.8"
+                  d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
+                />
+              </svg>
+            </div>
+
+            <div className="space-y-3">
+              <h2 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
+                {isRetrying
+                  ? "Esperando a API responder"
+                  : "Montando o painel inicial"}
+              </h2>
+
+              <p className="max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
+                {isRetrying
+                  ? "A home já está pronta, mas ainda estamos aguardando fila, impressão atual e agenda. Se o provedor colocou o backend para dormir, isso pode levar alguns segundos."
+                  : "Estamos sincronizando impressão atual, fila de produção e serviços para preencher a home sem mostrar dados inconsistentes."}
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 font-medium text-slate-700">
+                  <span className="h-2 w-2 rounded-full bg-brand-purple animate-pulse" />
+                  <span>Impressão atual</span>
+                </div>
+                <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 font-medium text-slate-700">
+                  <span
+                    className="h-2 w-2 rounded-full bg-brand-orange animate-pulse"
+                    style={{ animationDelay: "180ms" }}
+                  />
+                  <span>Fila e agenda</span>
+                </div>
+                {isRetrying ? (
+                  <div className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1.5 font-medium text-amber-800">
+                    <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                    <span>Tentativa {retryCount}</span>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 shadow-inner shadow-white/60">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">
+                  {isRetrying
+                    ? "Reconectando automaticamente"
+                    : "Preparando os blocos principais"}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  {lastError ||
+                    "Assim que o primeiro conjunto de dados chegar, o dashboard substitui esta camada automaticamente."}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={onRetry}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-700 transition-colors hover:border-brand-purple/30 hover:text-brand-purple"
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M4 4v5h.582M20 20v-5h-.581M5.08 15A7.002 7.002 0 0018.92 9M18.92 9A7.002 7.002 0 005.08 15"
+                  />
+                </svg>
+                Tentar agora
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          {["current-print", "queue", "services", "summary"].map(
+            (cardKey, index) => (
+              <div
+                key={cardKey}
+                className="overflow-hidden rounded-[1.6rem] border border-slate-200 bg-white p-4 shadow-sm"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="space-y-2">
+                    <div
+                      className="h-2.5 rounded-full bg-slate-200 animate-pulse"
+                      style={{ width: index % 2 === 0 ? "6rem" : "7.5rem" }}
+                    />
+                    <div
+                      className="h-7 rounded-full bg-slate-900/90 animate-pulse"
+                      style={{
+                        width: index % 2 === 0 ? "4.5rem" : "5.5rem",
+                        animationDelay: `${index * 120}ms`,
+                      }}
+                    />
+                  </div>
+                  <div
+                    className="h-11 w-11 rounded-2xl animate-pulse"
+                    style={{
+                      background:
+                        index % 2 === 0
+                          ? "linear-gradient(135deg, rgba(109,40,217,0.16), rgba(109,40,217,0.04))"
+                          : "linear-gradient(135deg, rgba(249,115,22,0.16), rgba(249,115,22,0.05))",
+                      animationDelay: `${index * 90}ms`,
+                    }}
+                  />
+                </div>
+
+                <div className="mt-4 space-y-2.5">
+                  <div className="h-2 rounded-full bg-slate-100 animate-pulse" />
+                  <div
+                    className="h-2 rounded-full bg-slate-100 animate-pulse"
+                    style={{ width: "82%", animationDelay: `${index * 140}ms` }}
+                  />
+                  <div
+                    className="h-2 rounded-full bg-slate-100 animate-pulse"
+                    style={{ width: "65%", animationDelay: `${index * 180}ms` }}
+                  />
+                </div>
+              </div>
+            ),
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
+  const hasLoadedOnceRef = useRef(false);
   const [currentPrint, setCurrentPrint] = useState<Sale | null>(null);
 
   const [queue, setQueue] = useState<Sale[]>([]);
@@ -240,6 +430,10 @@ export default function Dashboard() {
   const [serviceSales, setServiceSales] = useState<ServiceSale[]>([]);
 
   const [loading, setLoading] = useState(true);
+
+  const [loadingError, setLoadingError] = useState<string | null>(null);
+
+  const [loadingRetryCount, setLoadingRetryCount] = useState(0);
 
   const [remainingTime, setRemainingTime] = useState<string>("");
 
@@ -320,6 +514,8 @@ export default function Dashboard() {
 
   const fetchData = async () => {
     try {
+      setLoadingError(null);
+
       const [
         currentRes,
 
@@ -383,10 +579,20 @@ export default function Dashboard() {
       setPaintingTasks(paintingRes.data || []);
 
       setServiceSales(serviceSalesList || []);
+
+      hasLoadedOnceRef.current = true;
+
+      setLoadingRetryCount(0);
+
+      setLoading(false);
     } catch (error) {
       console.error("Error fetching dashboard data", error);
-    } finally {
-      setLoading(false);
+
+      if (!hasLoadedOnceRef.current) {
+        setLoading(true);
+        setLoadingRetryCount((currentCount) => currentCount + 1);
+        setLoadingError(getDashboardFetchErrorMessage(error));
+      }
     }
   };
 
@@ -1002,19 +1208,45 @@ export default function Dashboard() {
       const updateData: any = {
         ...currentPrint,
 
-        printStatus: finishStatus,
-
         tags: tagsArray,
       };
 
       if (finishStatus === "Concluded") {
+        updateData.printStatus = "Concluded";
+
         updateData.isPrintConcluded = true;
       }
 
       if (finishStatus === "Failed") {
-        updateData.errorReason = errorReason;
+        const wastedValue = Number.parseFloat(wastedFilament) || 0;
 
-        updateData.wastedFilamentGrams = parseFloat(wastedFilament) || 0;
+        const incidentComment = errorReason.trim();
+
+        const newIncident: PrintIncident = {
+          timestamp: new Date().toISOString(),
+
+          reason: "Other",
+
+          comment: incidentComment || "Falha registrada durante a impressão.",
+
+          wastedFilamentGrams: wastedValue > 0 ? wastedValue : null,
+        };
+
+        updateData.printStatus = "Staged";
+
+        updateData.isPrintConcluded = false;
+
+        updateData.printStartedAt = null;
+
+        updateData.errorReason =
+          incidentComment || currentPrint.errorReason || null;
+
+        updateData.wastedFilamentGrams =
+          Number(currentPrint.wastedFilamentGrams || 0) + wastedValue;
+
+        updateData.incidents = currentPrint.incidents
+          ? [...currentPrint.incidents, newIncident]
+          : [newIncident];
       }
 
       await axios.put(
@@ -1024,7 +1256,7 @@ export default function Dashboard() {
 
       // 2. Promote next item if exists
 
-      if (queue.length > 0) {
+      if (finishStatus === "Concluded" && queue.length > 0) {
         const nextItem = queue[0];
 
         await axios.put(`http://localhost:5000/api/sales/${nextItem.id}`, {
@@ -1097,7 +1329,15 @@ export default function Dashboard() {
   };
 
   if (loading) {
-    return <div className="text-center py-8">Carregando dashboard...</div>;
+    return (
+      <DashboardLoadingState
+        retryCount={loadingRetryCount}
+        lastError={loadingError}
+        onRetry={() => {
+          void fetchData();
+        }}
+      />
+    );
   }
 
   return (
@@ -1218,6 +1458,13 @@ export default function Dashboard() {
                   <p className="text-sm text-gray-700 mt-1">
                     {incident.comment}
                   </p>
+
+                  {typeof incident.wastedFilamentGrams === "number" &&
+                  incident.wastedFilamentGrams > 0 ? (
+                    <p className="mt-2 text-xs font-medium text-amber-700">
+                      Desperdício registrado: {incident.wastedFilamentGrams} g
+                    </p>
+                  ) : null}
                 </li>
               ))}
             </ul>

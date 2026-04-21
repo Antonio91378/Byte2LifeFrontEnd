@@ -32,6 +32,23 @@ interface Filament {
   color: string;
 }
 
+interface PrintIncident {
+  timestamp: string;
+  reason: string;
+  comment: string;
+  wastedFilamentGrams?: number | null;
+}
+
+const INCIDENT_REASONS: Record<string, string> = {
+  PowerLoss: "Queda de Energia",
+  FilamentJam: "Entupimento/Trava de Filamento",
+  LayerShift: "Deslocamento de Camada",
+  AdhesionIssue: "Problema de Aderência",
+  ManualPause: "Pausa Manual",
+  Maintenance: "Manutenção",
+  Other: "Outro",
+};
+
 interface SaleDetail {
   id: string;
   description: string;
@@ -48,6 +65,7 @@ interface SaleDetail {
   saleDate?: string;
   deliveryDate?: string;
   printStartConfirmedAt?: string;
+  printStatus?: string;
   designPrintTime?: string;
   printQuality?: string;
   filamentId?: string;
@@ -61,6 +79,9 @@ interface SaleDetail {
   designValue?: number;
   paintResponsible?: string;
   paintTimeHours?: number;
+  incidents?: PrintIncident[];
+  errorReason?: string | null;
+  wastedFilamentGrams?: number | null;
   attachments?: SaleAttachment[];
 }
 
@@ -408,6 +429,66 @@ function SaleViewContent({
                   : "Não informado"
               }
             />
+          </DetailCard>
+
+          <DetailCard title="Ocorrências da impressão">
+            <DetailRow
+              label="Status atual"
+              value={sale.printStatus || "Não informado"}
+            />
+            <DetailRow
+              label="Desperdício acumulado"
+              value={
+                typeof sale.wastedFilamentGrams === "number" &&
+                sale.wastedFilamentGrams > 0
+                  ? `${sale.wastedFilamentGrams} g`
+                  : "Nenhum desperdício registrado"
+              }
+            />
+
+            {sale.incidents && sale.incidents.length > 0 ? (
+              <div className="space-y-3">
+                {sale.incidents.map((incident, index) => (
+                  <div
+                    key={`${incident.timestamp}-${index}`}
+                    className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3"
+                  >
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-brand-purple">
+                          {INCIDENT_REASONS[incident.reason] || incident.reason}
+                        </p>
+                        <p className="mt-1 text-sm text-gray-700">
+                          {incident.comment || "Sem comentário adicional."}
+                        </p>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        {formatDateTime(incident.timestamp)}
+                      </p>
+                    </div>
+
+                    {typeof incident.wastedFilamentGrams === "number" &&
+                    incident.wastedFilamentGrams > 0 ? (
+                      <p className="mt-2 text-xs font-medium text-amber-700">
+                        Desperdício registrado: {incident.wastedFilamentGrams} g
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+                Nenhuma ocorrência registrada ainda. Quando houver interrupções
+                ou falhas, elas aparecerão aqui.
+              </div>
+            )}
+
+            {sale.errorReason ? (
+              <DetailRow
+                label="Último motivo informado"
+                value={sale.errorReason}
+              />
+            ) : null}
           </DetailCard>
 
           <DetailCard title="Links e observações">
