@@ -95,6 +95,7 @@ interface HoverCardData {
   taskType?: "design" | "painting";
   serviceStatus?: "Active" | "Concluded";
   saleId?: string;
+  viewPath?: string;
   editPath?: string;
   entityType?: "print" | "design" | "painting";
 }
@@ -1784,6 +1785,7 @@ export default function PrintScheduleCalendar({
       : duration > 0
         ? addHours(start, duration)
         : start;
+    const viewPath = saleId ? `/sales/view/${saleId}` : undefined;
     const editPath = saleId
       ? `/sales/${saleId}`
       : extended.taskId
@@ -1808,6 +1810,7 @@ export default function PrintScheduleCalendar({
       taskType,
       serviceStatus,
       saleId,
+      viewPath,
       editPath,
       entityType,
     });
@@ -2508,14 +2511,31 @@ export default function PrintScheduleCalendar({
                       : "Iniciar impressao agora"}
                   </button>
                 )}
-                {hoverCard.editPath && (
-                  <button
-                    type="button"
-                    onClick={() => router.push(hoverCard.editPath as string)}
-                    className="mt-3 w-full rounded-lg bg-brand-purple text-white text-xs font-semibold py-2 hover:bg-purple-800 transition-colors"
-                  >
-                    Editar item
-                  </button>
+                {(hoverCard.viewPath || hoverCard.editPath) && (
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {hoverCard.viewPath && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          router.push(hoverCard.viewPath as string)
+                        }
+                        className="w-full rounded-lg border border-gray-200 bg-white text-gray-700 text-xs font-semibold py-2 hover:bg-gray-50 transition-colors"
+                      >
+                        Visualizar item
+                      </button>
+                    )}
+                    {hoverCard.editPath && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          router.push(hoverCard.editPath as string)
+                        }
+                        className="w-full rounded-lg bg-brand-purple text-white text-xs font-semibold py-2 hover:bg-purple-800 transition-colors"
+                      >
+                        Editar item
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </div>,
