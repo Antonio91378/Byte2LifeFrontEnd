@@ -600,7 +600,7 @@ function SalesPageContent() {
   const mobileActionClass =
     "flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition-colors";
   const desktopActionClass =
-    "inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition-colors hover:border-brand-purple/30 hover:bg-purple-50 hover:text-brand-purple";
+    "inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition-colors hover:border-brand-purple/30 hover:bg-purple-50 hover:text-brand-purple";
   const buildViewHref = (id: string) =>
     filterQuery.toString()
       ? `/sales/view/${id}?${filterQuery.toString()}`
@@ -1447,27 +1447,27 @@ function SalesPageContent() {
               <table className="min-w-full divide-y divide-gray-200 table-fixed">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="px-5 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Data
                     </th>
-                    <th className="hidden md:table-cell px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="hidden md:table-cell px-5 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Entrega
                     </th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="px-5 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Descrição
                     </th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="px-5 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Valor
                     </th>
                     <th
-                      className={`hidden md:table-cell px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider transition-opacity duration-300 ${hideProfit ? "opacity-0" : "opacity-100"}`}
+                      className={`hidden md:table-cell px-5 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider transition-opacity duration-300 ${hideProfit ? "opacity-0" : "opacity-100"}`}
                     >
                       Lucro
                     </th>
-                    <th className="w-64 px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="w-52 px-5 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Status
                     </th>
-                    <th className="w-52 px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="w-44 px-5 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Ações
                     </th>
                   </tr>
@@ -1480,14 +1480,14 @@ function SalesPageContent() {
                         className={`cursor-pointer transition-colors ${getSaleRowClassName(s)}`}
                       >
                         <td
-                          className={`px-6 py-4 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
+                          className={`px-5 py-3 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
                         >
                           {s.saleDate
                             ? new Date(s.saleDate).toLocaleDateString("pt-BR")
                             : "-"}
                         </td>
                         <td
-                          className={`hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
+                          className={`hidden md:table-cell px-5 py-3 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
                         >
                           {s.deliveryDate
                             ? new Date(s.deliveryDate).toLocaleDateString(
@@ -1496,12 +1496,12 @@ function SalesPageContent() {
                             : "-"}
                         </td>
                         <td
-                          className={`px-6 py-4 text-sm font-medium ${getSaleMutedTextClassName(s)}`}
+                          className={`px-5 py-3 text-sm font-medium ${getSaleMutedTextClassName(s)}`}
                         >
-                          <div className="flex min-w-0 items-center gap-2">
+                          <div className="flex min-w-0 items-center gap-1.5">
                             {expandedSaleId === s.id ? (
                               <svg
-                                className={`w-4 h-4 ${isSaleActive(s) ? "text-brand-purple" : "text-slate-400"}`}
+                                className={`h-4 w-4 ${isSaleActive(s) ? "text-brand-purple" : "text-slate-400"}`}
                                 fill="none"
                                 stroke="currentColor"
                                 viewBox="0 0 24 24"
@@ -1532,10 +1532,13 @@ function SalesPageContent() {
                               <img
                                 src={getFirstProductImageUrl(s.attachments)}
                                 alt={s.description}
-                                className="h-10 w-10 shrink-0 rounded-lg border border-gray-200 object-cover"
+                                className="h-8 w-8 shrink-0 rounded-lg border border-gray-200 object-cover"
                               />
                             )}
-                            <div className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap">
+                            <div
+                              className="min-w-0 flex-1 truncate"
+                              title={s.description}
+                            >
                               {s.description}
                             </div>
                             {s.incidents && s.incidents.length > 0 && (
@@ -1544,11 +1547,11 @@ function SalesPageContent() {
                                   e.stopPropagation();
                                   setShowIncidentsModal(s);
                                 }}
-                                className="ml-2 text-yellow-500 hover:text-yellow-600 transition-colors"
+                                className="ml-1.5 text-yellow-500 hover:text-yellow-600 transition-colors"
                                 title="Ver ocorrências de impressão"
                               >
                                 <svg
-                                  className="w-5 h-5"
+                                  className="h-4 w-4"
                                   fill="none"
                                   stroke="currentColor"
                                   viewBox="0 0 24 24"
@@ -1565,19 +1568,19 @@ function SalesPageContent() {
                           </div>
                         </td>
                         <td
-                          className={`px-6 py-4 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
+                          className={`px-5 py-3 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
                         >
                           R$ {s.saleValue.toFixed(2)}
                         </td>
                         <td
-                          className={`hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm font-bold transition-opacity duration-300 ${hideProfit ? "opacity-0" : "opacity-100"} ${isSaleActive(s) ? "text-green-600" : "text-slate-500"}`}
+                          className={`hidden md:table-cell px-5 py-3 whitespace-nowrap text-sm font-bold transition-opacity duration-300 ${hideProfit ? "opacity-0" : "opacity-100"} ${isSaleActive(s) ? "text-green-600" : "text-slate-500"}`}
                         >
                           R$ {s.profit.toFixed(2)}
                         </td>
-                        <td className="w-64 px-6 py-4 text-sm text-center">
-                          <div className="flex flex-wrap justify-center gap-2">
+                        <td className="w-52 px-5 py-3 text-xs text-center">
+                          <div className="mx-auto grid max-w-[12rem] grid-cols-2 gap-1.5">
                             <span
-                              className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getSaleActivityClassName(s)}`}
+                              className={`inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold leading-4 ${getSaleActivityClassName(s)}`}
                             >
                               {getSaleActivityLabel(s)}
                             </span>
@@ -1588,7 +1591,7 @@ function SalesPageContent() {
                                 e.stopPropagation();
                                 handleToggleStatus(s, "isPrintConcluded");
                               }}
-                              className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isPrintConcluded ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800")}`}
+                              className={`inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold leading-4 cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isPrintConcluded ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800")}`}
                               title="Alternar impresso"
                             >
                               {s.isPrintConcluded ? "Impresso" : "Pendente"}
@@ -1600,7 +1603,7 @@ function SalesPageContent() {
                                 e.stopPropagation();
                                 handleToggleStatus(s, "isDelivered");
                               }}
-                              className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isDelivered ? "bg-purple-100 text-purple-800" : "bg-yellow-100 text-yellow-800")}`}
+                              className={`inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold leading-4 cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isDelivered ? "bg-purple-100 text-purple-800" : "bg-yellow-100 text-yellow-800")}`}
                               title="Alternar entregue"
                             >
                               {s.isDelivered ? "Entregue" : "A Enviar"}
@@ -1612,7 +1615,7 @@ function SalesPageContent() {
                                 e.stopPropagation();
                                 handleToggleStatus(s, "isPaid");
                               }}
-                              className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isPaid ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}`}
+                              className={`inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold leading-4 cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isPaid ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}`}
                               title="Alternar pago"
                             >
                               {s.isPaid ? "Pago" : "Não Pago"}
@@ -1620,10 +1623,10 @@ function SalesPageContent() {
                           </div>
                         </td>
                         <td
-                          className="w-52 px-6 py-4 whitespace-nowrap text-right text-sm font-medium"
+                          className="w-44 px-5 py-3 whitespace-nowrap text-right text-sm font-medium"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <div className="flex items-center justify-end gap-1.5">
+                          <div className="flex items-center justify-end gap-1">
                             <Link
                               href={buildViewHref(s.id)}
                               className={desktopActionClass}
@@ -1697,7 +1700,7 @@ function SalesPageContent() {
                             <button
                               type="button"
                               onClick={() => handleToggleActivity(s)}
-                              className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${isSaleActive(s) ? "border-amber-200 bg-amber-50 text-amber-600 hover:border-amber-300 hover:bg-amber-100 hover:text-amber-700" : "border-emerald-200 bg-emerald-50 text-emerald-600 hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-700"}`}
+                              className={`inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${isSaleActive(s) ? "border-amber-200 bg-amber-50 text-amber-600 hover:border-amber-300 hover:bg-amber-100 hover:text-amber-700" : "border-emerald-200 bg-emerald-50 text-emerald-600 hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-700"}`}
                               title={
                                 isSaleActive(s)
                                   ? "Hibernar venda"
@@ -1735,7 +1738,7 @@ function SalesPageContent() {
                             <button
                               type="button"
                               onClick={() => handleDelete(s.id)}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-red-50 text-red-600 transition-colors hover:border-red-300 hover:bg-red-100 hover:text-red-700"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-red-200 bg-red-50 text-red-600 transition-colors hover:border-red-300 hover:bg-red-100 hover:text-red-700"
                               title="Excluir venda"
                               aria-label="Excluir venda"
                             >
@@ -1762,7 +1765,7 @@ function SalesPageContent() {
                             isSaleActive(s) ? "bg-purple-50" : "bg-slate-100"
                           }
                         >
-                          <td colSpan={7} className="px-6 py-4">
+                          <td colSpan={7} className="px-5 py-3">
                             {renderExpandedSaleDetails(s)}
                           </td>
                         </tr>
