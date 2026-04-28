@@ -2,6 +2,7 @@
 
 import Modal from "@/components/Modal";
 import { useDialog } from "@/context/DialogContext";
+import { isSaleActive } from "@/utils/saleActivity";
 import {
     getFirstProductImageUrl,
     SaleAttachment,
@@ -70,6 +71,7 @@ interface Sale {
   designPrintTime?: string;
   incidents?: PrintIncident[];
   attachments?: SaleAttachment[];
+  isActive?: boolean | null;
 }
 
 export default function SalesPage() {
@@ -96,6 +98,9 @@ function SalesPageContent() {
     "all" | "delivered" | "undelivered"
   >("all");
   const [printFilter, setPrintFilter] = useState<"all" | "printed" | "pending">(
+    "all",
+  );
+  const [activityFilter, setActivityFilter] = useState<"all" | "inactive">(
     "all",
   );
   const [isStatusFilterOpen, setIsStatusFilterOpen] = useState(false);
@@ -179,6 +184,13 @@ function SalesPageContent() {
       setPrintFilter(nextPrintStatus);
     }
 
+    const nextActivityStatus = searchParams.get("activityStatus");
+    if (nextActivityStatus === "inactive") {
+      setActivityFilter("inactive");
+    } else {
+      setActivityFilter("all");
+    }
+
     const nextSortDirection = searchParams.get("sortDirection");
     if (nextSortDirection === "asc" || nextSortDirection === "desc") {
       setSortDirection(nextSortDirection);
@@ -231,6 +243,44 @@ function SalesPageContent() {
       : "Desconhecido";
   };
 
+  const getSaleActivityLabel = (sale: Sale) =>
+    isSaleActive(sale) ? "Ativa" : "Hibernando";
+
+  const getSaleActivityClassName = (sale: Sale) =>
+    isSaleActive(sale)
+      ? "bg-emerald-100 text-emerald-800"
+      : "border border-slate-300 bg-slate-200 text-slate-700";
+
+  const getSaleStatusBadgeClassName = (sale: Sale, activeClassName: string) =>
+    isSaleActive(sale)
+      ? activeClassName
+      : "border border-slate-300 bg-slate-200 text-slate-700";
+
+  const resolveRequestErrorMessage = (
+    error: unknown,
+    fallbackMessage: string,
+  ) => {
+    if (axios.isAxiosError(error) && typeof error.response?.data === "string") {
+      const responseMessage = error.response.data.trim();
+      if (responseMessage) {
+        return responseMessage;
+      }
+    }
+
+    return fallbackMessage;
+  };
+
+  const updateSaleActivityState = (saleId: string, nextIsActive: boolean) => {
+    setSales((prev) =>
+      prev.map((item) =>
+        item.id === saleId ? { ...item, isActive: nextIsActive } : item,
+      ),
+    );
+    setShowIncidentsModal((prev) =>
+      prev?.id === saleId ? { ...prev, isActive: nextIsActive } : prev,
+    );
+  };
+
   const togglePaymentFilter = (value: "paid" | "unpaid") => {
     setPaymentFilter((prev) => (prev === value ? "all" : value));
   };
@@ -241,6 +291,10 @@ function SalesPageContent() {
 
   const togglePrintFilter = (value: "printed" | "pending") => {
     setPrintFilter((prev) => (prev === value ? "all" : value));
+  };
+
+  const toggleInactiveFilter = () => {
+    setActivityFilter((prev) => (prev === "inactive" ? "all" : "inactive"));
   };
 
   const handleClientFilterChange = (value: string) => {
@@ -309,8 +363,54 @@ function SalesPageContent() {
       );
     } catch (error) {
       console.error(error);
-      showAlert("Erro", "Falha ao atualizar status da venda.", "error");
+      showAlert(
+        "Erro",
+        resolveRequestErrorMessage(
+          error,
+          "Falha ao atualizar status da venda.",
+        ),
+        "error",
+      );
     }
+  };
+
+  const handleToggleActivity = (sale: Sale) => {
+    const nextIsActive = !isSaleActive(sale);
+    const title = nextIsActive ? "Reativar Venda" : "Hibernar Venda";
+    const description = nextIsActive
+      ? "Deseja reativar esta venda? Ela volta para as filas e contabilizacoes conforme o status atual."
+      : "Deseja hibernar esta venda? Ela sai das filas e deixa de entrar nas contabilizacoes enquanto estiver inativa.";
+
+    showConfirm(title, description, async () => {
+      const updatedSale = { ...sale, isActive: nextIsActive };
+
+      try {
+        await axios.put(
+          `http://localhost:5000/api/sales/${sale.id}`,
+          updatedSale,
+        );
+
+        updateSaleActivityState(sale.id, nextIsActive);
+
+        showAlert(
+          "Sucesso",
+          nextIsActive
+            ? "Venda reativada com sucesso!"
+            : "Venda hibernada e removida das filas.",
+          "success",
+        );
+      } catch (error) {
+        console.error(error);
+        showAlert(
+          "Erro",
+          resolveRequestErrorMessage(
+            error,
+            "Falha ao atualizar o status da venda.",
+          ),
+          "error",
+        );
+      }
+    });
   };
 
   const handleClone = async (sale: Sale) => {
@@ -416,6 +516,7 @@ function SalesPageContent() {
       if (deliveryFilter === "undelivered" && s.isDelivered) return false;
       if (printFilter === "printed" && !s.isPrintConcluded) return false;
       if (printFilter === "pending" && s.isPrintConcluded) return false;
+      if (activityFilter === "inactive" && isSaleActive(s)) return false;
 
       if (!filterDate) return true;
       if (!s.saleDate) return false;
@@ -428,6 +529,7 @@ function SalesPageContent() {
     filterClientName,
     filterDate,
     filterProductName,
+    activityFilter,
     paymentFilter,
     printFilter,
     sales,
@@ -444,16 +546,26 @@ function SalesPageContent() {
     });
   }, [filteredSales, sortDirection]);
 
-  const totalSales = filteredSales.reduce(
+  const activeFilteredSales = filteredSales.filter((sale) =>
+    isSaleActive(sale),
+  );
+
+  const totalSales = activeFilteredSales.reduce(
     (acc, curr) => acc + curr.saleValue,
     0,
   );
-  const totalProfit = filteredSales.reduce((acc, curr) => acc + curr.profit, 0);
-  const pendingPrints = filteredSales.filter((s) => !s.isPrintConcluded).length;
+  const totalProfit = activeFilteredSales.reduce(
+    (acc, curr) => acc + curr.profit,
+    0,
+  );
+  const pendingPrints = activeFilteredSales.filter(
+    (s) => !s.isPrintConcluded,
+  ).length;
   const activeStatusFilters = [
     paymentFilter,
     deliveryFilter,
     printFilter,
+    activityFilter,
   ].filter((value) => value !== "all").length;
   const filterQuery = new URLSearchParams();
   filterQuery.set("filterType", filterType);
@@ -478,6 +590,9 @@ function SalesPageContent() {
   if (printFilter !== "all") {
     filterQuery.set("printStatus", printFilter);
   }
+  if (activityFilter !== "all") {
+    filterQuery.set("activityStatus", activityFilter);
+  }
   filterQuery.set("sortDirection", sortDirection);
   const newSaleHref = filterQuery.toString()
     ? `/sales/new?${filterQuery.toString()}`
@@ -500,8 +615,37 @@ function SalesPageContent() {
     ) || activeStatusFilters > 0;
   const formatDisplayDate = (value?: string) =>
     value ? new Date(value).toLocaleDateString("pt-BR") : "-";
+  const getSaleCardClassName = (sale: Sale) =>
+    isSaleActive(sale)
+      ? "bg-white border-gray-100 shadow-sm"
+      : "bg-slate-200/90 border-slate-300 shadow-none";
+  const getSaleMutedTextClassName = (sale: Sale) =>
+    isSaleActive(sale) ? "text-gray-900" : "text-slate-600";
+  const getSaleSecondaryTextClassName = (sale: Sale) =>
+    isSaleActive(sale) ? "text-gray-500" : "text-slate-500";
+  const getSaleRowClassName = (sale: Sale) => {
+    if (!isSaleActive(sale)) {
+      return expandedSaleId === sale.id
+        ? "text-slate-600 [&>td]:bg-slate-200/95"
+        : "text-slate-600 [&>td]:bg-slate-100/95 hover:[&>td]:bg-slate-200/95";
+    }
+
+    return expandedSaleId === sale.id ? "bg-purple-50" : "hover:bg-gray-50";
+  };
+  const getExpandedPanelClassName = (sale: Sale) =>
+    isSaleActive(sale)
+      ? "rounded-xl border border-purple-100 bg-purple-50 p-4"
+      : "rounded-xl border border-slate-200 bg-slate-100 p-4";
   const renderExpandedSaleDetails = (sale: Sale) => (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-700">
+    <div
+      className={`grid grid-cols-1 gap-4 text-sm md:grid-cols-3 ${isSaleActive(sale) ? "text-gray-700" : "text-slate-600"}`}
+    >
+      {!isSaleActive(sale) && (
+        <div className="md:col-span-3 rounded-xl border border-slate-300 bg-white/70 px-4 py-3 text-sm font-medium text-slate-600">
+          Esta venda está hibernando. Ela fica fora das filas e das
+          contabilizações até ser reativada.
+        </div>
+      )}
       <div>
         <p className="font-bold text-brand-purple mb-1">Cliente</p>
         <p>{getClientName(sale.clientId)}</p>
@@ -732,12 +876,32 @@ function SalesPageContent() {
                       </div>
                     </div>
 
+                    <div>
+                      <p className="mb-2 text-xs font-semibold uppercase text-gray-500">
+                        Atividade
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={toggleInactiveFilter}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                            activityFilter === "inactive"
+                              ? "bg-amber-100 text-amber-800 border-amber-200"
+                              : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
+                          }`}
+                        >
+                          Somente hibernando
+                        </button>
+                      </div>
+                    </div>
+
                     <button
                       type="button"
                       onClick={() => {
                         setPaymentFilter("all");
                         setDeliveryFilter("all");
                         setPrintFilter("all");
+                        setActivityFilter("all");
                       }}
                       className="w-full border-t border-gray-100 pt-3 text-xs font-semibold text-gray-600 transition-colors hover:text-gray-800"
                     >
@@ -1019,7 +1183,7 @@ function SalesPageContent() {
             {sortedSales.map((s) => (
               <div
                 key={s.id}
-                className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-4"
+                className={`rounded-xl border p-4 space-y-4 transition-colors ${getSaleCardClassName(s)}`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 items-start gap-3">
@@ -1031,15 +1195,26 @@ function SalesPageContent() {
                       />
                     )}
                     <div className="min-w-0">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <p
+                        className={`text-xs font-semibold uppercase tracking-wide ${getSaleSecondaryTextClassName(s)}`}
+                      >
                         Venda em {formatDisplayDate(s.saleDate)}
                       </p>
-                      <h3 className="mt-1 text-base font-bold text-gray-900 wrap-break-word">
+                      <h3
+                        className={`mt-1 text-base font-bold wrap-break-word ${getSaleMutedTextClassName(s)}`}
+                      >
                         {s.description}
                       </h3>
-                      <p className="mt-1 text-xs text-gray-500">
-                        Entrega: {formatDisplayDate(s.deliveryDate)}
-                      </p>
+                      <div
+                        className={`mt-1 flex flex-wrap items-center gap-2 text-xs ${getSaleSecondaryTextClassName(s)}`}
+                      >
+                        <p>Entrega: {formatDisplayDate(s.deliveryDate)}</p>
+                        <span
+                          className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${getSaleActivityClassName(s)}`}
+                        >
+                          {getSaleActivityLabel(s)}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   {s.incidents && s.incidents.length > 0 && (
@@ -1068,20 +1243,32 @@ function SalesPageContent() {
                 <div
                   className={`grid gap-3 ${hideProfit ? "grid-cols-1" : "grid-cols-2"}`}
                 >
-                  <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                  <div
+                    className={`rounded-xl border p-3 ${isSaleActive(s) ? "border-gray-100 bg-gray-50" : "border-slate-200 bg-white/80"}`}
+                  >
+                    <p
+                      className={`text-[11px] font-semibold uppercase tracking-wide ${getSaleSecondaryTextClassName(s)}`}
+                    >
                       Valor
                     </p>
-                    <p className="mt-1 text-xl font-bold text-gray-900">
+                    <p
+                      className={`mt-1 text-xl font-bold ${getSaleMutedTextClassName(s)}`}
+                    >
                       R$ {s.saleValue.toFixed(2)}
                     </p>
                   </div>
                   {!hideProfit && (
-                    <div className="rounded-xl border border-green-100 bg-green-50 p-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-green-700">
+                    <div
+                      className={`rounded-xl border p-3 ${isSaleActive(s) ? "border-green-100 bg-green-50" : "border-slate-200 bg-white/80"}`}
+                    >
+                      <p
+                        className={`text-[11px] font-semibold uppercase tracking-wide ${isSaleActive(s) ? "text-green-700" : "text-slate-500"}`}
+                      >
                         Lucro
                       </p>
-                      <p className="mt-1 text-xl font-bold text-green-700">
+                      <p
+                        className={`mt-1 text-xl font-bold ${isSaleActive(s) ? "text-green-700" : "text-slate-600"}`}
+                      >
                         R$ {s.profit.toFixed(2)}
                       </p>
                     </div>
@@ -1089,10 +1276,15 @@ function SalesPageContent() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
+                  <span
+                    className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getSaleActivityClassName(s)}`}
+                  >
+                    {getSaleActivityLabel(s)}
+                  </span>
                   <button
                     type="button"
                     onClick={() => handleToggleStatus(s, "isPrintConcluded")}
-                    className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isPrintConcluded ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800"}`}
+                    className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isPrintConcluded ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800")}`}
                     title="Alternar impresso"
                   >
                     {s.isPrintConcluded ? "Impresso" : "Pendente"}
@@ -1100,7 +1292,7 @@ function SalesPageContent() {
                   <button
                     type="button"
                     onClick={() => handleToggleStatus(s, "isDelivered")}
-                    className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isDelivered ? "bg-purple-100 text-purple-800" : "bg-yellow-100 text-yellow-800"}`}
+                    className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isDelivered ? "bg-purple-100 text-purple-800" : "bg-yellow-100 text-yellow-800")}`}
                     title="Alternar entregue"
                   >
                     {s.isDelivered ? "Entregue" : "A Enviar"}
@@ -1108,7 +1300,7 @@ function SalesPageContent() {
                   <button
                     type="button"
                     onClick={() => handleToggleStatus(s, "isPaid")}
-                    className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isPaid ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
+                    className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isPaid ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}`}
                     title="Alternar pago"
                   >
                     {s.isPaid ? "Pago" : "Não Pago"}
@@ -1183,7 +1375,7 @@ function SalesPageContent() {
                   <button
                     type="button"
                     onClick={() => handleClone(s)}
-                    className={`${mobileActionClass} col-span-2 border border-gray-200 bg-white text-gray-700`}
+                    className={`${mobileActionClass} border border-gray-200 bg-white text-gray-700`}
                   >
                     <svg
                       className="h-4 w-4"
@@ -1200,6 +1392,35 @@ function SalesPageContent() {
                     </svg>
                     Clonar venda
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleActivity(s)}
+                    className={`${mobileActionClass} ${isSaleActive(s) ? "border border-amber-200 bg-amber-50 text-amber-700" : "border border-emerald-200 bg-emerald-50 text-emerald-700"}`}
+                  >
+                    <svg
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      {isSaleActive(s) ? (
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M10 9v6m4-6v6M9 5h6a2 2 0 012 2v10a2 2 0 01-2 2H9a2 2 0 01-2-2V7a2 2 0 012-2z"
+                        ></path>
+                      ) : (
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M8 5v14l11-7L8 5z"
+                        ></path>
+                      )}
+                    </svg>
+                    {isSaleActive(s) ? "Hibernar" : "Reativar"}
+                  </button>
                 </div>
 
                 <button
@@ -1213,7 +1434,7 @@ function SalesPageContent() {
                 </button>
 
                 {expandedSaleId === s.id && (
-                  <div className="rounded-xl border border-purple-100 bg-purple-50 p-4">
+                  <div className={getExpandedPanelClassName(s)}>
                     {renderExpandedSaleDetails(s)}
                   </div>
                 )}
@@ -1243,10 +1464,10 @@ function SalesPageContent() {
                     >
                       Lucro
                     </th>
-                    <th className="w-52 px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="w-64 px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Status
                     </th>
-                    <th className="w-40 px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="w-52 px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Ações
                     </th>
                   </tr>
@@ -1256,71 +1477,31 @@ function SalesPageContent() {
                     <Fragment key={s.id}>
                       <tr
                         onClick={() => toggleExpand(s.id)}
-                        className={`cursor-pointer transition-colors ${expandedSaleId === s.id ? "bg-purple-50" : "hover:bg-gray-50"}`}
+                        className={`cursor-pointer transition-colors ${getSaleRowClassName(s)}`}
                       >
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td
+                          className={`px-6 py-4 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
+                        >
                           {s.saleDate
                             ? new Date(s.saleDate).toLocaleDateString("pt-BR")
                             : "-"}
                         </td>
-                        <td className="hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td
+                          className={`hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
+                        >
                           {s.deliveryDate
                             ? new Date(s.deliveryDate).toLocaleDateString(
                                 "pt-BR",
                               )
                             : "-"}
                         </td>
-                        <td className="px-6 py-4 text-sm font-medium text-gray-900 flex items-center gap-2 min-w-0">
-                          {expandedSaleId === s.id ? (
-                            <svg
-                              className="w-4 h-4 text-brand-purple"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth="2"
-                                d="M19 9l-7 7-7-7"
-                              ></path>
-                            </svg>
-                          ) : (
-                            <svg
-                              className="w-4 h-4 text-gray-400"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth="2"
-                                d="M9 5l7 7-7 7"
-                              ></path>
-                            </svg>
-                          )}
-                          {getFirstProductImageUrl(s.attachments) && (
-                            <img
-                              src={getFirstProductImageUrl(s.attachments)}
-                              alt={s.description}
-                              className="h-10 w-10 shrink-0 rounded-lg border border-gray-200 object-cover"
-                            />
-                          )}
-                          <div className="flex-1 min-w-0 max-w-65 overflow-x-auto whitespace-nowrap">
-                            {s.description}
-                          </div>
-                          {s.incidents && s.incidents.length > 0 && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setShowIncidentsModal(s);
-                              }}
-                              className="ml-2 text-yellow-500 hover:text-yellow-600 transition-colors"
-                              title="Ver ocorrências de impressão"
-                            >
+                        <td
+                          className={`px-6 py-4 text-sm font-medium ${getSaleMutedTextClassName(s)}`}
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            {expandedSaleId === s.id ? (
                               <svg
-                                className="w-5 h-5"
+                                className={`w-4 h-4 ${isSaleActive(s) ? "text-brand-purple" : "text-slate-400"}`}
                                 fill="none"
                                 stroke="currentColor"
                                 viewBox="0 0 24 24"
@@ -1329,60 +1510,117 @@ function SalesPageContent() {
                                   strokeLinecap="round"
                                   strokeLinejoin="round"
                                   strokeWidth="2"
-                                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                  d="M19 9l-7 7-7-7"
                                 ></path>
                               </svg>
-                            </button>
-                          )}
+                            ) : (
+                              <svg
+                                className={`w-4 h-4 ${isSaleActive(s) ? "text-gray-400" : "text-slate-400"}`}
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="2"
+                                  d="M9 5l7 7-7 7"
+                                ></path>
+                              </svg>
+                            )}
+                            {getFirstProductImageUrl(s.attachments) && (
+                              <img
+                                src={getFirstProductImageUrl(s.attachments)}
+                                alt={s.description}
+                                className="h-10 w-10 shrink-0 rounded-lg border border-gray-200 object-cover"
+                              />
+                            )}
+                            <div className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap">
+                              {s.description}
+                            </div>
+                            {s.incidents && s.incidents.length > 0 && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowIncidentsModal(s);
+                                }}
+                                className="ml-2 text-yellow-500 hover:text-yellow-600 transition-colors"
+                                title="Ver ocorrências de impressão"
+                              >
+                                <svg
+                                  className="w-5 h-5"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth="2"
+                                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                  ></path>
+                                </svg>
+                              </button>
+                            )}
+                          </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td
+                          className={`px-6 py-4 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
+                        >
                           R$ {s.saleValue.toFixed(2)}
                         </td>
                         <td
-                          className={`hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-green-600 font-bold transition-opacity duration-300 ${hideProfit ? "opacity-0" : "opacity-100"}`}
+                          className={`hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm font-bold transition-opacity duration-300 ${hideProfit ? "opacity-0" : "opacity-100"} ${isSaleActive(s) ? "text-green-600" : "text-slate-500"}`}
                         >
                           R$ {s.profit.toFixed(2)}
                         </td>
-                        <td className="w-52 px-6 py-4 whitespace-nowrap text-sm text-center space-x-2">
-                          <span
-                            role="button"
-                            tabIndex={0}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleToggleStatus(s, "isPrintConcluded");
-                            }}
-                            className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isPrintConcluded ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800"}`}
-                            title="Alternar impresso"
-                          >
-                            {s.isPrintConcluded ? "Impresso" : "Pendente"}
-                          </span>
-                          <span
-                            role="button"
-                            tabIndex={0}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleToggleStatus(s, "isDelivered");
-                            }}
-                            className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isDelivered ? "bg-purple-100 text-purple-800" : "bg-yellow-100 text-yellow-800"}`}
-                            title="Alternar entregue"
-                          >
-                            {s.isDelivered ? "Entregue" : "A Enviar"}
-                          </span>
-                          <span
-                            role="button"
-                            tabIndex={0}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleToggleStatus(s, "isPaid");
-                            }}
-                            className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${s.isPaid ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
-                            title="Alternar pago"
-                          >
-                            {s.isPaid ? "Pago" : "Não Pago"}
-                          </span>
+                        <td className="w-64 px-6 py-4 text-sm text-center">
+                          <div className="flex flex-wrap justify-center gap-2">
+                            <span
+                              className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getSaleActivityClassName(s)}`}
+                            >
+                              {getSaleActivityLabel(s)}
+                            </span>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleStatus(s, "isPrintConcluded");
+                              }}
+                              className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isPrintConcluded ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800")}`}
+                              title="Alternar impresso"
+                            >
+                              {s.isPrintConcluded ? "Impresso" : "Pendente"}
+                            </span>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleStatus(s, "isDelivered");
+                              }}
+                              className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isDelivered ? "bg-purple-100 text-purple-800" : "bg-yellow-100 text-yellow-800")}`}
+                              title="Alternar entregue"
+                            >
+                              {s.isDelivered ? "Entregue" : "A Enviar"}
+                            </span>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleStatus(s, "isPaid");
+                              }}
+                              className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isPaid ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}`}
+                              title="Alternar pago"
+                            >
+                              {s.isPaid ? "Pago" : "Não Pago"}
+                            </span>
+                          </div>
                         </td>
                         <td
-                          className="w-40 px-6 py-4 whitespace-nowrap text-right text-sm font-medium"
+                          className="w-52 px-6 py-4 whitespace-nowrap text-right text-sm font-medium"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center justify-end gap-1.5">
@@ -1458,6 +1696,44 @@ function SalesPageContent() {
                             </button>
                             <button
                               type="button"
+                              onClick={() => handleToggleActivity(s)}
+                              className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${isSaleActive(s) ? "border-amber-200 bg-amber-50 text-amber-600 hover:border-amber-300 hover:bg-amber-100 hover:text-amber-700" : "border-emerald-200 bg-emerald-50 text-emerald-600 hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-700"}`}
+                              title={
+                                isSaleActive(s)
+                                  ? "Hibernar venda"
+                                  : "Reativar venda"
+                              }
+                              aria-label={
+                                isSaleActive(s)
+                                  ? "Hibernar venda"
+                                  : "Reativar venda"
+                              }
+                            >
+                              <svg
+                                className="w-4 h-4"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                {isSaleActive(s) ? (
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth="2"
+                                    d="M10 9v6m4-6v6M9 5h6a2 2 0 012 2v10a2 2 0 01-2 2H9a2 2 0 01-2-2V7a2 2 0 012-2z"
+                                  ></path>
+                                ) : (
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth="2"
+                                    d="M8 5v14l11-7L8 5z"
+                                  ></path>
+                                )}
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleDelete(s.id)}
                               className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-red-50 text-red-600 transition-colors hover:border-red-300 hover:bg-red-100 hover:text-red-700"
                               title="Excluir venda"
@@ -1481,7 +1757,11 @@ function SalesPageContent() {
                         </td>
                       </tr>
                       {expandedSaleId === s.id && (
-                        <tr className="bg-purple-50">
+                        <tr
+                          className={
+                            isSaleActive(s) ? "bg-purple-50" : "bg-slate-100"
+                          }
+                        >
                           <td colSpan={7} className="px-6 py-4">
                             {renderExpandedSaleDetails(s)}
                           </td>
@@ -1519,6 +1799,13 @@ function SalesPageContent() {
               ? "Ajuste os filtros ou limpe a busca para ver mais resultados."
               : "Comece importando uma planilha ou criando uma nova venda."}
           </p>
+        </div>
+      )}
+
+      {activityFilter === "inactive" && (
+        <div className="rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-600">
+          As vendas hibernando aparecem na listagem, mas continuam fora das
+          somas de lucro, faturamento e pendências.
         </div>
       )}
 

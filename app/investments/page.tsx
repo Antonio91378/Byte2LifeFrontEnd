@@ -2,6 +2,11 @@
 
 import Modal from "@/components/Modal";
 import { useDialog } from "@/context/DialogContext";
+import {
+    aggregateActiveSalesByDay,
+    aggregateActiveSalesByMonth,
+    buildInvestmentSummary,
+} from "@/utils/investmentMetrics";
 import axios from "axios";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
@@ -32,14 +37,6 @@ function getSaleDateStr(sale: any) {
     sale.created_at ||
     null
   );
-}
-
-function getSaleProfit(sale: any) {
-  const raw = sale.profit ?? sale.Profit ?? 0;
-  if (typeof raw === "number") return raw;
-  const normalized = String(raw).replaceAll(".", "").replace(",", ".");
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function getServiceDateStr(task: any) {
@@ -76,47 +73,6 @@ function filterChartEntriesByLabels(
 ) {
   const labelSet = new Set(labels);
   return entries.filter((entry) => labelSet.has(entry.label));
-}
-
-// Agrega vendas por m??s
-function aggregateSalesByMonth(sales: any[]) {
-  const map = new Map<string, { value: number; description: string }>();
-  sales.forEach((sale) => {
-    const dateStr = getSaleDateStr(sale);
-    if (!dateStr) return;
-    const label = getMonthLabel(dateStr);
-    const prev = map.get(label) || { value: 0, description: "" };
-    map.set(label, {
-      value: prev.value + getSaleProfit(sale),
-      description: `Lucro de ${label}`,
-    });
-  });
-  return Array.from(map.entries()).map(([label, { value, description }]) => ({
-    label,
-    value,
-    description,
-  }));
-}
-
-// Agrega vendas por dia de um m??s
-function aggregateSalesByDay(sales: any[], month: string) {
-  const map = new Map<string, { value: number; description: string }>();
-  sales.forEach((sale) => {
-    const dateStr = getSaleDateStr(sale);
-    if (!dateStr) return;
-    if (getMonthLabel(dateStr) !== month) return;
-    const label = getDayLabel(dateStr);
-    const prev = map.get(label) || { value: 0, description: "" };
-    map.set(label, {
-      value: prev.value + getSaleProfit(sale),
-      description: `Lucro em ${label}`,
-    });
-  });
-  return Array.from(map.entries()).map(([label, { value, description }]) => ({
-    label,
-    value,
-    description,
-  }));
 }
 
 function aggregateServicesByDay(tasks: any[], month: string) {
@@ -261,39 +217,23 @@ export default function InvestmentsPage() {
       const salesList = salesRes.data || [];
       const designList = designRes.data || [];
       const paintingList = paintingRes.data || [];
-      setSales(salesList);
-      setDesignTasks(designList);
-      setPaintingTasks(paintingList);
-
-      const servicesProfit = [...designList, ...paintingList].reduce(
-        (acc: number, task: any) => acc + getServiceValue(task),
-        0,
-      );
-      const profit =
-        salesList.reduce(
-          (acc: number, sale: any) => acc + getSaleProfit(sale),
-          0,
-        ) + servicesProfit;
-      const revenue =
-        salesList.reduce((acc: number, sale: any) => {
-          const raw = sale.saleValue ?? sale.SaleValue ?? 0;
-          if (typeof raw === "number") return acc + raw;
-          const normalized = String(raw).replaceAll(".", "").replace(",", ".");
-          const parsed = Number(normalized);
-          return acc + (Number.isFinite(parsed) ? parsed : 0);
-        }, 0) + servicesProfit;
-      setTotalProfit(profit);
-      setTotalRevenue(revenue);
-
-      const invList = invRes.data.sort(
+      const invList = (invRes.data || []).sort(
         (a: Investment, b: Investment) =>
           new Date(b.date).getTime() - new Date(a.date).getTime(),
       );
-      const investmentTotal = invList.reduce(
-        (acc: number, inv: any) => acc + inv.amount,
-        0,
-      );
-      setTotalInvestment(investmentTotal);
+      const summary = buildInvestmentSummary({
+        sales: salesList,
+        designTasks: designList,
+        paintingTasks: paintingList,
+        investments: invList,
+      });
+
+      setSales(summary.activeSales);
+      setDesignTasks(designList);
+      setPaintingTasks(paintingList);
+      setTotalProfit(summary.totalProfit);
+      setTotalRevenue(summary.totalRevenue);
+      setTotalInvestment(summary.totalInvestment);
       setInvestments(invList);
     } catch (err) {
       console.error(err);
@@ -421,7 +361,7 @@ export default function InvestmentsPage() {
   // Dados agregados por dia do m??s selecionado
   const salesByDay = useMemo(() => {
     if (!selectedMonth) return [];
-    return aggregateSalesByDay(sales, selectedMonth);
+    return aggregateActiveSalesByDay(sales, selectedMonth);
   }, [selectedMonth, sales]);
   const servicesByDay = useMemo(() => {
     if (!selectedMonth) return [];
@@ -443,7 +383,7 @@ export default function InvestmentsPage() {
     if (selectedMonthRange.length === 0) return [];
 
     const salesByMonth = filterChartEntriesByLabels(
-      aggregateSalesByMonth(sales),
+      aggregateActiveSalesByMonth(sales),
       selectedMonthRange,
     );
     const servicesByMonth = filterChartEntriesByLabels(

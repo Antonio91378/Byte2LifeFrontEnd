@@ -133,9 +133,7 @@ export default function EditFilamentPage({
   };
 
   const formatIncidentTimestamp = (timestamp?: string) => {
-    return timestamp
-      ? new Date(timestamp).toLocaleString("pt-BR")
-      : "Sem data";
+    return timestamp ? new Date(timestamp).toLocaleString("pt-BR") : "Sem data";
   };
 
   const getSaleStatusLabel = (sale: Sale) => {
@@ -156,7 +154,11 @@ export default function EditFilamentPage({
     }
 
     return (
-      <div className={compact ? "max-h-44 space-y-3 overflow-y-auto pr-1" : "space-y-3"}>
+      <div
+        className={
+          compact ? "max-h-44 space-y-3 overflow-y-auto pr-1" : "space-y-3"
+        }
+      >
         {sale.incidents.map((incident, index) => (
           <div
             key={`${sale.id}-${incident.timestamp}-${index}`}
