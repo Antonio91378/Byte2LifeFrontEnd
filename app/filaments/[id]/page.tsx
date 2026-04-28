@@ -1,5 +1,10 @@
 "use client";
 
+import {
+    type Nozzle02Compatibility,
+    getNozzle02CompatibilityValue,
+    toNozzle02CompatibilityPayload,
+} from "@/utils/filamentNozzleCompatibility";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
@@ -52,7 +57,7 @@ export default function EditFilamentPage({
     color: "",
     colorHex: "#000000",
     type: "PLA",
-    isNozzle02Compatible: false,
+    nozzle02Compatibility: "unknown" as Nozzle02Compatibility,
     warningComment: "",
     slicingProfile3mfPath: "",
   });
@@ -73,7 +78,9 @@ export default function EditFilamentPage({
           color: filamentRes.data.color || "",
           colorHex: filamentRes.data.colorHex || "#000000",
           type: filamentRes.data.type || "PLA",
-          isNozzle02Compatible: Boolean(filamentRes.data.isNozzle02Compatible),
+          nozzle02Compatibility: getNozzle02CompatibilityValue(
+            filamentRes.data,
+          ),
           warningComment: filamentRes.data.warningComment || "",
           slicingProfile3mfPath: filamentRes.data.slicingProfile3mfPath || "",
         });
@@ -112,7 +119,9 @@ export default function EditFilamentPage({
         color: formData.color,
         colorHex: formData.colorHex,
         type: formData.type,
-        isNozzle02Compatible: formData.isNozzle02Compatible,
+        isNozzle02Compatible: toNozzle02CompatibilityPayload(
+          formData.nozzle02Compatibility,
+        ),
         warningComment: formData.warningComment,
         slicingProfile3mfPath: formData.slicingProfile3mfPath,
       };
@@ -222,17 +231,24 @@ export default function EditFilamentPage({
               <option value="Outro">Outro</option>
             </select>
           </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              name="isNozzle02Compatible"
-              checked={formData.isNozzle02Compatible}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Compatibilidade com bico 0.2 mm
+            </label>
+            <select
+              name="nozzle02Compatibility"
+              value={formData.nozzle02Compatibility}
               onChange={handleChange}
-              className="w-5 h-5 text-brand-purple rounded focus:ring-brand-purple"
-            />
-            <span className="text-sm text-gray-700">
-              Compativel com bico 0.2 mm
-            </span>
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+            >
+              <option value="unknown">Desconhecido</option>
+              <option value="compatible">Compatível</option>
+              <option value="incompatible">Não compatível</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-500">
+              Marque desconhecido quando ainda não houver teste confiável com
+              bico 0.2 mm.
+            </p>
           </div>
           {/* Description */}
           <div>

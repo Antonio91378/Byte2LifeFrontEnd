@@ -1447,27 +1447,27 @@ function SalesPageContent() {
               <table className="min-w-full divide-y divide-gray-200 table-fixed">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-5 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="w-24 px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Data
                     </th>
-                    <th className="hidden md:table-cell px-5 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="hidden w-24 md:table-cell px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Entrega
                     </th>
-                    <th className="px-5 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="w-[31%] px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Descrição
                     </th>
-                    <th className="px-5 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="w-24 px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Valor
                     </th>
                     <th
-                      className={`hidden md:table-cell px-5 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider transition-opacity duration-300 ${hideProfit ? "opacity-0" : "opacity-100"}`}
+                      className={`hidden w-24 md:table-cell px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider transition-opacity duration-300 ${hideProfit ? "opacity-0" : "opacity-100"}`}
                     >
                       Lucro
                     </th>
-                    <th className="w-52 px-5 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="w-56 px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Status
                     </th>
-                    <th className="w-44 px-5 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <th className="w-48 px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">
                       Ações
                     </th>
                   </tr>
@@ -1480,14 +1480,14 @@ function SalesPageContent() {
                         className={`cursor-pointer transition-colors ${getSaleRowClassName(s)}`}
                       >
                         <td
-                          className={`px-5 py-3 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
+                          className={`px-4 py-3 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
                         >
                           {s.saleDate
                             ? new Date(s.saleDate).toLocaleDateString("pt-BR")
                             : "-"}
                         </td>
                         <td
-                          className={`hidden md:table-cell px-5 py-3 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
+                          className={`hidden md:table-cell px-4 py-3 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
                         >
                           {s.deliveryDate
                             ? new Date(s.deliveryDate).toLocaleDateString(
@@ -1496,7 +1496,7 @@ function SalesPageContent() {
                             : "-"}
                         </td>
                         <td
-                          className={`px-5 py-3 text-sm font-medium ${getSaleMutedTextClassName(s)}`}
+                          className={`w-[31%] px-4 py-3 text-sm font-medium ${getSaleMutedTextClassName(s)}`}
                         >
                           <div className="flex min-w-0 items-center gap-1.5">
                             {expandedSaleId === s.id ? (
@@ -1536,7 +1536,7 @@ function SalesPageContent() {
                               />
                             )}
                             <div
-                              className="min-w-0 flex-1 truncate"
+                              className="min-w-0 max-w-[22rem] flex-1 truncate text-[13px]"
                               title={s.description}
                             >
                               {s.description}
@@ -1568,62 +1568,59 @@ function SalesPageContent() {
                           </div>
                         </td>
                         <td
-                          className={`px-5 py-3 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
+                          className={`px-4 py-3 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
                         >
                           R$ {s.saleValue.toFixed(2)}
                         </td>
                         <td
-                          className={`hidden md:table-cell px-5 py-3 whitespace-nowrap text-sm font-bold transition-opacity duration-300 ${hideProfit ? "opacity-0" : "opacity-100"} ${isSaleActive(s) ? "text-green-600" : "text-slate-500"}`}
+                          className={`hidden md:table-cell px-4 py-3 whitespace-nowrap text-sm font-bold transition-opacity duration-300 ${hideProfit ? "opacity-0" : "opacity-100"} ${isSaleActive(s) ? "text-green-600" : "text-slate-500"}`}
                         >
                           R$ {s.profit.toFixed(2)}
                         </td>
-                        <td className="w-52 px-5 py-3 text-xs text-center">
-                          <div className="mx-auto grid max-w-[12rem] grid-cols-2 gap-1.5">
+                        <td className="w-56 px-4 py-3 text-xs text-center align-middle">
+                          <div className="mx-auto flex max-w-[13rem] flex-wrap items-center justify-center gap-1.5">
                             <span
-                              className={`inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold leading-4 ${getSaleActivityClassName(s)}`}
+                              className={`inline-flex whitespace-nowrap items-center justify-center rounded-full px-2.5 py-1 text-[10px] font-semibold leading-none ${getSaleActivityClassName(s)}`}
                             >
                               {getSaleActivityLabel(s)}
                             </span>
-                            <span
-                              role="button"
-                              tabIndex={0}
+                            <button
+                              type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleToggleStatus(s, "isPrintConcluded");
                               }}
-                              className={`inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold leading-4 cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isPrintConcluded ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800")}`}
+                              className={`inline-flex whitespace-nowrap items-center justify-center rounded-full px-2.5 py-1 text-[10px] font-semibold leading-none transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isPrintConcluded ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800")}`}
                               title="Alternar impresso"
                             >
                               {s.isPrintConcluded ? "Impresso" : "Pendente"}
-                            </span>
-                            <span
-                              role="button"
-                              tabIndex={0}
+                            </button>
+                            <button
+                              type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleToggleStatus(s, "isDelivered");
                               }}
-                              className={`inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold leading-4 cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isDelivered ? "bg-purple-100 text-purple-800" : "bg-yellow-100 text-yellow-800")}`}
+                              className={`inline-flex whitespace-nowrap items-center justify-center rounded-full px-2.5 py-1 text-[10px] font-semibold leading-none transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isDelivered ? "bg-purple-100 text-purple-800" : "bg-yellow-100 text-yellow-800")}`}
                               title="Alternar entregue"
                             >
                               {s.isDelivered ? "Entregue" : "A Enviar"}
-                            </span>
-                            <span
-                              role="button"
-                              tabIndex={0}
+                            </button>
+                            <button
+                              type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleToggleStatus(s, "isPaid");
                               }}
-                              className={`inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold leading-4 cursor-pointer transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isPaid ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}`}
+                              className={`inline-flex whitespace-nowrap items-center justify-center rounded-full px-2.5 py-1 text-[10px] font-semibold leading-none transition-transform duration-150 hover:scale-105 active:scale-95 ${getSaleStatusBadgeClassName(s, s.isPaid ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}`}
                               title="Alternar pago"
                             >
                               {s.isPaid ? "Pago" : "Não Pago"}
-                            </span>
+                            </button>
                           </div>
                         </td>
                         <td
-                          className="w-44 px-5 py-3 whitespace-nowrap text-right text-sm font-medium"
+                          className="w-48 px-4 py-3 whitespace-nowrap text-right text-sm font-medium"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center justify-end gap-1">
@@ -1765,7 +1762,7 @@ function SalesPageContent() {
                             isSaleActive(s) ? "bg-purple-50" : "bg-slate-100"
                           }
                         >
-                          <td colSpan={7} className="px-5 py-3">
+                          <td colSpan={7} className="px-4 py-3">
                             {renderExpandedSaleDetails(s)}
                           </td>
                         </tr>

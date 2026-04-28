@@ -1,42 +1,56 @@
-'use client';
+"use client";
 
-import axios from 'axios';
-import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import {
+    type Nozzle02Compatibility,
+    toNozzle02CompatibilityPayload,
+} from "@/utils/filamentNozzleCompatibility";
+import axios from "axios";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 export default function NewFilamentPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
   const [formData, setFormData] = useState({
-    description: '',
-    link: '',
+    description: "",
+    link: "",
     price: 0,
     initialMassGrams: 1000,
     remainingMassGrams: 1000,
-    color: '',
-    colorHex: '#000000',
-    type: 'PLA',
-    isNozzle02Compatible: false,
-    warningComment: '',
-    slicingProfile3mfPath: ''
+    color: "",
+    colorHex: "#000000",
+    type: "PLA",
+    nozzle02Compatibility: "unknown" as Nozzle02Compatibility,
+    warningComment: "",
+    slicingProfile3mfPath: "",
   });
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+  const handleChange = (
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >,
+  ) => {
     const target = e.target as HTMLInputElement;
-    const nextValue = target.type === 'checkbox' ? target.checked : target.value;
-    setFormData(prev => ({ ...prev, [target.name]: nextValue }));
+    const nextValue =
+      target.type === "checkbox" ? target.checked : target.value;
+    setFormData((prev) => ({ ...prev, [target.name]: nextValue }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await axios.post('http://localhost:5000/api/filaments', formData);
-      router.push('/filaments');
+      await axios.post("http://localhost:5000/api/filaments", {
+        ...formData,
+        isNozzle02Compatible: toNozzle02CompatibilityPayload(
+          formData.nozzle02Compatibility,
+        ),
+      });
+      router.push("/filaments");
     } catch (error) {
-      console.error('Error creating filament:', error);
-      alert('Erro ao criar filamento');
+      console.error("Error creating filament:", error);
+      alert("Erro ao criar filamento");
     } finally {
       setLoading(false);
     }
@@ -44,12 +58,19 @@ export default function NewFilamentPage() {
 
   return (
     <div className="max-w-2xl mx-auto">
-      <h1 className="text-3xl font-bold text-brand-purple mb-8 border-b-2 border-brand-orange pb-4">Novo Filamento</h1>
-      
-      <form onSubmit={handleSubmit} className="bg-white p-8 rounded-xl shadow-sm border border-gray-100 space-y-6">
+      <h1 className="text-3xl font-bold text-brand-purple mb-8 border-b-2 border-brand-orange pb-4">
+        Novo Filamento
+      </h1>
+
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white p-8 rounded-xl shadow-sm border border-gray-100 space-y-6"
+      >
         {/* Tipo */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Tipo
+          </label>
           <select
             name="type"
             value={formData.type}
@@ -67,19 +88,30 @@ export default function NewFilamentPage() {
             <option value="Outro">Outro</option>
           </select>
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            name="isNozzle02Compatible"
-            checked={formData.isNozzle02Compatible}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Compatibilidade com bico 0.2 mm
+          </label>
+          <select
+            name="nozzle02Compatibility"
+            value={formData.nozzle02Compatibility}
             onChange={handleChange}
-            className="w-5 h-5 text-brand-purple rounded focus:ring-brand-purple"
-          />
-          <span className="text-sm text-gray-700">Compativel com bico 0.2 mm</span>
+            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+          >
+            <option value="unknown">Desconhecido</option>
+            <option value="compatible">Compatível</option>
+            <option value="incompatible">Não compatível</option>
+          </select>
+          <p className="mt-1 text-xs text-gray-500">
+            Use desconhecido quando o filamento ainda não tiver sido testado com
+            esse bico.
+          </p>
         </div>
         {/* Description */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Descrição / Marca</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Descrição / Marca
+          </label>
           <input
             type="text"
             name="description"
@@ -92,7 +124,9 @@ export default function NewFilamentPage() {
 
         {/* Color */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Cor</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Cor
+          </label>
           <div className="flex gap-4 items-center">
             <div className="relative flex-1">
               <input
@@ -122,7 +156,9 @@ export default function NewFilamentPage() {
         <div className="grid grid-cols-2 gap-6">
           {/* Price */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Preço (R$)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Preço (R$)
+            </label>
             <input
               type="number"
               name="price"
@@ -136,7 +172,9 @@ export default function NewFilamentPage() {
 
           {/* Initial Mass */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Massa Inicial (g)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Massa Inicial (g)
+            </label>
             <input
               type="number"
               name="initialMassGrams"
@@ -144,10 +182,10 @@ export default function NewFilamentPage() {
               value={formData.initialMassGrams}
               onChange={(e) => {
                 const val = Number(e.target.value);
-                setFormData(prev => ({ 
-                  ...prev, 
+                setFormData((prev) => ({
+                  ...prev,
                   initialMassGrams: val,
-                  remainingMassGrams: val // Auto-update remaining when initial changes on create
+                  remainingMassGrams: val, // Auto-update remaining when initial changes on create
                 }));
               }}
               className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
@@ -157,7 +195,9 @@ export default function NewFilamentPage() {
 
         {/* Link */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Link de Compra</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Link de Compra
+          </label>
           <input
             type="url"
             name="link"
@@ -168,7 +208,9 @@ export default function NewFilamentPage() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Ressalvas de Fatiamento (warning)</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Ressalvas de Fatiamento (warning)
+          </label>
           <textarea
             name="warningComment"
             value={formData.warningComment}
@@ -180,7 +222,9 @@ export default function NewFilamentPage() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Arquivo 3MF de Exemplo (caminho)</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Arquivo 3MF de Exemplo (caminho)
+          </label>
           <input
             type="text"
             name="slicingProfile3mfPath"
@@ -204,10 +248,9 @@ export default function NewFilamentPage() {
             disabled={loading}
             className="px-6 py-2 bg-brand-purple text-white rounded-lg hover:bg-purple-800 transition-colors disabled:opacity-50"
           >
-            {loading ? 'Salvando...' : 'Salvar Filamento'}
+            {loading ? "Salvando..." : "Salvar Filamento"}
           </button>
         </div>
-
       </form>
     </div>
   );
