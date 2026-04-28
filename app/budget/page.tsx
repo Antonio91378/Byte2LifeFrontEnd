@@ -1,12 +1,20 @@
 "use client";
 
-import FilamentSelect from "@/components/FilamentSelect";
+import FilamentUsageEditor from "@/components/FilamentUsageEditor";
 import PrintScheduleCalendar from "@/components/PrintScheduleCalendar";
 import { DETAIL_LEVELS } from "@/constants/printQuality";
 import { API_BASE_URL } from "@/utils/api";
+import {
+    ensureFilamentUsageCount,
+    formatFilamentDisplayName,
+    getTotalFilamentUsageMass,
+    hasCompleteFilamentUsages,
+    toFilamentUsagePayload,
+    type FilamentUsageSelection,
+} from "@/utils/filamentUsage";
 import axios from "axios";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 interface Filament {
   id: string;
@@ -14,6 +22,7 @@ interface Filament {
   color: string;
   colorHex?: string;
   type?: string;
+  remainingMassGrams?: number;
   price: number;
   warningComment?: string;
   slicingProfile3mfPath?: string;
@@ -21,6 +30,14 @@ interface Filament {
 
 interface BudgetResult {
   materialCost: number;
+  materialBreakdown: Array<{
+    filamentId: string;
+    filamentDescription: string;
+    color: string;
+    massGrams: number;
+    unitPricePerKg: number;
+    materialCost: number;
+  }>;
   energyCost: number;
   machineCost: number;
   totalProductionCost: number;
@@ -34,9 +51,8 @@ interface BudgetResult {
 }
 
 interface BudgetFormData {
-  filamentId: string;
+  filamentUsages: FilamentUsageSelection[];
   detailLevel: number;
-  massGrams: string;
   hasCustomArt: boolean;
   hasPainting: boolean;
   hasVarnish: boolean;
@@ -48,9 +64,8 @@ interface BudgetFormData {
 const FILAMENTS_ENDPOINT = `${API_BASE_URL}/filaments`;
 const BUDGET_CALCULATE_ENDPOINT = `${API_BASE_URL}/budget/calculate`;
 const INITIAL_FORM_DATA: BudgetFormData = {
-  filamentId: "",
+  filamentUsages: ensureFilamentUsageCount([], 1),
   detailLevel: 1,
-  massGrams: "",
   hasCustomArt: false,
   hasPainting: false,
   hasVarnish: false,
@@ -93,22 +108,60 @@ export default function BudgetPage() {
   const formDataRef = useRef<BudgetFormData>(INITIAL_FORM_DATA);
   const resultRef = useRef<BudgetResult | null>(null);
 
-  const selectedFilament = filaments.find(
-    (filament) => filament.id === formData.filamentId,
+  const filamentPayload = useMemo(
+    () => toFilamentUsagePayload(formData.filamentUsages),
+    [formData.filamentUsages],
   );
-  const warningDetails = [
-    selectedFilament?.warningComment?.trim(),
-    selectedFilament?.slicingProfile3mfPath?.trim()
-      ? `3MF: ${selectedFilament.slicingProfile3mfPath.trim()}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join(" | ");
-  const hasWarning = Boolean(warningDetails);
+  const totalMassGrams = useMemo(
+    () => getTotalFilamentUsageMass(formData.filamentUsages),
+    [formData.filamentUsages],
+  );
+  const selectedFilamentWarnings = useMemo(() => {
+    return filamentPayload
+      .map((usage) => {
+        const filament = filaments.find((item) => item.id === usage.filamentId);
+        if (!filament) {
+          return null;
+        }
+
+        const details = [
+          filament.warningComment?.trim(),
+          filament.slicingProfile3mfPath?.trim()
+            ? `3MF: ${filament.slicingProfile3mfPath.trim()}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" | ");
+
+        if (!details) {
+          return null;
+        }
+
+        return `${formatFilamentDisplayName(filament)}: ${details}`;
+      })
+      .filter(Boolean) as string[];
+  }, [filamentPayload, filaments]);
+  const selectedFilamentNames = useMemo(() => {
+    return filamentPayload
+      .map((usage) => {
+        const filament = filaments.find((item) => item.id === usage.filamentId);
+        if (!filament) {
+          return null;
+        }
+
+        return `${formatFilamentDisplayName(filament)} • ${usage.massGrams.toLocaleString(
+          "pt-BR",
+          {
+            maximumFractionDigits: 1,
+          },
+        )}g`;
+      })
+      .filter(Boolean) as string[];
+  }, [filamentPayload, filaments]);
   const hasNoFilaments = !loading && !filamentsError && filaments.length === 0;
   const canCalculate =
-    Boolean(formData.filamentId) &&
-    Number(formData.massGrams) > 0 &&
+    hasCompleteFilamentUsages(formData.filamentUsages) &&
+    totalMassGrams > 0 &&
     !loading &&
     !filamentsError &&
     filaments.length > 0;
@@ -131,7 +184,13 @@ export default function BudgetPage() {
   }
 
   async function calculateBudget(data = formDataRef.current) {
-    if (!data.filamentId || Number(data.massGrams) <= 0) {
+    const nextFilamentPayload = toFilamentUsagePayload(data.filamentUsages);
+    const nextTotalMassGrams = nextFilamentPayload.reduce(
+      (total, usage) => total + usage.massGrams,
+      0,
+    );
+
+    if (nextFilamentPayload.length === 0 || nextTotalMassGrams <= 0) {
       return;
     }
 
@@ -142,9 +201,10 @@ export default function BudgetPage() {
 
     try {
       const payload = {
-        filamentId: data.filamentId,
+        filaments: nextFilamentPayload,
+        filamentId: nextFilamentPayload[0].filamentId,
         detailLevel: Number(data.detailLevel),
-        massGrams: Number(data.massGrams),
+        massGrams: nextTotalMassGrams,
         hasCustomArt: data.hasCustomArt,
         hasPainting: data.hasPainting,
         hasVarnish: data.hasVarnish,
@@ -211,7 +271,8 @@ export default function BudgetPage() {
     formDataRef.current = nextData;
 
     const hasRequiredInputs =
-      Boolean(nextData.filamentId) && Number(nextData.massGrams) > 0;
+      hasCompleteFilamentUsages(nextData.filamentUsages) &&
+      getTotalFilamentUsageMass(nextData.filamentUsages) > 0;
     if (!hasRequiredInputs) {
       clearRecalculationTimeout();
       setCalculationError(null);
@@ -258,16 +319,39 @@ export default function BudgetPage() {
   }, []);
 
   useEffect(() => {
-    if (!formData.filamentId || loading) {
+    if (loading) {
       return;
     }
 
-    const filamentStillExists = filaments.some(
-      (filament) => filament.id === formData.filamentId,
-    );
-    if (!filamentStillExists) {
-      applyFormData({ ...formData, filamentId: "" });
+    let hasChanges = false;
+    const nextUsages = formData.filamentUsages.map((usage) => {
+      if (!usage.filamentId) {
+        return usage;
+      }
+
+      const selectedFilament = filaments.find(
+        (filament) => filament.id === usage.filamentId,
+      );
+      const requestedMass = Number(usage.massGrams || 0);
+
+      if (
+        !selectedFilament ||
+        (requestedMass > 0 &&
+          typeof selectedFilament.remainingMassGrams === "number" &&
+          selectedFilament.remainingMassGrams < requestedMass)
+      ) {
+        hasChanges = true;
+        return { ...usage, filamentId: "" };
+      }
+
+      return usage;
+    });
+
+    if (!hasChanges) {
+      return;
     }
+
+    applyFormData({ ...formData, filamentUsages: nextUsages });
   }, [filaments, formData, loading]);
 
   function handleCalculate(event: React.FormEvent) {
@@ -281,10 +365,258 @@ export default function BudgetPage() {
     updateFormData({ [name]: value } as Partial<BudgetFormData>, 800);
   }
 
+  const budgetResultPanel = (() => {
+    if (result) {
+      return (
+        <div className="space-y-6">
+          <div className="bg-white rounded-2xl shadow-lg border border-teal-100 overflow-hidden">
+            <div className="bg-teal-600 p-6 text-white text-center">
+              <p className="text-teal-100 text-sm font-medium uppercase tracking-wider mb-1">
+                Valor Sugerido de Venda
+              </p>
+              <h2 className="text-5xl font-extrabold">
+                {result.totalPrice.toLocaleString("pt-BR", {
+                  style: "currency",
+                  currency: "BRL",
+                })}
+              </h2>
+            </div>
+
+            <div className="p-6">
+              <div className="flex justify-between items-center py-3 border-b border-gray-100">
+                <span className="text-gray-600">Margem de Lucro</span>
+                <div className="text-right">
+                  <span className="block font-semibold text-teal-600">
+                    {result.profitMarginPercentage.toFixed(0)}%
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    {result.profitValue.toLocaleString("pt-BR", {
+                      style: "currency",
+                      currency: "BRL",
+                    })}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="bg-gray-50 p-4 border-b border-gray-200">
+              <div className="flex justify-between items-center">
+                <h3 className="text-lg font-bold text-gray-800">
+                  Custo de Produção
+                </h3>
+                <span className="text-xl font-bold text-gray-900">
+                  {result.totalProductionCost.toLocaleString("pt-BR", {
+                    style: "currency",
+                    currency: "BRL",
+                  })}
+                </span>
+              </div>
+            </div>
+            <div className="p-6 space-y-3">
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-gray-600 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+                  <span>
+                    {result.materialBreakdown.length > 1
+                      ? "Materiais (Filamentos)"
+                      : "Material (Filamento)"}
+                  </span>
+                </span>
+                <span className="font-medium text-gray-900">
+                  {result.materialCost.toLocaleString("pt-BR", {
+                    style: "currency",
+                    currency: "BRL",
+                  })}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-gray-600 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-yellow-400"></span>
+                  <span>Energia Elétrica</span>
+                </span>
+                <span className="font-medium text-gray-900">
+                  {result.energyCost.toLocaleString("pt-BR", {
+                    style: "currency",
+                    currency: "BRL",
+                  })}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-gray-600 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-red-400"></span>
+                  <span>Depreciação Máquina</span>
+                </span>
+                <span className="font-medium text-gray-900">
+                  {result.machineCost.toLocaleString("pt-BR", {
+                    style: "currency",
+                    currency: "BRL",
+                  })}
+                </span>
+              </div>
+
+              {result.materialBreakdown.length > 1 && (
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-gray-500">
+                    Composição do material
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {result.materialBreakdown.map((item) => (
+                      <div
+                        key={`${item.filamentId}-${item.color}`}
+                        className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-sm"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-gray-900">
+                            {item.filamentDescription}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {item.color || "Cor não informada"} •{" "}
+                            {item.massGrams.toLocaleString("pt-BR", {
+                              maximumFractionDigits: 1,
+                            })}
+                            g
+                          </p>
+                        </div>
+                        <span className="shrink-0 font-semibold text-gray-900">
+                          {item.materialCost.toLocaleString("pt-BR", {
+                            style: "currency",
+                            currency: "BRL",
+                          })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+            <h3 className="text-sm font-bold text-gray-900 mb-4">
+              Detalhes Técnicos (Editável)
+            </h3>
+            <div className="grid grid-cols-3 gap-4 pb-4 border-b border-gray-100">
+              <div className="bg-gray-50 p-3 rounded-lg text-center">
+                <p className="text-xs text-gray-500 uppercase font-bold mb-1">
+                  Nozzle
+                </p>
+                <input
+                  type="text"
+                  name="nozzleDiameter"
+                  value={formData.nozzleDiameter}
+                  onChange={handleTechnicalChange}
+                  className="w-full text-center text-sm font-bold text-gray-800 bg-transparent border-b border-gray-300 focus:border-teal-500 focus:outline-none"
+                  placeholder="0.4mm"
+                />
+              </div>
+              <div className="bg-gray-50 p-3 rounded-lg text-center">
+                <p className="text-xs text-gray-500 uppercase font-bold mb-1">
+                  Camada
+                </p>
+                <input
+                  type="text"
+                  name="layerHeight"
+                  value={formData.layerHeight}
+                  onChange={handleTechnicalChange}
+                  className="w-full text-center text-sm font-bold text-gray-800 bg-transparent border-b border-gray-300 focus:border-teal-500 focus:outline-none"
+                  placeholder="0.2mm"
+                />
+              </div>
+              <div className="bg-gray-50 p-3 rounded-lg text-center">
+                <p className="text-xs text-gray-500 uppercase font-bold mb-1">
+                  Tempo (h)
+                </p>
+                <input
+                  type="number"
+                  name="printTimeHours"
+                  step="0.1"
+                  value={formData.printTimeHours}
+                  onChange={handleTechnicalChange}
+                  className="w-full text-center text-sm font-bold text-gray-800 bg-transparent border-b border-gray-300 focus:border-teal-500 focus:outline-none"
+                  placeholder="0.0"
+                />
+              </div>
+            </div>
+
+            <div className="bg-gray-50 rounded-lg p-4 mt-4">
+              <h3 className="text-xs font-bold text-gray-500 uppercase mb-2">
+                Regras de Negócio Aplicadas
+              </h3>
+              <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono">
+                {result.breakdown}
+              </pre>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (calculationError) {
+      return (
+        <div
+          className="bg-red-50 rounded-2xl border border-red-200 p-8 flex flex-col items-center justify-center text-center h-full min-h-100 text-red-700"
+          role="alert"
+        >
+          <svg
+            className="w-16 h-16 mb-4 text-red-300"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              d="M12 9v2m0 4h.01m-7.938 4h15.876C21.296 19 22 18.296 22 17.428V6.572C22 5.704 21.296 5 20.428 5H3.572C2.704 5 2 5.704 2 6.572v10.856C2 18.296 2.704 19 3.572 19z"
+            ></path>
+          </svg>
+          <p className="text-lg font-semibold text-red-800">
+            Não foi possível calcular o orçamento
+          </p>
+          <p className="text-sm mt-2 max-w-md">{calculationError}</p>
+          <button
+            type="button"
+            onClick={() => void calculateBudget(formDataRef.current)}
+            disabled={!canCalculate || calculating}
+            className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 flex flex-col items-center justify-center text-center h-full min-h-100 text-gray-600">
+        <svg
+          className="w-16 h-16 mb-4 text-gray-400"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+            d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+          ></path>
+        </svg>
+        <p className="text-lg font-medium text-gray-800">
+          Preencha o formulário ao lado
+        </p>
+        <p className="text-sm mt-2 text-gray-600">
+          O resultado do orçamento aparecerá aqui.
+        </p>
+      </div>
+    );
+  })();
+
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-6xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
+    <div className="min-h-screen bg-gray-50 px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-800">
               Simulação de Orçamento
@@ -314,42 +646,22 @@ export default function BudgetPage() {
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)] gap-10">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+        <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,460px)_minmax(0,1fr)] xl:gap-10">
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
             <form onSubmit={handleCalculate} className="space-y-6">
               <div>
-                <label
-                  htmlFor="budget-filament-select"
-                  className="block text-sm font-medium text-gray-700 mb-2"
-                >
-                  Filamento
-                </label>
-                <FilamentSelect
-                  id="budget-filament-select"
+                <FilamentUsageEditor
                   filaments={filaments}
-                  value={formData.filamentId}
+                  usages={formData.filamentUsages}
                   onChange={(value) =>
-                    updateFormData({ filamentId: value }, 300)
+                    updateFormData({ filamentUsages: value }, 300)
                   }
                   loading={loading}
-                  loadingMessage="Buscando filamentos cadastrados..."
-                  emptyMessage={
-                    hasNoFilaments
-                      ? "Nenhum filamento cadastrado no momento."
-                      : "Nenhum filamento encontrado."
-                  }
-                  placeholder={
-                    loading
-                      ? "Carregando filamentos..."
-                      : filamentsError
-                        ? "Falha ao carregar filamentos"
-                        : hasNoFilaments
-                          ? "Nenhum filamento disponível"
-                          : "Selecione um filamento..."
-                  }
                   disabled={Boolean(filamentsError) || hasNoFilaments}
                   showPrice
+                  showRemaining
                   showType
+                  description="Distribua a massa entre os materiais usados na peça. A soma é usada no custo, no tempo estimado e na sugestão de preço."
                 />
                 {loading && (
                   <div className="mt-3 flex items-center gap-2 rounded-lg border border-brand-purple/10 bg-brand-purple/5 px-3 py-2 text-sm text-brand-purple">
@@ -398,15 +710,11 @@ export default function BudgetPage() {
                     </Link>
                   </div>
                 )}
-                {hasWarning && (
-                  <div className="mt-2 flex items-center gap-2 text-sm text-yellow-700">
-                    <span
-                      className="text-yellow-500"
-                      title={warningDetails}
-                      aria-label="Filamento com ressalvas de fatiamento"
-                    >
+                {selectedFilamentWarnings.length > 0 && (
+                  <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+                    <div className="flex items-center gap-2 font-semibold text-amber-900">
                       <svg
-                        className="w-5 h-5"
+                        className="h-4 w-4"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -418,10 +726,13 @@ export default function BudgetPage() {
                           d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
                         ></path>
                       </svg>
-                    </span>
-                    <span className="text-gray-600">
-                      Filamento exige cuidados de fatiamento.
-                    </span>
+                      Ressalvas dos filamentos selecionados
+                    </div>
+                    <div className="mt-2 space-y-2">
+                      {selectedFilamentWarnings.map((warning) => (
+                        <p key={warning}>{warning}</p>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -485,28 +796,28 @@ export default function BudgetPage() {
                 </div>
               </fieldset>
 
-              <div className="grid grid-cols-1 gap-4">
-                <div>
-                  <label
-                    htmlFor="budget-mass-grams"
-                    className="block text-sm font-medium text-gray-700 mb-2"
-                  >
-                    Massa (g)
-                  </label>
-                  <input
-                    id="budget-mass-grams"
-                    type="number"
-                    required
-                    min="0"
-                    step="0.1"
-                    value={formData.massGrams}
-                    onChange={(event) =>
-                      updateFormData({ massGrams: event.target.value }, 450)
-                    }
-                    className="w-full rounded-lg border-gray-300 shadow-sm focus:border-teal-500 focus:ring-teal-500 text-gray-900 placeholder-gray-500"
-                    placeholder="Ex: 150"
-                  />
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium">Massa total calculada</span>
+                  <span className="text-lg font-bold text-gray-900">
+                    {totalMassGrams.toLocaleString("pt-BR", {
+                      maximumFractionDigits: 1,
+                    })}
+                    g
+                  </span>
                 </div>
+                {selectedFilamentNames.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-600">
+                    {selectedFilamentNames.map((name) => (
+                      <span
+                        key={name}
+                        className="rounded-full bg-white px-3 py-1 font-medium text-gray-700 ring-1 ring-gray-200"
+                      >
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <fieldset className="space-y-3 pt-2 border-t border-gray-100">
@@ -605,206 +916,7 @@ export default function BudgetPage() {
             </form>
           </div>
 
-          <div className="space-y-6 min-w-0">
-            {result ? (
-              <div className="space-y-6">
-                <div className="bg-white rounded-2xl shadow-lg border border-teal-100 overflow-hidden">
-                  <div className="bg-teal-600 p-6 text-white text-center">
-                    <p className="text-teal-100 text-sm font-medium uppercase tracking-wider mb-1">
-                      Valor Sugerido de Venda
-                    </p>
-                    <h2 className="text-5xl font-extrabold">
-                      {result.totalPrice.toLocaleString("pt-BR", {
-                        style: "currency",
-                        currency: "BRL",
-                      })}
-                    </h2>
-                  </div>
-
-                  <div className="p-6">
-                    <div className="flex justify-between items-center py-3 border-b border-gray-100">
-                      <span className="text-gray-600">Margem de Lucro</span>
-                      <div className="text-right">
-                        <span className="block font-semibold text-teal-600">
-                          {result.profitMarginPercentage.toFixed(0)}%
-                        </span>
-                        <span className="text-xs text-gray-400">
-                          {result.profitValue.toLocaleString("pt-BR", {
-                            style: "currency",
-                            currency: "BRL",
-                          })}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                  <div className="bg-gray-50 p-4 border-b border-gray-200">
-                    <div className="flex justify-between items-center">
-                      <h3 className="text-lg font-bold text-gray-800">
-                        Custo de Produção
-                      </h3>
-                      <span className="text-xl font-bold text-gray-900">
-                        {result.totalProductionCost.toLocaleString("pt-BR", {
-                          style: "currency",
-                          currency: "BRL",
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="p-6 space-y-3">
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-blue-400"></span>
-                        <span>Material (Filamento)</span>
-                      </span>
-                      <span className="font-medium text-gray-900">
-                        {result.materialCost.toLocaleString("pt-BR", {
-                          style: "currency",
-                          currency: "BRL",
-                        })}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-yellow-400"></span>
-                        <span>Energia Elétrica</span>
-                      </span>
-                      <span className="font-medium text-gray-900">
-                        {result.energyCost.toLocaleString("pt-BR", {
-                          style: "currency",
-                          currency: "BRL",
-                        })}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-red-400"></span>
-                        <span>Depreciação Máquina</span>
-                      </span>
-                      <span className="font-medium text-gray-900">
-                        {result.machineCost.toLocaleString("pt-BR", {
-                          style: "currency",
-                          currency: "BRL",
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-                  <h3 className="text-sm font-bold text-gray-900 mb-4">
-                    Detalhes Técnicos (Editável)
-                  </h3>
-                  <div className="grid grid-cols-3 gap-4 pb-4 border-b border-gray-100">
-                    <div className="bg-gray-50 p-3 rounded-lg text-center">
-                      <p className="text-xs text-gray-500 uppercase font-bold mb-1">
-                        Nozzle
-                      </p>
-                      <input
-                        type="text"
-                        name="nozzleDiameter"
-                        value={formData.nozzleDiameter}
-                        onChange={handleTechnicalChange}
-                        className="w-full text-center text-sm font-bold text-gray-800 bg-transparent border-b border-gray-300 focus:border-teal-500 focus:outline-none"
-                        placeholder="0.4mm"
-                      />
-                    </div>
-                    <div className="bg-gray-50 p-3 rounded-lg text-center">
-                      <p className="text-xs text-gray-500 uppercase font-bold mb-1">
-                        Camada
-                      </p>
-                      <input
-                        type="text"
-                        name="layerHeight"
-                        value={formData.layerHeight}
-                        onChange={handleTechnicalChange}
-                        className="w-full text-center text-sm font-bold text-gray-800 bg-transparent border-b border-gray-300 focus:border-teal-500 focus:outline-none"
-                        placeholder="0.2mm"
-                      />
-                    </div>
-                    <div className="bg-gray-50 p-3 rounded-lg text-center">
-                      <p className="text-xs text-gray-500 uppercase font-bold mb-1">
-                        Tempo (h)
-                      </p>
-                      <input
-                        type="number"
-                        name="printTimeHours"
-                        step="0.1"
-                        value={formData.printTimeHours}
-                        onChange={handleTechnicalChange}
-                        className="w-full text-center text-sm font-bold text-gray-800 bg-transparent border-b border-gray-300 focus:border-teal-500 focus:outline-none"
-                        placeholder="0.0"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="bg-gray-50 rounded-lg p-4 mt-4">
-                    <h3 className="text-xs font-bold text-gray-500 uppercase mb-2">
-                      Regras de Negócio Aplicadas
-                    </h3>
-                    <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono">
-                      {result.breakdown}
-                    </pre>
-                  </div>
-                </div>
-              </div>
-            ) : calculationError ? (
-              <div
-                className="bg-red-50 rounded-2xl border border-red-200 p-8 flex flex-col items-center justify-center text-center h-full min-h-[400px] text-red-700"
-                role="alert"
-              >
-                <svg
-                  className="w-16 h-16 mb-4 text-red-300"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M12 9v2m0 4h.01m-7.938 4h15.876C21.296 19 22 18.296 22 17.428V6.572C22 5.704 21.296 5 20.428 5H3.572C2.704 5 2 5.704 2 6.572v10.856C2 18.296 2.704 19 3.572 19z"
-                  ></path>
-                </svg>
-                <p className="text-lg font-semibold text-red-800">
-                  Não foi possível calcular o orçamento
-                </p>
-                <p className="text-sm mt-2 max-w-md">{calculationError}</p>
-                <button
-                  type="button"
-                  onClick={() => void calculateBudget(formDataRef.current)}
-                  disabled={!canCalculate || calculating}
-                  className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Tentar novamente
-                </button>
-              </div>
-            ) : (
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 flex flex-col items-center justify-center text-center h-full min-h-[400px] text-gray-600">
-                <svg
-                  className="w-16 h-16 mb-4 text-gray-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-                  ></path>
-                </svg>
-                <p className="text-lg font-medium text-gray-800">
-                  Preencha o formulário ao lado
-                </p>
-                <p className="text-sm mt-2 text-gray-600">
-                  O resultado do orçamento aparecerá aqui.
-                </p>
-              </div>
-            )}
-          </div>
+          <div className="space-y-6 min-w-0">{budgetResultPanel}</div>
 
           {result && (
             <div className="lg:col-span-2">

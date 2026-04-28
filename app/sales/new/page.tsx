@@ -1,10 +1,18 @@
 ﻿"use client";
 
-import FilamentSelect from "@/components/FilamentSelect";
+import FilamentUsageEditor from "@/components/FilamentUsageEditor";
 import PrintScheduleCalendar from "@/components/PrintScheduleCalendar";
 import SaleAttachmentsPanel from "@/components/sale/SaleAttachmentsPanel";
 import { DETAIL_LEVELS } from "@/constants/printQuality";
 import { useDialog } from "@/context/DialogContext";
+import {
+    ensureFilamentUsageCount,
+    formatFilamentDisplayName,
+    getPrimaryFilamentId,
+    getTotalFilamentUsageMass,
+    hasCompleteFilamentUsages,
+    toFilamentUsagePayload,
+} from "@/utils/filamentUsage";
 import {
     appendPendingAttachmentsToFormData,
     buildPendingSaleAttachments,
@@ -21,7 +29,7 @@ import {
 import { parseDurationToHours } from "@/utils/time";
 import axios from "axios";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 interface Filament {
   id: string;
@@ -30,6 +38,8 @@ interface Filament {
   colorHex?: string;
   type?: string;
   remainingMassGrams: number;
+  warningComment?: string;
+  slicingProfile3mfPath?: string;
 }
 
 interface Client {
@@ -84,7 +94,6 @@ function NewSaleContent() {
     const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : 0;
   };
-  const parseMassGrams = (value: string | number) => parseNumericValue(value);
   const [filaments, setFilaments] = useState<Filament[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [serviceProviders, setServiceProviders] = useState<ServiceProvider[]>(
@@ -107,6 +116,7 @@ function NewSaleContent() {
     description: "",
     productLink: "",
     printQuality: "Normal",
+    filamentUsages: ensureFilamentUsageCount([], 1),
     massGrams: 0,
     cost: 0,
     shippingCost: 0,
@@ -293,10 +303,12 @@ function NewSaleContent() {
 
   const buildSalePayload = () => {
     const { baseCost, costDetails, ...saleData } = formData;
+    const filamentPayload = toFilamentUsagePayload(formData.filamentUsages);
 
     return {
       ...saleData,
       attachments: existingAttachments,
+      filaments: filamentPayload,
       massGrams: massGramsValue,
       printTimeHours: parseDurationToHours(formData.designPrintTime),
       deliveryDate: formData.deliveryDate === "" ? null : formData.deliveryDate,
@@ -318,8 +330,8 @@ function NewSaleContent() {
       paintTimeHours: Number(formData.paintTimeHours) || 0,
       paintResponsible: formData.paintResponsible || "",
       filamentId:
-        formData.filamentId && formData.filamentId.length === 24
-          ? formData.filamentId
+        filamentPayload[0]?.filamentId?.length === 24
+          ? filamentPayload[0].filamentId
           : null,
       clientId:
         formData.clientId && formData.clientId.length === 24
@@ -362,7 +374,18 @@ function NewSaleContent() {
           setFormData((prev) => ({
             ...prev,
             description: stockItem.description,
-            filamentId: stockItem.filamentId,
+            filamentUsages: ensureFilamentUsageCount(
+              stockItem.filamentId
+                ? [
+                    {
+                      key: `stock-${stockItem.filamentId}`,
+                      filamentId: stockItem.filamentId,
+                      massGrams: stockItem.weightGrams,
+                    },
+                  ]
+                : [],
+              1,
+            ),
             massGrams: stockItem.weightGrams,
             baseCost: stockItem.productionCost || 0,
             productionCost: stockItem.productionCost || 0,
@@ -384,14 +407,53 @@ function NewSaleContent() {
     fetchData();
   }, [stockId]);
 
-  const massGramsValue = parseMassGrams(formData.massGrams);
+  const filamentPayload = useMemo(
+    () => toFilamentUsagePayload(formData.filamentUsages),
+    [formData.filamentUsages],
+  );
+  const massGramsValue = getTotalFilamentUsageMass(formData.filamentUsages);
+  const selectedFilamentWarnings = useMemo(() => {
+    return filamentPayload
+      .map((usage) => {
+        const filament = filaments.find((item) => item.id === usage.filamentId);
+        if (!filament) {
+          return null;
+        }
 
-  const filteredFilaments =
-    massGramsValue > 0
-      ? filaments.filter(
-          (filament) => filament.remainingMassGrams >= massGramsValue,
-        )
-      : [];
+        const details = [
+          filament.warningComment?.trim(),
+          filament.slicingProfile3mfPath?.trim()
+            ? `3MF: ${filament.slicingProfile3mfPath.trim()}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" | ");
+
+        if (!details) {
+          return null;
+        }
+
+        return `${formatFilamentDisplayName(filament)}: ${details}`;
+      })
+      .filter(Boolean) as string[];
+  }, [filamentPayload, filaments]);
+  const selectedFilamentNames = useMemo(() => {
+    return filamentPayload
+      .map((usage) => {
+        const filament = filaments.find((item) => item.id === usage.filamentId);
+        if (!filament) {
+          return null;
+        }
+
+        return `${formatFilamentDisplayName(filament)} • ${usage.massGrams.toLocaleString(
+          "pt-BR",
+          {
+            maximumFractionDigits: 1,
+          },
+        )}g`;
+      })
+      .filter(Boolean) as string[];
+  }, [filamentPayload, filaments]);
   const designerProviders = serviceProviders.filter((provider) =>
     isDesignerCategory(
       provider.categories && provider.categories.length > 0
@@ -447,26 +509,68 @@ function NewSaleContent() {
   );
 
   useEffect(() => {
-    if (formData.filamentId === "") return;
-    const selected = filaments.find(
-      (filament) => filament.id === formData.filamentId,
-    );
+    const nextMassGrams = getTotalFilamentUsageMass(formData.filamentUsages);
+    const nextFilamentId = getPrimaryFilamentId(formData.filamentUsages);
+
     if (
-      !selected ||
-      massGramsValue <= 0 ||
-      selected.remainingMassGrams < massGramsValue
+      formData.massGrams === nextMassGrams &&
+      formData.filamentId === nextFilamentId
     ) {
-      setFormData((prev) => ({ ...prev, filamentId: "" }));
+      return;
     }
-  }, [massGramsValue, formData.filamentId, filaments]);
+
+    setFormData((prev) => ({
+      ...prev,
+      massGrams: nextMassGrams,
+      filamentId: nextFilamentId,
+    }));
+  }, [formData.filamentUsages, formData.massGrams, formData.filamentId]);
+
+  useEffect(() => {
+    if (optionsLoading) {
+      return;
+    }
+
+    let hasChanges = false;
+    const nextUsages = formData.filamentUsages.map((usage) => {
+      if (!usage.filamentId) {
+        return usage;
+      }
+
+      const selectedFilament = filaments.find(
+        (filament) => filament.id === usage.filamentId,
+      );
+      const requestedMass = Number(usage.massGrams || 0);
+
+      if (
+        !selectedFilament ||
+        (requestedMass > 0 &&
+          selectedFilament.remainingMassGrams < requestedMass)
+      ) {
+        hasChanges = true;
+        return { ...usage, filamentId: "" };
+      }
+
+      return usage;
+    });
+
+    if (!hasChanges) {
+      return;
+    }
+
+    setFormData((prev) => ({ ...prev, filamentUsages: nextUsages }));
+  }, [filaments, formData.filamentUsages, optionsLoading]);
 
   // Calculate cost and suggested price automatically
   useEffect(() => {
     const calculatePrice = async () => {
-      const isValidFilamentId =
-        typeof formData.filamentId === "string" &&
-        formData.filamentId.length === 24;
-      if (!isValidFilamentId || massGramsValue <= 0) return;
+      if (
+        !hasCompleteFilamentUsages(formData.filamentUsages) ||
+        massGramsValue <= 0 ||
+        filamentPayload.length === 0
+      ) {
+        return;
+      }
 
       const hours = parseDurationToHours(formData.designPrintTime);
       const level =
@@ -477,7 +581,8 @@ function NewSaleContent() {
         const res = await axios.post(
           "http://localhost:5000/api/budget/calculate",
           {
-            filamentId: formData.filamentId,
+            filaments: filamentPayload,
+            filamentId: filamentPayload[0].filamentId,
             detailLevel: level,
             massGrams: massGramsValue,
             hasCustomArt: formData.hasCustomArt,
@@ -514,8 +619,7 @@ function NewSaleContent() {
 
     return () => clearTimeout(timeoutId);
   }, [
-    formData.filamentId,
-    formData.massGrams,
+    formData.filamentUsages,
     formData.printQuality,
     formData.designPrintTime,
     formData.hasCustomArt,
@@ -681,49 +785,69 @@ function NewSaleContent() {
             />
           </div>
 
-          {/* Mass */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Massa (g)
-            </label>
-            <input
-              type="number"
-              name="massGrams"
-              step="0.1"
-              value={formData.massGrams}
-              onChange={handleChange}
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
-            />
-          </div>
-
-          {/* Filament */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Filamento
-            </label>
-            <FilamentSelect
-              id="new-sale-filament-select"
-              filaments={filteredFilaments}
-              value={formData.filamentId}
+          <div className="col-span-1 md:col-span-2 space-y-3">
+            <FilamentUsageEditor
+              filaments={filaments}
+              usages={formData.filamentUsages}
               onChange={(value) =>
-                setFormData((prev) => ({ ...prev, filamentId: value }))
+                setFormData((prev) => ({ ...prev, filamentUsages: value }))
               }
               loading={optionsLoading}
-              loadingMessage="Buscando filamentos disponíveis..."
-              emptyMessage={
-                formData.massGrams > 0
-                  ? "Nenhum filamento compatível com a massa informada."
-                  : "Informe a massa para listar filamentos."
-              }
-              placeholder={
-                formData.massGrams > 0
-                  ? "Selecione um filamento..."
-                  : "Informe a massa para listar filamentos"
-              }
-              disabled={formData.massGrams <= 0}
+              disabled={optionsLoading && filaments.length === 0}
               showRemaining
               showType
+              description="Distribua a massa da peça entre os filamentos usados. A soma define o custo, a sugestão de venda e o histórico de consumo."
             />
+
+            <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-medium">Massa total calculada</span>
+                <span className="text-lg font-bold text-gray-900">
+                  {massGramsValue.toLocaleString("pt-BR", {
+                    maximumFractionDigits: 1,
+                  })}
+                  g
+                </span>
+              </div>
+              {selectedFilamentNames.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-600">
+                  {selectedFilamentNames.map((name) => (
+                    <span
+                      key={name}
+                      className="rounded-full bg-white px-3 py-1 font-medium text-gray-700 ring-1 ring-gray-200"
+                    >
+                      {name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {selectedFilamentWarnings.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <div className="flex items-center gap-2 font-semibold text-amber-900">
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    ></path>
+                  </svg>
+                  Ressalvas dos filamentos selecionados
+                </div>
+                <div className="mt-2 space-y-2">
+                  {selectedFilamentWarnings.map((warning) => (
+                    <p key={warning}>{warning}</p>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Client */}

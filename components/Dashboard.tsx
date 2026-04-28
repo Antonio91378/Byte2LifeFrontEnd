@@ -1,5 +1,6 @@
 "use client";
 
+import { mapSaleFilamentPayload } from "@/utils/filamentUsage";
 import axios from "axios";
 
 import Link from "next/link";
@@ -26,6 +27,11 @@ interface Sale {
   description: string;
 
   filamentId: string;
+
+  filaments?: Array<{
+    filamentId?: string;
+    massGrams?: number;
+  }>;
 
   printStatus: string;
 
@@ -174,6 +180,8 @@ interface FilamentInfo {
   color?: string;
 
   colorHex?: string;
+
+  massGrams?: number;
 }
 
 const NOTIFY_LEAD_MINUTES = 30;
@@ -457,9 +465,7 @@ export default function Dashboard() {
 
   const [showCalendar, setShowCalendar] = useState(false);
 
-  const [currentFilament, setCurrentFilament] = useState<FilamentInfo | null>(
-    null,
-  );
+  const [currentFilaments, setCurrentFilaments] = useState<FilamentInfo[]>([]);
 
   const [activeWorkTab, setActiveWorkTab] = useState("printer");
 
@@ -607,40 +613,89 @@ export default function Dashboard() {
   useEffect(() => {
     let isMounted = true;
 
-    const fetchFilament = async () => {
-      if (!currentPrint?.filamentId) {
-        setCurrentFilament(null);
+    const fetchFilaments = async () => {
+      const currentPrintFilaments = mapSaleFilamentPayload(currentPrint);
+
+      if (currentPrintFilaments.length === 0) {
+        setCurrentFilaments([]);
 
         return;
       }
 
       try {
-        const res = await axios.get(
-          `http://localhost:5000/api/filaments/${currentPrint.filamentId}`,
+        const nextFilaments = await Promise.all(
+          currentPrintFilaments.map(async (usage) => {
+            try {
+              const res = await axios.get(
+                `http://localhost:5000/api/filaments/${usage.filamentId}`,
+              );
+
+              return {
+                id: res.data?.id || usage.filamentId,
+                color: res.data?.color || "",
+                colorHex: res.data?.colorHex || "",
+                massGrams: usage.massGrams,
+              } satisfies FilamentInfo;
+            } catch {
+              return {
+                id: usage.filamentId,
+                color: "",
+                colorHex: "",
+                massGrams: usage.massGrams,
+              } satisfies FilamentInfo;
+            }
+          }),
         );
 
         if (!isMounted) return;
 
-        setCurrentFilament({
-          id: res.data?.id || currentPrint.filamentId,
-
-          color: res.data?.color || "",
-
-          colorHex: res.data?.colorHex || "",
-        });
+        setCurrentFilaments(nextFilaments);
       } catch {
         if (!isMounted) return;
 
-        setCurrentFilament(null);
+        setCurrentFilaments([]);
       }
     };
 
-    fetchFilament();
+    fetchFilaments();
 
     return () => {
       isMounted = false;
     };
-  }, [currentPrint?.filamentId]);
+  }, [currentPrint]);
+
+  const currentFilamentSummary = useMemo(() => {
+    if (currentFilaments.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="mt-4 flex max-w-full flex-wrap items-center justify-center gap-2 text-xs text-gray-700 sm:text-sm">
+        {currentFilaments.map((filament) => (
+          <span
+            key={`${filament.id}-${filament.massGrams}`}
+            className="inline-flex max-w-full items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1"
+          >
+            <span
+              className="h-3.5 w-3.5 shrink-0 rounded border border-gray-300"
+              style={{
+                backgroundColor: filament.colorHex || "#ffffff",
+              }}
+            ></span>
+
+            <span className="font-medium">
+              {filament.color || "Cor não informada"}
+              {typeof filament.massGrams === "number"
+                ? ` • ${filament.massGrams.toLocaleString("pt-BR", {
+                    maximumFractionDigits: 1,
+                  })}g`
+                : ""}
+            </span>
+          </span>
+        ))}
+      </div>
+    );
+  }, [currentFilaments]);
 
   useEffect(() => {
     if (
@@ -1553,6 +1608,8 @@ export default function Dashboard() {
                           : "N/A"}
                       </p>
 
+                      {currentFilamentSummary}
+
                       {remainingTime && (
                         <div className="my-4 flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4">
                           {isEditingTime ? (
@@ -1768,23 +1825,7 @@ export default function Dashboard() {
                         Pronto para imprimir
                       </p>
 
-                      {currentFilament && (
-                        <div className="mt-4 inline-flex max-w-full flex-wrap items-center justify-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-gray-700 sm:text-sm">
-                          <span
-                            className="h-3.5 w-3.5 rounded border border-gray-300"
-                            style={{
-                              backgroundColor:
-                                currentFilament.colorHex || "#ffffff",
-                            }}
-                          ></span>
-
-                          <span className="font-medium">
-                            {currentFilament.color
-                              ? `Filamento: ${currentFilament.color}`
-                              : "Filamento: cor não informada"}
-                          </span>
-                        </div>
-                      )}
+                      {currentFilamentSummary}
 
                       <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row sm:gap-4">
                         <Link

@@ -5,6 +5,7 @@ import {
     getNozzle02CompatibilityValue,
     toNozzle02CompatibilityPayload,
 } from "@/utils/filamentNozzleCompatibility";
+import { getSaleFilamentUsageMass } from "@/utils/filamentUsage";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
@@ -13,6 +14,10 @@ interface Sale {
   id: string;
   description: string;
   massGrams: number;
+  filaments?: Array<{
+    filamentId?: string;
+    massGrams?: number;
+  }>;
   saleValue: number;
   isPrintConcluded: boolean;
   saleDate?: string;
@@ -153,6 +158,23 @@ export default function EditFilamentPage({
     return sale.isPrintConcluded
       ? "bg-green-100 text-green-800"
       : "bg-yellow-100 text-yellow-800";
+  };
+
+  const getTrackedConsumption = (sale: Sale) => {
+    const trackedMass = getSaleFilamentUsageMass(sale, id);
+    return trackedMass > 0 ? trackedMass : Number(sale.massGrams || 0);
+  };
+
+  const getTrackedWaste = (sale: Sale) => {
+    const totalWaste = Number(sale.wastedFilamentGrams || 0);
+    const trackedMass = getTrackedConsumption(sale);
+    const totalMass = Number(sale.massGrams || 0);
+
+    if (totalWaste <= 0 || trackedMass <= 0 || totalMass <= 0) {
+      return 0;
+    }
+
+    return (trackedMass / totalMass) * totalWaste;
   };
 
   const renderIncidents = (sale: Sale, compact = false) => {
@@ -433,15 +455,21 @@ export default function EditFilamentPage({
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-lg bg-gray-50 px-3 py-2">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
-                      Consumo
+                      Consumo neste filamento
                     </p>
                     <div className="mt-1 text-sm font-semibold text-gray-900">
-                      {sale.massGrams}g
+                      {getTrackedConsumption(sale).toLocaleString("pt-BR", {
+                        maximumFractionDigits: 1,
+                      })}
+                      g
                     </div>
-                    {typeof sale.wastedFilamentGrams === "number" &&
-                    sale.wastedFilamentGrams > 0 ? (
+                    {getTrackedWaste(sale) > 0 ? (
                       <div className="mt-1 text-xs font-medium text-amber-700">
-                        + {sale.wastedFilamentGrams}g desperdiçados
+                        +{" "}
+                        {getTrackedWaste(sale).toLocaleString("pt-BR", {
+                          maximumFractionDigits: 1,
+                        })}
+                        g desperdiçados
                       </div>
                     ) : null}
                   </div>
@@ -503,11 +531,19 @@ export default function EditFilamentPage({
                       </div>
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900 font-medium">
-                      <div>{sale.massGrams}g</div>
-                      {typeof sale.wastedFilamentGrams === "number" &&
-                      sale.wastedFilamentGrams > 0 ? (
+                      <div>
+                        {getTrackedConsumption(sale).toLocaleString("pt-BR", {
+                          maximumFractionDigits: 1,
+                        })}
+                        g
+                      </div>
+                      {getTrackedWaste(sale) > 0 ? (
                         <div className="mt-1 text-xs font-medium text-amber-700">
-                          + {sale.wastedFilamentGrams}g desperdiçados
+                          +{" "}
+                          {getTrackedWaste(sale).toLocaleString("pt-BR", {
+                            maximumFractionDigits: 1,
+                          })}
+                          g desperdiçados
                         </div>
                       ) : null}
                     </td>

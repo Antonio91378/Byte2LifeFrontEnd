@@ -2,6 +2,10 @@
 
 import Modal from "@/components/Modal";
 import { useDialog } from "@/context/DialogContext";
+import {
+    formatFilamentDisplayName,
+    mapSaleFilamentPayload,
+} from "@/utils/filamentUsage";
 import { isSaleActive } from "@/utils/saleActivity";
 import {
     getFirstProductImageUrl,
@@ -43,6 +47,11 @@ interface Filament {
   color: string;
 }
 
+interface SaleFilamentUsage {
+  filamentId?: string;
+  massGrams?: number;
+}
+
 interface Client {
   id: string;
   name: string;
@@ -64,6 +73,7 @@ interface Sale {
   productLink?: string;
   clientId?: string;
   filamentId?: string;
+  filaments?: SaleFilamentUsage[];
   printQuality?: string;
   massGrams?: number;
   cost?: number;
@@ -238,9 +248,7 @@ function SalesPageContent() {
   const getFilamentName = (id?: string) => {
     if (!id) return "N/A";
     const filament = filaments.find((f) => f.id === id);
-    return filament
-      ? `${filament.description} (${filament.color})`
-      : "Desconhecido";
+    return filament ? formatFilamentDisplayName(filament) : "Desconhecido";
   };
 
   const getSaleActivityLabel = (sale: Sale) =>
@@ -636,103 +644,123 @@ function SalesPageContent() {
     isSaleActive(sale)
       ? "rounded-xl border border-purple-100 bg-purple-50 p-4"
       : "rounded-xl border border-slate-200 bg-slate-100 p-4";
-  const renderExpandedSaleDetails = (sale: Sale) => (
-    <div
-      className={`grid grid-cols-1 gap-4 text-sm md:grid-cols-3 ${isSaleActive(sale) ? "text-gray-700" : "text-slate-600"}`}
-    >
-      {!isSaleActive(sale) && (
-        <div className="md:col-span-3 rounded-xl border border-slate-300 bg-white/70 px-4 py-3 text-sm font-medium text-slate-600">
-          Esta venda está hibernando. Ela fica fora das filas e das
-          contabilizações até ser reativada.
+  const renderExpandedSaleDetails = (sale: Sale) => {
+    const saleFilamentUsages = mapSaleFilamentPayload(sale);
+
+    return (
+      <div
+        className={`grid grid-cols-1 gap-4 text-sm md:grid-cols-3 ${isSaleActive(sale) ? "text-gray-700" : "text-slate-600"}`}
+      >
+        {!isSaleActive(sale) && (
+          <div className="md:col-span-3 rounded-xl border border-slate-300 bg-white/70 px-4 py-3 text-sm font-medium text-slate-600">
+            Esta venda está hibernando. Ela fica fora das filas e das
+            contabilizações até ser reativada.
+          </div>
+        )}
+        <div>
+          <p className="font-bold text-brand-purple mb-1">Cliente</p>
+          <p>{getClientName(sale.clientId)}</p>
         </div>
-      )}
-      <div>
-        <p className="font-bold text-brand-purple mb-1">Cliente</p>
-        <p>{getClientName(sale.clientId)}</p>
-      </div>
-      <div>
-        <p className="font-bold text-brand-purple mb-1">Filamento</p>
-        <p>{getFilamentName(sale.filamentId)}</p>
-      </div>
-      <div>
-        <p className="font-bold text-brand-purple mb-1">Link do Produto</p>
-        {sale.productLink ? (
-          <a
-            href={sale.productLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:underline break-all block"
-          >
-            {sale.productLink}
-          </a>
-        ) : (
-          <span className="text-gray-400">Não informado</span>
-        )}
-      </div>
-      <div>
-        <p className="font-bold text-brand-purple mb-1">Qualidade</p>
-        <p>{sale.printQuality || "Padrão"}</p>
-      </div>
-      <div>
-        <p className="font-bold text-brand-purple mb-1">Tempo Estimado</p>
-        <p>{sale.designPrintTime || "-"}</p>
-      </div>
-      <div>
-        <p className="font-bold text-brand-purple mb-1">Massa / Custo Total</p>
-        <p>
-          {sale.massGrams}g / R$ {sale.cost?.toFixed(2)}
-        </p>
-        {Number(sale.shippingCost || 0) > 0 && (
-          <p className="mt-1 text-xs text-gray-500">
-            Frete: R$ {(sale.shippingCost || 0).toFixed(2)}
+        <div>
+          <p className="font-bold text-brand-purple mb-1">Filamentos</p>
+          {saleFilamentUsages.length === 0 ? (
+            <p>Não informado</p>
+          ) : (
+            <div className="space-y-1">
+              {saleFilamentUsages.map((usage) => (
+                <p key={`${sale.id}-${usage.filamentId}`}>
+                  {getFilamentName(usage.filamentId)} •{" "}
+                  {usage.massGrams.toLocaleString("pt-BR", {
+                    maximumFractionDigits: 1,
+                  })}
+                  g
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+        <div>
+          <p className="font-bold text-brand-purple mb-1">Link do Produto</p>
+          {sale.productLink ? (
+            <a
+              href={sale.productLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline break-all block"
+            >
+              {sale.productLink}
+            </a>
+          ) : (
+            <span className="text-gray-400">Não informado</span>
+          )}
+        </div>
+        <div>
+          <p className="font-bold text-brand-purple mb-1">Qualidade</p>
+          <p>{sale.printQuality || "Padrão"}</p>
+        </div>
+        <div>
+          <p className="font-bold text-brand-purple mb-1">Tempo Estimado</p>
+          <p>{sale.designPrintTime || "-"}</p>
+        </div>
+        <div>
+          <p className="font-bold text-brand-purple mb-1">
+            Massa / Custo Total
           </p>
-        )}
-      </div>
-      <div className="md:col-span-3 flex flex-col sm:flex-row sm:justify-end mt-4 pt-4 border-t border-purple-100 gap-3">
-        <button
-          onClick={() => {
-            setShowIncidentsModal(sale);
-            setIsAddingIncident(true);
-          }}
-          className="w-full sm:w-auto bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
-        >
-          <svg
-            className="w-4 h-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+          <p>
+            {sale.massGrams}g / R$ {sale.cost?.toFixed(2)}
+          </p>
+          {Number(sale.shippingCost || 0) > 0 && (
+            <p className="mt-1 text-xs text-gray-500">
+              Frete: R$ {(sale.shippingCost || 0).toFixed(2)}
+            </p>
+          )}
+        </div>
+        <div className="md:col-span-3 flex flex-col sm:flex-row sm:justify-end mt-4 pt-4 border-t border-purple-100 gap-3">
+          <button
+            onClick={() => {
+              setShowIncidentsModal(sale);
+              setIsAddingIncident(true);
+            }}
+            className="w-full sm:w-auto bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-            ></path>
-          </svg>
-          Registrar Ocorrência
-        </button>
-        <button
-          onClick={() => handleMoveToStock(sale.id)}
-          className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
-        >
-          <svg
-            className="w-4 h-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              ></path>
+            </svg>
+            Registrar Ocorrência
+          </button>
+          <button
+            onClick={() => handleMoveToStock(sale.id)}
+            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
-            ></path>
-          </svg>
-          Mover para Estoque
-        </button>
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
+              ></path>
+            </svg>
+            Mover para Estoque
+          </button>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="space-y-8">

@@ -141,8 +141,55 @@ export default function FilamentSelect({
     setOpen(false);
   };
 
+  const panelStyle = {
+    width: "min(28rem, calc(100vw - 2rem))",
+    minWidth: "100%",
+  } satisfies React.CSSProperties;
+
+  let triggerContent: React.ReactNode;
+
+  if (selected) {
+    triggerContent = (
+      <>
+        <span
+          className="h-3 w-3 rounded-full border border-gray-200 shadow-sm"
+          style={{ backgroundColor: selected.colorHex || "#d1d5db" }}
+        ></span>
+        <span className="truncate text-sm font-medium text-gray-900">
+          {selected.description}
+        </span>
+        <span className="hidden shrink-0 text-xs text-gray-500 sm:inline">
+          ({selected.color})
+        </span>
+      </>
+    );
+  } else if (loading) {
+    triggerContent = (
+      <>
+        <svg
+          className="h-4 w-4 animate-spin text-brand-purple"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+          ></path>
+        </svg>
+        <span className="truncate text-gray-500">{loadingMessage}</span>
+      </>
+    );
+  } else {
+    triggerContent = (
+      <span className="truncate text-gray-500">{placeholder}</span>
+    );
+  }
+
   return (
-    <div className="relative" ref={wrapperRef}>
+    <div className="relative min-w-0" ref={wrapperRef}>
       <button
         id={id}
         type="button"
@@ -151,47 +198,17 @@ export default function FilamentSelect({
         aria-expanded={open}
         aria-controls={listboxId}
         aria-haspopup="listbox"
-        className={`w-full flex items-center justify-between gap-3 border border-gray-300 rounded-lg px-3 py-2 text-left transition-colors ${
+        className={`flex w-full items-center justify-between gap-3 rounded-lg border border-gray-300 px-3 py-2.5 text-left transition-colors ${
           disabled
             ? "bg-gray-100 text-gray-500 cursor-not-allowed"
             : "bg-white hover:border-brand-purple"
         }`}
       >
-        <div className="flex items-center gap-2 min-w-0">
-          {selected ? (
-            <>
-              <span
-                className="w-3 h-3 rounded-full border border-gray-200 shadow-sm"
-                style={{ backgroundColor: selected.colorHex || "#d1d5db" }}
-              ></span>
-              <span className="truncate text-gray-900">
-                {selected.description}
-              </span>
-              <span className="text-xs text-gray-500">({selected.color})</span>
-            </>
-          ) : loading ? (
-            <>
-              <svg
-                className="w-4 h-4 animate-spin text-brand-purple"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                ></path>
-              </svg>
-              <span className="text-gray-500 truncate">{loadingMessage}</span>
-            </>
-          ) : (
-            <span className="text-gray-500 truncate">{placeholder}</span>
-          )}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {triggerContent}
         </div>
         <svg
-          className="w-4 h-4 text-gray-400"
+          className="h-4 w-4 shrink-0 text-gray-400"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -206,8 +223,11 @@ export default function FilamentSelect({
       </button>
 
       {open && (
-        <div className="absolute z-30 mt-2 w-full rounded-lg border border-gray-200 bg-white shadow-lg">
-          <div className="p-3 border-b border-gray-100 space-y-2">
+        <div
+          className="absolute left-0 z-30 mt-2 rounded-lg border border-gray-200 bg-white shadow-lg"
+          style={panelStyle}
+        >
+          <div className="space-y-2 border-b border-gray-100 p-3">
             <input
               type="text"
               value={search}
@@ -220,7 +240,7 @@ export default function FilamentSelect({
               disabled={loading}
               className={`w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-brand-purple focus:outline-none ${loading ? "bg-gray-50 text-gray-400 cursor-wait" : "text-gray-900"}`}
             />
-            <div className="flex gap-2">
+            <div className="grid gap-2 sm:grid-cols-2">
               <select
                 value={colorFilter}
                 onChange={(event) => setColorFilter(event.target.value)}
@@ -273,8 +293,8 @@ export default function FilamentSelect({
                     key={index}
                     className="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-3"
                   >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className="h-3 w-3 rounded-full bg-gray-200"></div>
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                      <div className="h-4 w-4 shrink-0 rounded-full border border-gray-200 bg-gray-200"></div>
                       <div className="min-w-0 flex-1 space-y-2">
                         <div
                           className={`h-3 rounded-full bg-gray-100 ${index === 1 ? "w-5/12" : "w-7/12"}`}
@@ -313,17 +333,17 @@ export default function FilamentSelect({
                       role="option"
                       aria-selected={item.id === value}
                       onClick={() => handleSelect(item.id)}
-                      className="w-full flex items-center justify-between gap-3 px-4 py-2 text-left hover:bg-gray-50 transition-colors"
+                      className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-gray-50"
                       style={rowStyle}
                     >
-                      <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
                         <span
-                          className="w-3 h-3 rounded-full border border-gray-200 shadow-sm"
+                          className="h-4 w-4 shrink-0 rounded-full border border-gray-300 shadow-sm"
                           style={{
                             backgroundColor: item.colorHex || "#d1d5db",
                           }}
                         ></span>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium text-gray-900 truncate">
                             {item.description}
                           </p>
@@ -333,7 +353,7 @@ export default function FilamentSelect({
                           </p>
                         </div>
                       </div>
-                      <div className="text-xs text-gray-500 text-right">
+                      <div className="shrink-0 text-right text-xs text-gray-500">
                         {showRemaining &&
                           typeof item.remainingMassGrams === "number" && (
                             <div>{item.remainingMassGrams}g</div>

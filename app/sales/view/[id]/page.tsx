@@ -1,6 +1,10 @@
 "use client";
 
 import {
+    formatFilamentDisplayName,
+    mapSaleFilamentPayload,
+} from "@/utils/filamentUsage";
+import {
     formatBytes,
     getAttachmentsByCategory,
     getSaleAttachmentUrl,
@@ -30,6 +34,12 @@ interface Filament {
   id: string;
   description: string;
   color: string;
+  colorHex?: string;
+}
+
+interface SaleFilamentUsage {
+  filamentId?: string;
+  massGrams?: number;
 }
 
 interface PrintIncident {
@@ -69,6 +79,7 @@ interface SaleDetail {
   designPrintTime?: string;
   printQuality?: string;
   filamentId?: string;
+  filaments?: SaleFilamentUsage[];
   clientId?: string;
   massGrams?: number;
   hasCustomArt?: boolean;
@@ -181,9 +192,24 @@ function SaleViewContent({
 
     const filament = filaments.find((item) => item.id === filamentId);
     return filament
-      ? `${filament.description} (${filament.color})`
+      ? formatFilamentDisplayName(filament)
       : "Filamento removido";
   };
+  const saleFilamentUsages = useMemo(
+    () => mapSaleFilamentPayload(sale),
+    [sale],
+  );
+  const saleFilamentHeadline = useMemo(() => {
+    if (saleFilamentUsages.length === 0) {
+      return "Não informado";
+    }
+
+    if (saleFilamentUsages.length === 1) {
+      return getFilamentName(saleFilamentUsages[0].filamentId);
+    }
+
+    return `${saleFilamentUsages.length} filamentos usados`;
+  }, [saleFilamentUsages, filaments]);
 
   if (loading) {
     return <div className="py-12 text-center">Carregando...</div>;
@@ -232,10 +258,7 @@ function SaleViewContent({
 
           <div className="flex flex-wrap gap-3 text-sm text-gray-600">
             <InfoPill label="Cliente" value={getClientName(sale.clientId)} />
-            <InfoPill
-              label="Filamento"
-              value={getFilamentName(sale.filamentId)}
-            />
+            <InfoPill label="Filamentos" value={saleFilamentHeadline} />
             <InfoPill label="Data da venda" value={formatDate(sale.saleDate)} />
             <InfoPill label="Entrega" value={formatDate(sale.deliveryDate)} />
           </div>
@@ -358,17 +381,58 @@ function SaleViewContent({
           <DetailCard title="Dados da venda">
             <DetailRow label="Cliente" value={getClientName(sale.clientId)} />
             <DetailRow
-              label="Filamento"
-              value={getFilamentName(sale.filamentId)}
-            />
-            <DetailRow
               label="Qualidade"
               value={sale.printQuality || "Não informado"}
             />
-            <DetailRow
-              label="Massa"
-              value={sale.massGrams ? `${sale.massGrams} g` : "Não informado"}
-            />
+            <div className="space-y-3 border-b border-gray-100 pb-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium text-gray-500">Filamentos</p>
+                <p className="text-sm font-semibold text-gray-900">
+                  {sale.massGrams
+                    ? `${sale.massGrams} g no total`
+                    : "Sem massa informada"}
+                </p>
+              </div>
+
+              {saleFilamentUsages.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  Nenhum filamento registrado.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {saleFilamentUsages.map((usage) => {
+                    const filament = filaments.find(
+                      (item) => item.id === usage.filamentId,
+                    );
+
+                    return (
+                      <div
+                        key={`${usage.filamentId}-${usage.massGrams}`}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2"
+                      >
+                        <div className="min-w-0 flex items-center gap-3">
+                          <span
+                            className="h-3.5 w-3.5 shrink-0 rounded-full border border-gray-300"
+                            style={{
+                              backgroundColor: filament?.colorHex || "#d1d5db",
+                            }}
+                          ></span>
+                          <span className="truncate text-sm font-medium text-gray-900">
+                            {getFilamentName(usage.filamentId)}
+                          </span>
+                        </div>
+                        <span className="shrink-0 text-sm font-semibold text-gray-900">
+                          {usage.massGrams?.toLocaleString("pt-BR", {
+                            maximumFractionDigits: 1,
+                          }) || 0}
+                          g
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             <DetailRow
               label="Tempo estimado"
               value={sale.designPrintTime || "Não informado"}
