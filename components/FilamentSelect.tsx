@@ -141,11 +141,6 @@ export default function FilamentSelect({
     setOpen(false);
   };
 
-  const panelStyle = {
-    width: "min(28rem, calc(100vw - 2rem))",
-    minWidth: "100%",
-  } satisfies React.CSSProperties;
-
   let triggerContent: React.ReactNode;
 
   if (selected) {
@@ -198,7 +193,7 @@ export default function FilamentSelect({
         aria-expanded={open}
         aria-controls={listboxId}
         aria-haspopup="listbox"
-        className={`flex w-full items-center justify-between gap-3 rounded-lg border border-gray-300 px-3 py-2.5 text-left transition-colors ${
+        className={`flex min-h-11 w-full items-center justify-between gap-3 rounded-lg border border-gray-300 px-3 py-2.5 text-left transition-colors ${
           disabled
             ? "bg-gray-100 text-gray-500 cursor-not-allowed"
             : "bg-white hover:border-brand-purple"
@@ -223,10 +218,7 @@ export default function FilamentSelect({
       </button>
 
       {open && (
-        <div
-          className="absolute left-0 z-30 mt-2 rounded-lg border border-gray-200 bg-white shadow-lg"
-          style={panelStyle}
-        >
+        <div className="absolute inset-x-0 z-30 mt-2 rounded-lg border border-gray-200 bg-white shadow-lg sm:left-0 sm:right-auto sm:w-[28rem] sm:min-w-full">
           <div className="space-y-2 border-b border-gray-100 p-3">
             <input
               type="text"
@@ -313,7 +305,7 @@ export default function FilamentSelect({
             <ul
               id={listboxId}
               role="listbox"
-              className="max-h-64 overflow-y-auto"
+              className="max-h-[22rem] overflow-y-auto"
             >
               {filtered.length === 0 && (
                 <li className="px-4 py-3 text-sm text-gray-500">
@@ -333,7 +325,7 @@ export default function FilamentSelect({
                       role="option"
                       aria-selected={item.id === value}
                       onClick={() => handleSelect(item.id)}
-                      className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-gray-50"
+                      className="flex w-full flex-col items-stretch gap-2 px-4 py-3 text-left transition-colors hover:bg-gray-50 sm:flex-row sm:items-center sm:justify-between"
                       style={rowStyle}
                     >
                       <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -353,7 +345,7 @@ export default function FilamentSelect({
                           </p>
                         </div>
                       </div>
-                      <div className="shrink-0 text-right text-xs text-gray-500">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-7 text-left text-xs text-gray-500 sm:block sm:pl-0 sm:text-right">
                         {showRemaining &&
                           typeof item.remainingMassGrams === "number" && (
                             <div>{item.remainingMassGrams}g</div>

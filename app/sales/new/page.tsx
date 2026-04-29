@@ -800,7 +800,7 @@ function NewSaleContent() {
             />
 
             <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <span className="font-medium">Massa total calculada</span>
                 <span className="text-lg font-bold text-gray-900">
                   {massGramsValue.toLocaleString("pt-BR", {
@@ -825,7 +825,7 @@ function NewSaleContent() {
 
             {selectedFilamentWarnings.length > 0 && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                <div className="flex items-center gap-2 font-semibold text-amber-900">
+                <div className="flex items-start gap-2 font-semibold text-amber-900">
                   <svg
                     className="h-4 w-4"
                     fill="none"

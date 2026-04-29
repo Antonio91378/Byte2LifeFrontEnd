@@ -165,7 +165,7 @@ export default function FilamentUsageEditor({
               key={usage.key}
               className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
             >
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="inline-flex items-center gap-2 rounded-full bg-brand-purple/8 px-3 py-1 text-xs font-semibold text-brand-purple">
                   <span>Filamento {index + 1}</span>
                 </div>
@@ -174,7 +174,7 @@ export default function FilamentUsageEditor({
                   <button
                     type="button"
                     onClick={() => handleRemove(index)}
-                    className="text-xs font-semibold text-gray-400 transition-colors hover:text-red-500"
+                    className="ml-auto text-xs font-semibold text-gray-400 transition-colors hover:text-red-500"
                   >
                     Remover
                   </button>

@@ -797,7 +797,7 @@ export default function BudgetPage() {
               </fieldset>
 
               <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <span className="font-medium">Massa total calculada</span>
                   <span className="text-lg font-bold text-gray-900">
                     {totalMassGrams.toLocaleString("pt-BR", {
