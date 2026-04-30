@@ -704,12 +704,14 @@ function SalesPageContent() {
         </div>
         <div>
           <p className="font-bold text-brand-purple mb-1">
-            Massa / Custo Total
+            {hideProfit ? "Massa Total" : "Massa / Custo Total"}
           </p>
           <p>
-            {sale.massGrams}g / R$ {sale.cost?.toFixed(2)}
+            {hideProfit
+              ? `${sale.massGrams}g`
+              : `${sale.massGrams}g / R$ ${sale.cost?.toFixed(2)}`}
           </p>
-          {Number(sale.shippingCost || 0) > 0 && (
+          {!hideProfit && Number(sale.shippingCost || 0) > 0 && (
             <p className="mt-1 text-xs text-gray-500">
               Frete: R$ {(sale.shippingCost || 0).toFixed(2)}
             </p>
