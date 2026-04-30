@@ -465,6 +465,10 @@ export default function Dashboard() {
 
   const [showCalendar, setShowCalendar] = useState(false);
 
+  const calendarContentRef = useRef<HTMLDivElement | null>(null);
+
+  const [calendarContentHeight, setCalendarContentHeight] = useState(0);
+
   const [currentFilaments, setCurrentFilaments] = useState<FilamentInfo[]>([]);
 
   const [activeWorkTab, setActiveWorkTab] = useState("printer");
@@ -1039,6 +1043,42 @@ export default function Dashboard() {
 
   const activeServiceTab =
     serviceProviderTabs.find((tab) => tab.id === activeWorkTab) || null;
+
+  useEffect(() => {
+    if (!showCalendar) {
+      setCalendarContentHeight(0);
+      return;
+    }
+
+    const content = calendarContentRef.current;
+    if (!content) return;
+
+    const syncCalendarHeight = () => {
+      setCalendarContentHeight(content.scrollHeight);
+    };
+
+    syncCalendarHeight();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", syncCalendarHeight);
+
+      return () => {
+        window.removeEventListener("resize", syncCalendarHeight);
+      };
+    }
+
+    const observer = new ResizeObserver(() => {
+      syncCalendarHeight();
+    });
+
+    observer.observe(content);
+    window.addEventListener("resize", syncCalendarHeight);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", syncCalendarHeight);
+    };
+  }, [showCalendar]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2258,14 +2298,17 @@ export default function Dashboard() {
         )}
 
         <div
-          className={`transition-all duration-500 ease-out overflow-hidden ${
+          className={`overflow-hidden transition-[max-height,opacity,transform,margin] duration-500 ease-out ${
             showCalendar
-              ? "max-h-[1800px] opacity-100 translate-y-0 mt-6"
-              : "max-h-0 opacity-0 -translate-y-2"
+              ? "opacity-100 translate-y-0 mt-6"
+              : "opacity-0 -translate-y-2"
           }`}
+          style={{
+            maxHeight: showCalendar ? `${calendarContentHeight}px` : "0px",
+          }}
         >
           {showCalendar && (
-            <div className="space-y-4">
+            <div ref={calendarContentRef} className="space-y-4">
               <div className="flex justify-end">
                 <button
                   type="button"

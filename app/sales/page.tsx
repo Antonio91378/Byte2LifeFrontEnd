@@ -1237,11 +1237,13 @@ function SalesPageContent() {
                         className={`mt-1 flex flex-wrap items-center gap-2 text-xs ${getSaleSecondaryTextClassName(s)}`}
                       >
                         <p>Entrega: {formatDisplayDate(s.deliveryDate)}</p>
-                        <span
-                          className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${getSaleActivityClassName(s)}`}
-                        >
-                          {getSaleActivityLabel(s)}
-                        </span>
+                        {!isSaleActive(s) && (
+                          <span
+                            className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${getSaleActivityClassName(s)}`}
+                          >
+                            {getSaleActivityLabel(s)}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1304,11 +1306,13 @@ function SalesPageContent() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <span
-                    className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getSaleActivityClassName(s)}`}
-                  >
-                    {getSaleActivityLabel(s)}
-                  </span>
+                  {!isSaleActive(s) && (
+                    <span
+                      className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getSaleActivityClassName(s)}`}
+                    >
+                      {getSaleActivityLabel(s)}
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => handleToggleStatus(s, "isPrintConcluded")}
@@ -1607,11 +1611,13 @@ function SalesPageContent() {
                         </td>
                         <td className="w-56 px-4 py-3 text-xs text-center align-middle">
                           <div className="mx-auto flex max-w-[13rem] flex-wrap items-center justify-center gap-1.5">
-                            <span
-                              className={`inline-flex whitespace-nowrap items-center justify-center rounded-full px-2.5 py-1 text-[10px] font-semibold leading-none ${getSaleActivityClassName(s)}`}
-                            >
-                              {getSaleActivityLabel(s)}
-                            </span>
+                            {!isSaleActive(s) && (
+                              <span
+                                className={`inline-flex whitespace-nowrap items-center justify-center rounded-full px-2.5 py-1 text-[10px] font-semibold leading-none ${getSaleActivityClassName(s)}`}
+                              >
+                                {getSaleActivityLabel(s)}
+                              </span>
+                            )}
                             <button
                               type="button"
                               onClick={(e) => {
