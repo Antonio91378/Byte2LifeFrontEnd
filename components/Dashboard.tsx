@@ -1,6 +1,7 @@
 "use client";
 
 import { mapSaleFilamentPayload } from "@/utils/filamentUsage";
+import { getIncidentWasteEntries, getIncidentWasteTotal } from "@/utils/printWaste";
 import axios from "axios";
 
 import Link from "next/link";
@@ -19,6 +20,11 @@ interface PrintIncident {
   comment: string;
 
   wastedFilamentGrams?: number | null;
+
+  wastedFilaments?: Array<{
+    filamentId?: string;
+    massGrams?: number;
+  }>;
 }
 
 interface Sale {
@@ -455,7 +461,9 @@ export default function Dashboard() {
 
   const [errorReason, setErrorReason] = useState("");
 
-  const [wastedFilament, setWastedFilament] = useState("");
+  const [wastedFilamentById, setWastedFilamentById] = useState<
+    Record<string, string>
+  >({});
 
   const [forceZeroTimer, setForceZeroTimer] = useState(false);
 
@@ -668,6 +676,38 @@ export default function Dashboard() {
     };
   }, [currentPrint]);
 
+  const currentPrintFilamentUsages = useMemo(
+    () => mapSaleFilamentPayload(currentPrint),
+    [currentPrint],
+  );
+
+  const currentFailureWasteOptions = useMemo(() => {
+    return currentPrintFilamentUsages.map((usage, index) => {
+      const currentFilament = currentFilaments.find(
+        (filament) => filament.id === usage.filamentId,
+      );
+
+      return {
+        filamentId: usage.filamentId,
+        label: currentFilament?.color || `Filamento ${index + 1}`,
+        colorHex: currentFilament?.colorHex || "#ffffff",
+        massGrams: usage.massGrams,
+      };
+    });
+  }, [currentFilaments, currentPrintFilamentUsages]);
+
+  const totalFailedWaste = useMemo(
+    () =>
+      currentFailureWasteOptions.reduce(
+        (total, filament) =>
+          total +
+          (Number.parseFloat(wastedFilamentById[filament.filamentId] || "") ||
+            0),
+        0,
+      ),
+    [currentFailureWasteOptions, wastedFilamentById],
+  );
+
   const currentFilamentSummary = useMemo(() => {
     if (currentFilaments.length === 0) {
       return null;
@@ -700,6 +740,36 @@ export default function Dashboard() {
       </div>
     );
   }, [currentFilaments]);
+
+  const updateWastedFilamentValue = (filamentId: string, value: string) => {
+    setWastedFilamentById((current) => ({
+      ...current,
+      [filamentId]: value,
+    }));
+  };
+
+  const getIncidentFilamentLabel = (sale: Sale | null, filamentId?: string) => {
+    if (!filamentId) {
+      return "Filamento não informado";
+    }
+
+    if (sale?.id === currentPrint?.id) {
+      const currentOption = currentFailureWasteOptions.find(
+        (option) => option.filamentId === filamentId,
+      );
+
+      if (currentOption) {
+        return currentOption.label;
+      }
+    }
+
+    const saleFilaments = mapSaleFilamentPayload(sale);
+    const saleIndex = saleFilaments.findIndex(
+      (usage) => usage.filamentId === filamentId,
+    );
+
+    return saleIndex >= 0 ? `Filamento ${saleIndex + 1}` : "Filamento";
+  };
 
   useEffect(() => {
     if (
@@ -1313,7 +1383,19 @@ export default function Dashboard() {
       }
 
       if (finishStatus === "Failed") {
-        const wastedValue = Number.parseFloat(wastedFilament) || 0;
+        const wastedFilaments = currentFailureWasteOptions
+          .map((filament) => ({
+            filamentId: filament.filamentId,
+            massGrams:
+              Number.parseFloat(wastedFilamentById[filament.filamentId] || "") ||
+              0,
+          }))
+          .filter((filament) => filament.massGrams > 0);
+
+        const wastedValue = wastedFilaments.reduce(
+          (total, filament) => total + filament.massGrams,
+          0,
+        );
 
         const incidentComment = errorReason.trim();
 
@@ -1325,6 +1407,8 @@ export default function Dashboard() {
           comment: incidentComment || "Falha registrada durante a impressão.",
 
           wastedFilamentGrams: wastedValue > 0 ? wastedValue : null,
+
+          wastedFilaments: wastedFilaments.length > 0 ? wastedFilaments : [],
         };
 
         updateData.printStatus = "Staged";
@@ -1369,7 +1453,7 @@ export default function Dashboard() {
 
       setErrorReason("");
 
-      setWastedFilament("");
+      setWastedFilamentById({});
 
       fetchData();
     } catch (error) {
@@ -1476,15 +1560,69 @@ export default function Dashboard() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Filamento Desperdiçado (g)
+                  Desperdício por filamento (g)
                 </label>
 
-                <input
-                  type="number"
-                  value={wastedFilament}
-                  onChange={(e) => setWastedFilament(e.target.value)}
-                  className="w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-purple focus:border-brand-purple p-2 border text-gray-900 bg-white"
-                />
+                <div className="space-y-3">
+                  {currentFailureWasteOptions.map((filament) => (
+                    <div
+                      key={filament.filamentId}
+                      className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="h-3.5 w-3.5 shrink-0 rounded-full border border-gray-300"
+                              style={{
+                                backgroundColor: filament.colorHex,
+                              }}
+                            ></span>
+                            <p className="text-sm font-medium text-gray-900">
+                              {filament.label}
+                            </p>
+                          </div>
+                          <p className="mt-1 text-xs text-gray-500">
+                            Usado na venda: {filament.massGrams.toLocaleString("pt-BR", {
+                              maximumFractionDigits: 1,
+                            })}
+                            g
+                          </p>
+                        </div>
+
+                        <div className="sm:w-32">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={wastedFilamentById[filament.filamentId] || ""}
+                            onChange={(e) =>
+                              updateWastedFilamentValue(
+                                filament.filamentId,
+                                e.target.value,
+                              )
+                            }
+                            className="w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-purple focus:border-brand-purple p-2 border text-gray-900 bg-white"
+                            placeholder="0"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  {currentFailureWasteOptions.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-3 text-sm text-gray-500">
+                      Nenhum filamento disponível para registrar desperdício.
+                    </p>
+                  ) : (
+                    <p className="text-xs font-medium text-amber-700">
+                      Total informado: {totalFailedWaste.toLocaleString("pt-BR", {
+                        maximumFractionDigits: 2,
+                      })}
+                      g
+                    </p>
+                  )}
+                </div>
               </div>
             </>
           )}
@@ -1554,11 +1692,32 @@ export default function Dashboard() {
                     {incident.comment}
                   </p>
 
-                  {typeof incident.wastedFilamentGrams === "number" &&
-                  incident.wastedFilamentGrams > 0 ? (
+                  {getIncidentWasteTotal(incident) > 0 ? (
                     <p className="mt-2 text-xs font-medium text-amber-700">
-                      Desperdício registrado: {incident.wastedFilamentGrams} g
+                      Desperdício registrado: {getIncidentWasteTotal(incident).toLocaleString("pt-BR", {
+                        maximumFractionDigits: 2,
+                      })} g
                     </p>
+                  ) : null}
+
+                  {getIncidentWasteEntries(incident).length > 0 ? (
+                    <div className="mt-2 space-y-1">
+                      {getIncidentWasteEntries(incident).map((entry) => (
+                        <p
+                          key={`${entry.filamentId}-${entry.massGrams}`}
+                          className="text-[11px] text-amber-700"
+                        >
+                          {getIncidentFilamentLabel(
+                            showIncidentsModal,
+                            entry.filamentId,
+                          )}
+                          : {entry.massGrams.toLocaleString("pt-BR", {
+                            maximumFractionDigits: 2,
+                          })}
+                          g
+                        </p>
+                      ))}
+                    </div>
                   ) : null}
                 </li>
               ))}

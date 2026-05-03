@@ -4,6 +4,7 @@ import {
     formatFilamentDisplayName,
     mapSaleFilamentPayload,
 } from "@/utils/filamentUsage";
+import { getIncidentWasteEntries, getIncidentWasteTotal, getSaleWasteTotal } from "@/utils/printWaste";
 import {
     formatBytes,
     getAttachmentsByCategory,
@@ -47,6 +48,10 @@ interface PrintIncident {
   reason: string;
   comment: string;
   wastedFilamentGrams?: number | null;
+  wastedFilaments?: Array<{
+    filamentId?: string;
+    massGrams?: number;
+  }>;
 }
 
 const INCIDENT_REASONS: Record<string, string> = {
@@ -503,9 +508,10 @@ function SaleViewContent({
             <DetailRow
               label="Desperdício acumulado"
               value={
-                typeof sale.wastedFilamentGrams === "number" &&
-                sale.wastedFilamentGrams > 0
-                  ? `${sale.wastedFilamentGrams} g`
+                getSaleWasteTotal(sale) > 0
+                  ? `${getSaleWasteTotal(sale).toLocaleString("pt-BR", {
+                      maximumFractionDigits: 2,
+                    })} g`
                   : "Nenhum desperdício registrado"
               }
             />
@@ -531,11 +537,27 @@ function SaleViewContent({
                       </p>
                     </div>
 
-                    {typeof incident.wastedFilamentGrams === "number" &&
-                    incident.wastedFilamentGrams > 0 ? (
+                    {getIncidentWasteTotal(incident) > 0 ? (
                       <p className="mt-2 text-xs font-medium text-amber-700">
-                        Desperdício registrado: {incident.wastedFilamentGrams} g
+                        Desperdício registrado: {getIncidentWasteTotal(incident).toLocaleString("pt-BR", {
+                          maximumFractionDigits: 2,
+                        })} g
                       </p>
+                    ) : null}
+
+                    {getIncidentWasteEntries(incident).length > 0 ? (
+                      <div className="mt-2 space-y-1">
+                        {getIncidentWasteEntries(incident).map((entry) => (
+                          <p
+                            key={`${entry.filamentId}-${entry.massGrams}`}
+                            className="text-[11px] text-amber-700"
+                          >
+                            {getFilamentName(entry.filamentId)}: {entry.massGrams.toLocaleString("pt-BR", {
+                              maximumFractionDigits: 2,
+                            })} g
+                          </p>
+                        ))}
+                      </div>
                     ) : null}
                   </div>
                 ))}

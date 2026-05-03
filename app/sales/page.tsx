@@ -6,6 +6,7 @@ import {
     formatFilamentDisplayName,
     mapSaleFilamentPayload,
 } from "@/utils/filamentUsage";
+import { getIncidentWasteEntries, getIncidentWasteTotal } from "@/utils/printWaste";
 import { isSaleActive } from "@/utils/saleActivity";
 import {
     getFirstProductImageUrl,
@@ -39,6 +40,10 @@ interface PrintIncident {
   reason: string;
   comment: string;
   wastedFilamentGrams?: number | null;
+  wastedFilaments?: Array<{
+    filamentId?: string;
+    massGrams?: number;
+  }>;
 }
 
 interface Filament {
@@ -1953,12 +1958,28 @@ function SalesPageContent() {
                         {incident.comment}
                       </p>
 
-                      {typeof incident.wastedFilamentGrams === "number" &&
-                      incident.wastedFilamentGrams > 0 ? (
+                      {getIncidentWasteTotal(incident) > 0 ? (
                         <p className="mt-2 text-xs font-medium text-amber-700">
-                          Desperdício registrado: {incident.wastedFilamentGrams}{" "}
+                          Desperdício registrado: {getIncidentWasteTotal(incident).toLocaleString("pt-BR", {
+                            maximumFractionDigits: 2,
+                          })}{" "}
                           g
                         </p>
+                      ) : null}
+
+                      {getIncidentWasteEntries(incident).length > 0 ? (
+                        <div className="mt-2 space-y-1">
+                          {getIncidentWasteEntries(incident).map((entry) => (
+                            <p
+                              key={`${entry.filamentId}-${entry.massGrams}`}
+                              className="text-[11px] text-amber-700"
+                            >
+                              {getFilamentName(entry.filamentId)}: {entry.massGrams.toLocaleString("pt-BR", {
+                                maximumFractionDigits: 2,
+                              })} g
+                            </p>
+                          ))}
+                        </div>
                       ) : null}
                     </li>
                   ))}

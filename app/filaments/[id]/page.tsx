@@ -6,6 +6,7 @@ import {
     toNozzle02CompatibilityPayload,
 } from "@/utils/filamentNozzleCompatibility";
 import { getSaleFilamentUsageMass } from "@/utils/filamentUsage";
+import { getIncidentWasteForFilament, getSaleWasteForFilament } from "@/utils/printWaste";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
@@ -28,6 +29,10 @@ interface Sale {
     reason: string;
     comment: string;
     wastedFilamentGrams?: number | null;
+    wastedFilaments?: Array<{
+      filamentId?: string;
+      massGrams?: number;
+    }>;
   }>;
   printStartScheduledAt?: string;
   printStartConfirmedAt?: string;
@@ -166,15 +171,7 @@ export default function EditFilamentPage({
   };
 
   const getTrackedWaste = (sale: Sale) => {
-    const totalWaste = Number(sale.wastedFilamentGrams || 0);
-    const trackedMass = getTrackedConsumption(sale);
-    const totalMass = Number(sale.massGrams || 0);
-
-    if (totalWaste <= 0 || trackedMass <= 0 || totalMass <= 0) {
-      return 0;
-    }
-
-    return (trackedMass / totalMass) * totalWaste;
+    return getSaleWasteForFilament(sale, id);
   };
 
   const renderIncidents = (sale: Sale, compact = false) => {
@@ -206,10 +203,15 @@ export default function EditFilamentPage({
             <p className="mt-1 wrap-break-word text-xs text-gray-700">
               {incident.comment || "Sem comentário adicional."}
             </p>
-            {typeof incident.wastedFilamentGrams === "number" &&
-            incident.wastedFilamentGrams > 0 ? (
+            {getIncidentWasteForFilament(incident, sale, id) > 0 ? (
               <p className="mt-1 text-[11px] font-medium text-amber-700">
-                Desperdício: {incident.wastedFilamentGrams} g
+                Desperdício neste filamento: {getIncidentWasteForFilament(
+                  incident,
+                  sale,
+                  id,
+                ).toLocaleString("pt-BR", {
+                  maximumFractionDigits: 2,
+                })} g
               </p>
             ) : null}
           </div>
