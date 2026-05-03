@@ -38,7 +38,8 @@ const normalizeFilamentId = (value: string | null | undefined) =>
 
 const getSaleFilamentUsages = (sale: SaleWasteLike | null | undefined) =>
   mapSaleFilamentPayload(sale).filter(
-    (usage) => normalizeFilamentId(usage.filamentId) !== "" && usage.massGrams > 0,
+    (usage) =>
+      normalizeFilamentId(usage.filamentId) !== "" && usage.massGrams > 0,
   );
 
 export function getIncidentWasteEntries(
@@ -60,10 +61,12 @@ export function getIncidentWasteEntries(
     );
   }
 
-  return Array.from(wasteByFilament.entries()).map(([filamentId, massGrams]) => ({
-    filamentId,
-    massGrams,
-  }));
+  return Array.from(wasteByFilament.entries()).map(
+    ([filamentId, massGrams]) => ({
+      filamentId,
+      massGrams,
+    }),
+  );
 }
 
 export function getIncidentWasteTotal(
@@ -93,8 +96,8 @@ function getProportionalWasteForFilament(
   }
 
   const trackedUsage =
-    saleFilamentUsages.find((usage) => usage.filamentId === filamentId)?.massGrams ||
-    0;
+    saleFilamentUsages.find((usage) => usage.filamentId === filamentId)
+      ?.massGrams || 0;
 
   if (trackedUsage <= 0) {
     return 0;
@@ -175,7 +178,10 @@ export function getSaleWasteByFilament(sale: SaleWasteLike | null | undefined) {
     }
 
     for (const usage of saleFilamentUsages) {
-      addWaste(usage.filamentId, normalizedWaste * (usage.massGrams / totalMass));
+      addWaste(
+        usage.filamentId,
+        normalizedWaste * (usage.massGrams / totalMass),
+      );
     }
   };
 
@@ -199,10 +205,12 @@ export function getSaleWasteByFilament(sale: SaleWasteLike | null | undefined) {
 
   distributeLegacyWaste(getSaleWasteTotal(sale) - incidentWasteTotal);
 
-  return Array.from(wasteByFilament.entries()).map(([filamentId, massGrams]) => ({
-    filamentId,
-    massGrams,
-  }));
+  return Array.from(wasteByFilament.entries()).map(
+    ([filamentId, massGrams]) => ({
+      filamentId,
+      massGrams,
+    }),
+  );
 }
 
 export function getSaleWasteForFilament(

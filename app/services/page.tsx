@@ -937,7 +937,7 @@ export default function ServicesPage() {
                             <button
                               type="button"
                               onClick={() =>
-                                router.push(`/sales/${record.saleId}`)
+                                router.push(`/sales/view/${record.saleId}`)
                               }
                               className="text-brand-purple hover:text-purple-900"
                             >

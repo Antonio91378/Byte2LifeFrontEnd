@@ -395,6 +395,7 @@ export default function PrintScheduleCalendar({
   const [effectiveHours, setEffectiveHours] = useState<number>(
     Number(estimatedHours) || 0,
   );
+  const hoverCardEnabled = !isCompactCalendar;
   const [hoverCard, setHoverCard] = useState<HoverCardData | null>(null);
   const hoverCardActiveRef = useRef(false);
   const eventHoverActiveRef = useRef(false);
@@ -1747,7 +1748,16 @@ export default function PrintScheduleCalendar({
     }, 240);
   };
 
+  useEffect(() => {
+    if (hoverCardEnabled) return;
+    hoverCardActiveRef.current = false;
+    eventHoverActiveRef.current = false;
+    clearHoverHideTimeout();
+    setHoverCard(null);
+  }, [hoverCardEnabled]);
+
   const handleEventMouseEnter = (info: any) => {
+    if (!hoverCardEnabled) return;
     if (isDraggingRef.current) return;
     clearHoverHideTimeout();
     eventHoverActiveRef.current = true;
@@ -1945,6 +1955,7 @@ export default function PrintScheduleCalendar({
   };
 
   const handleEventMouseLeave = () => {
+    if (!hoverCardEnabled) return;
     eventHoverActiveRef.current = false;
     scheduleHoverHide();
   };
@@ -2308,8 +2319,12 @@ export default function PrintScheduleCalendar({
             eventDragStart={handleEventDragStart}
             eventDragStop={handleEventDragStop}
             eventDrop={handleEventDrop}
-            eventMouseEnter={handleEventMouseEnter}
-            eventMouseLeave={handleEventMouseLeave}
+            eventMouseEnter={
+              hoverCardEnabled ? handleEventMouseEnter : undefined
+            }
+            eventMouseLeave={
+              hoverCardEnabled ? handleEventMouseLeave : undefined
+            }
           />
         </div>
 
@@ -2430,8 +2445,12 @@ export default function PrintScheduleCalendar({
               eventDragStart={handleEventDragStart}
               eventDragStop={handleEventDragStop}
               eventDrop={handleEventDrop}
-              eventMouseEnter={handleEventMouseEnter}
-              eventMouseLeave={handleEventMouseLeave}
+              eventMouseEnter={
+                hoverCardEnabled ? handleEventMouseEnter : undefined
+              }
+              eventMouseLeave={
+                hoverCardEnabled ? handleEventMouseLeave : undefined
+              }
             />
           </div>
 
@@ -2440,7 +2459,7 @@ export default function PrintScheduleCalendar({
           </div>
         </div>
       )}
-      {hoverCard && portalRoot
+      {hoverCardEnabled && hoverCard && portalRoot
         ? createPortal(
             <div
               className="fixed z-9999"

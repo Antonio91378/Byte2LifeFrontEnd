@@ -255,6 +255,7 @@ function ServicesPageContent() {
   const [calendarTarget, setCalendarTarget] = useState<"design" | "painting">(
     "design",
   );
+  const hoverCardEnabled = !isCompactCalendar;
   const [hoverCard, setHoverCard] = useState<HoverCardData | null>(null);
   const hoverCardActiveRef = useRef(false);
   const eventHoverActiveRef = useRef(false);
@@ -1218,7 +1219,16 @@ function ServicesPageContent() {
     }, 240);
   };
 
+  useEffect(() => {
+    if (hoverCardEnabled) return;
+    hoverCardActiveRef.current = false;
+    eventHoverActiveRef.current = false;
+    clearHoverHideTimeout();
+    setHoverCard(null);
+  }, [hoverCardEnabled]);
+
   const handleEventMouseEnter = (info: any) => {
+    if (!hoverCardEnabled) return;
     if (isDraggingRef.current) return;
     clearHoverHideTimeout();
     eventHoverActiveRef.current = true;
@@ -1267,6 +1277,7 @@ function ServicesPageContent() {
   };
 
   const handleEventMouseLeave = () => {
+    if (!hoverCardEnabled) return;
     eventHoverActiveRef.current = false;
     scheduleHoverHide();
   };
@@ -2190,7 +2201,7 @@ function ServicesPageContent() {
                           <button
                             type="button"
                             onClick={() =>
-                              router.push(`/sales/${record.saleId}`)
+                              router.push(`/sales/view/${record.saleId}`)
                             }
                             className="text-brand-purple hover:text-purple-900"
                           >
@@ -2981,8 +2992,12 @@ function ServicesPageContent() {
                     eventDragStart={handleEventDragStart}
                     eventDragStop={handleEventDragStop}
                     eventDrop={handleEventDrop}
-                    eventMouseEnter={handleEventMouseEnter}
-                    eventMouseLeave={handleEventMouseLeave}
+                    eventMouseEnter={
+                      hoverCardEnabled ? handleEventMouseEnter : undefined
+                    }
+                    eventMouseLeave={
+                      hoverCardEnabled ? handleEventMouseLeave : undefined
+                    }
                   />
                   {!isCalendarReady && (
                     <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/70 backdrop-blur-sm">
@@ -3235,7 +3250,7 @@ function ServicesPageContent() {
           </section>
         </div>
       </div>
-      {hoverCard && portalRoot
+      {hoverCardEnabled && hoverCard && portalRoot
         ? createPortal(
             <div
               className="fixed z-[9999]"

@@ -6,7 +6,10 @@ import {
     toNozzle02CompatibilityPayload,
 } from "@/utils/filamentNozzleCompatibility";
 import { getSaleFilamentUsageMass } from "@/utils/filamentUsage";
-import { getIncidentWasteForFilament, getSaleWasteForFilament } from "@/utils/printWaste";
+import {
+    getIncidentWasteForFilament,
+    getSaleWasteForFilament,
+} from "@/utils/printWaste";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
@@ -205,13 +208,14 @@ export default function EditFilamentPage({
             </p>
             {getIncidentWasteForFilament(incident, sale, id) > 0 ? (
               <p className="mt-1 text-[11px] font-medium text-amber-700">
-                Desperdício neste filamento: {getIncidentWasteForFilament(
-                  incident,
-                  sale,
-                  id,
-                ).toLocaleString("pt-BR", {
-                  maximumFractionDigits: 2,
-                })} g
+                Desperdício neste filamento:{" "}
+                {getIncidentWasteForFilament(incident, sale, id).toLocaleString(
+                  "pt-BR",
+                  {
+                    maximumFractionDigits: 2,
+                  },
+                )}{" "}
+                g
               </p>
             ) : null}
           </div>
