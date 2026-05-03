@@ -22,6 +22,7 @@ import {
     SaleAttachment,
     SaleAttachmentCategory,
 } from "@/utils/saleAttachments";
+import { applyDraftFlags, getSaleDraftIssues } from "@/utils/saleDraft";
 import {
     formatSaleProfitPercentage,
     getSaleProfitValue,
@@ -507,6 +508,25 @@ function NewSaleContent() {
   const productionCostValue = Number(
     formData.productionCost || formData.baseCost || 0,
   );
+  const draftIssues = useMemo(
+    () =>
+      getSaleDraftIssues({
+        ...formData,
+        filaments: filamentPayload,
+        printTimeHours: parseDurationToHours(formData.designPrintTime),
+      }),
+    [filamentPayload, formData],
+  );
+  const isDraft = draftIssues.length > 0;
+  const submitButtonClassName = isDraft
+    ? "bg-amber-600 hover:bg-amber-700"
+    : "bg-brand-purple hover:bg-purple-800";
+  let submitButtonLabel = "Salvar Venda";
+  if (loading) {
+    submitButtonLabel = "Salvando...";
+  } else if (isDraft) {
+    submitButtonLabel = "Salvar Rascunho";
+  }
 
   useEffect(() => {
     const nextMassGrams = getTotalFilamentUsageMass(formData.filamentUsages);
@@ -688,7 +708,8 @@ function NewSaleContent() {
     e.preventDefault();
     setLoading(true);
     try {
-      const payload = buildSalePayload();
+      const payload = applyDraftFlags(buildSalePayload());
+      const savedAsDraft = getSaleDraftIssues(payload).length > 0;
       const multipartData = new FormData();
       multipartData.append("sale", JSON.stringify(payload));
       appendPendingAttachmentsToFormData(multipartData, pendingAttachments);
@@ -717,6 +738,14 @@ function NewSaleContent() {
         } catch (err) {
           console.error("Error updating stock status", err);
         }
+      }
+
+      if (savedAsDraft) {
+        await showAlert(
+          "Rascunho salvo",
+          "A venda foi salva como rascunho. Ela continua sinalizada no relatório até você preencher os dados obrigatórios pendentes.",
+          "warning",
+        );
       }
 
       router.push(buildReturnToSalesUrl());
@@ -769,6 +798,50 @@ function NewSaleContent() {
           </div>
         )}
 
+        {isDraft && (
+          <div className="rounded-2xl border border-amber-200 bg-linear-to-r from-amber-50 via-orange-50 to-white px-4 py-4 shadow-sm">
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    ></path>
+                  </svg>
+                  Venda em rascunho
+                </div>
+                <p className="mt-1 text-sm text-amber-800">
+                  Você pode salvar agora e completar depois. Enquanto isso, a
+                  venda fica sinalizada no relatório como pendente de revisão.
+                </p>
+              </div>
+              <span className="inline-flex rounded-full bg-white px-3 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200">
+                {draftIssues.length} pendência
+                {draftIssues.length > 1 ? "s" : ""}
+              </span>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {draftIssues.map((issue) => (
+                <span
+                  key={issue.id}
+                  className="rounded-full bg-white px-3 py-1 text-xs font-medium text-amber-900 ring-1 ring-amber-200"
+                >
+                  {issue.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
           {/* Description */}
           <div className="col-span-1 md:col-span-2">
@@ -778,7 +851,6 @@ function NewSaleContent() {
             <input
               type="text"
               name="description"
-              required
               value={formData.description}
               onChange={handleChange}
               className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
@@ -885,7 +957,6 @@ function NewSaleContent() {
             <input
               type="date"
               name="saleDate"
-              required
               value={formData.saleDate}
               onChange={handleChange}
               className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
@@ -916,7 +987,6 @@ function NewSaleContent() {
               name="designPrintTime"
               placeholder="ex: 4h 30m"
               value={formData.designPrintTime}
-              required
               onChange={handleChange}
               className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
             />
@@ -1533,9 +1603,9 @@ function NewSaleContent() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full sm:w-auto px-6 py-3 sm:py-2 bg-brand-purple text-white rounded-lg hover:bg-purple-800 transition-colors disabled:opacity-50"
+            className={`w-full sm:w-auto px-6 py-3 sm:py-2 text-white rounded-lg transition-colors disabled:opacity-50 ${submitButtonClassName}`}
           >
-            {loading ? "Salvando..." : "Salvar Venda"}
+            {submitButtonLabel}
           </button>
         </div>
       </form>

@@ -6,12 +6,22 @@ import {
     formatFilamentDisplayName,
     mapSaleFilamentPayload,
 } from "@/utils/filamentUsage";
-import { getIncidentWasteEntries, getIncidentWasteTotal } from "@/utils/printWaste";
+import {
+    getIncidentWasteEntries,
+    getIncidentWasteTotal,
+} from "@/utils/printWaste";
 import { isSaleActive } from "@/utils/saleActivity";
 import {
     getFirstProductImageUrl,
     SaleAttachment,
 } from "@/utils/saleAttachments";
+import {
+    buildClonedSalePayload,
+    CloneableSale,
+    CloneMode,
+    formatSaleDraftIssuesSummary,
+    getSaleDraftIssues,
+} from "@/utils/saleDraft";
 import axios from "axios";
 import {
     Fragment,
@@ -84,6 +94,20 @@ interface Sale {
   cost?: number;
   shippingCost?: number;
   designPrintTime?: string;
+  printTimeHours?: number;
+  hasCustomArt?: boolean;
+  designTimeHours?: number;
+  designResponsible?: string;
+  hasPainting?: boolean;
+  paintTimeHours?: number;
+  paintResponsible?: string;
+  designStartConfirmedAt?: string;
+  paintStartConfirmedAt?: string;
+  printStartedAt?: string;
+  errorReason?: string | null;
+  wastedFilamentGrams?: number | null;
+  stockItemId?: string | null;
+  priority?: number;
   incidents?: PrintIncident[];
   attachments?: SaleAttachment[];
   isActive?: boolean | null;
@@ -123,6 +147,10 @@ function SalesPageContent() {
   const [filterClientName, setFilterClientName] = useState("");
   const [filterProductName, setFilterProductName] = useState("");
   const [showIncidentsModal, setShowIncidentsModal] = useState<Sale | null>(
+    null,
+  );
+  const [cloneTarget, setCloneTarget] = useState<Sale | null>(null);
+  const [cloneModeLoading, setCloneModeLoading] = useState<CloneMode | null>(
     null,
   );
   const [isAddingIncident, setIsAddingIncident] = useState(false);
@@ -255,6 +283,21 @@ function SalesPageContent() {
     const filament = filaments.find((f) => f.id === id);
     return filament ? formatFilamentDisplayName(filament) : "Desconhecido";
   };
+  const saleDraftIssuesById = useMemo(
+    () =>
+      new Map(
+        sales.map((sale) => [
+          sale.id,
+          getSaleDraftIssues(sale as unknown as CloneableSale),
+        ]),
+      ),
+    [sales],
+  );
+  const getDraftIssuesForSale = (sale: Sale) =>
+    saleDraftIssuesById.get(sale.id) ?? [];
+  const getDraftSummaryForSale = (sale: Sale) =>
+    formatSaleDraftIssuesSummary(getDraftIssuesForSale(sale)) ||
+    "dados obrigatórios";
 
   const getSaleActivityLabel = (sale: Sale) =>
     isSaleActive(sale) ? "Ativa" : "Hibernando";
@@ -426,10 +469,31 @@ function SalesPageContent() {
     });
   };
 
-  const handleClone = async (sale: Sale) => {
-    const payload: any = { ...sale };
-    delete payload.id;
-    payload.attachments = [];
+  const handleClone = (sale: Sale) => {
+    setCloneTarget(sale);
+    setCloneModeLoading(null);
+  };
+
+  const closeCloneModal = () => {
+    if (cloneModeLoading) {
+      return;
+    }
+
+    setCloneTarget(null);
+  };
+
+  const handleCloneConfirm = async (mode: CloneMode) => {
+    if (!cloneTarget) {
+      return;
+    }
+
+    setCloneModeLoading(mode);
+    const payload = buildClonedSalePayload(
+      cloneTarget as unknown as CloneableSale,
+      mode,
+    );
+    const clonedDraftIssues = getSaleDraftIssues(payload);
+
     try {
       const res = await axios.post("http://localhost:5000/api/sales", payload);
       const created = res.data;
@@ -439,10 +503,27 @@ function SalesPageContent() {
         const listRes = await axios.get("http://localhost:5000/api/sales");
         setSales(listRes.data);
       }
-      showAlert("Sucesso", "Venda clonada.", "success");
+
+      setCloneTarget(null);
+
+      if (clonedDraftIssues.length > 0) {
+        await showAlert(
+          "Rascunho criado",
+          `A venda clonada foi criada como rascunho. Ainda faltam: ${formatSaleDraftIssuesSummary(clonedDraftIssues)}.`,
+          "warning",
+        );
+      } else {
+        await showAlert("Sucesso", "Venda clonada.", "success");
+      }
     } catch (error) {
       console.error(error);
-      showAlert("Erro", "Falha ao clonar venda.", "error");
+      await showAlert(
+        "Erro",
+        resolveRequestErrorMessage(error, "Falha ao clonar venda."),
+        "error",
+      );
+    } finally {
+      setCloneModeLoading(null);
     }
   };
 
@@ -651,11 +732,47 @@ function SalesPageContent() {
       : "rounded-xl border border-slate-200 bg-slate-100 p-4";
   const renderExpandedSaleDetails = (sale: Sale) => {
     const saleFilamentUsages = mapSaleFilamentPayload(sale);
+    const draftIssues = getDraftIssuesForSale(sale);
 
     return (
       <div
         className={`grid grid-cols-1 gap-4 text-sm md:grid-cols-3 ${isSaleActive(sale) ? "text-gray-700" : "text-slate-600"}`}
       >
+        {draftIssues.length > 0 && (
+          <div className="md:col-span-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="flex items-start gap-3">
+              <svg
+                className="mt-0.5 h-4 w-4 shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                ></path>
+              </svg>
+              <div>
+                <p className="font-semibold">Venda em rascunho</p>
+                <p className="mt-1 text-amber-800">
+                  Complete os dados abaixo para remover este aviso do relatório.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {draftIssues.map((issue) => (
+                    <span
+                      key={`${sale.id}-${issue.id}`}
+                      className="rounded-full bg-white px-3 py-1 text-xs font-medium text-amber-900 ring-1 ring-amber-200"
+                    >
+                      {issue.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {!isSaleActive(sale) && (
           <div className="md:col-span-3 rounded-xl border border-slate-300 bg-white/70 px-4 py-3 text-sm font-medium text-slate-600">
             Esta venda está hibernando. Ela fica fora das filas e das
@@ -1244,6 +1361,11 @@ function SalesPageContent() {
                         className={`mt-1 flex flex-wrap items-center gap-2 text-xs ${getSaleSecondaryTextClassName(s)}`}
                       >
                         <p>Entrega: {formatDisplayDate(s.deliveryDate)}</p>
+                        {getDraftIssuesForSale(s).length > 0 && (
+                          <span className="inline-flex rounded-full border border-amber-200 bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-800">
+                            Rascunho
+                          </span>
+                        )}
                         {!isSaleActive(s) && (
                           <span
                             className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${getSaleActivityClassName(s)}`}
@@ -1276,6 +1398,32 @@ function SalesPageContent() {
                     </button>
                   )}
                 </div>
+
+                {getDraftIssuesForSale(s).length > 0 && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <div className="flex items-start gap-2">
+                      <svg
+                        className="mt-0.5 h-4 w-4 shrink-0"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                        ></path>
+                      </svg>
+                      <div>
+                        <p className="font-semibold">Rascunho com pendências</p>
+                        <p className="mt-0.5 text-amber-800">
+                          Faltando {getDraftSummaryForSale(s)}.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div
                   className={`grid gap-3 ${hideProfit ? "grid-cols-1" : "grid-cols-2"}`}
@@ -1313,6 +1461,11 @@ function SalesPageContent() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
+                  {getDraftIssuesForSale(s).length > 0 && (
+                    <span className="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-amber-100 text-amber-800">
+                      Rascunho
+                    </span>
+                  )}
                   {!isSaleActive(s) && (
                     <span
                       className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getSaleActivityClassName(s)}`}
@@ -1580,6 +1733,11 @@ function SalesPageContent() {
                             >
                               {s.description}
                             </div>
+                            {getDraftIssuesForSale(s).length > 0 && (
+                              <span className="inline-flex shrink-0 rounded-full border border-amber-200 bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-800">
+                                Rascunho
+                              </span>
+                            )}
                             {s.incidents && s.incidents.length > 0 && (
                               <button
                                 onClick={(e) => {
@@ -1605,6 +1763,16 @@ function SalesPageContent() {
                               </button>
                             )}
                           </div>
+                          {getDraftIssuesForSale(s).length > 0 && (
+                            <div className="mt-1 flex items-center gap-2 overflow-hidden text-[11px] text-amber-700">
+                              <span className="inline-flex rounded-full border border-amber-200 bg-amber-100 px-2 py-1 font-semibold text-amber-800">
+                                Revisar
+                              </span>
+                              <span className="truncate">
+                                Faltando {getDraftSummaryForSale(s)}.
+                              </span>
+                            </div>
+                          )}
                         </td>
                         <td
                           className={`px-4 py-3 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
@@ -1851,6 +2019,77 @@ function SalesPageContent() {
       )}
 
       <Modal
+        isOpen={!!cloneTarget}
+        onClose={closeCloneModal}
+        title="Clonar venda"
+        type="warning"
+        footer={
+          <>
+            <button
+              onClick={closeCloneModal}
+              disabled={cloneModeLoading !== null}
+              className="px-4 py-2 rounded-lg font-medium text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => handleCloneConfirm("copy")}
+              disabled={cloneModeLoading !== null}
+              className="px-4 py-2 rounded-lg font-medium bg-brand-purple text-white hover:bg-purple-800 transition-colors disabled:opacity-50"
+            >
+              {cloneModeLoading === "copy" ? "Clonando..." : "Copiar tudo"}
+            </button>
+            <button
+              onClick={() => handleCloneConfirm("reset")}
+              disabled={cloneModeLoading !== null}
+              className="px-4 py-2 rounded-lg font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors disabled:opacity-50"
+            >
+              {cloneModeLoading === "reset"
+                ? "Criando rascunho..."
+                : "Resetar para nova venda"}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm text-gray-700">
+              Deseja copiar todos os parâmetros para o clone ou resetar os
+              campos operacionais para iniciar uma nova venda a partir deste
+              modelo?
+            </p>
+            {cloneTarget && (
+              <p className="mt-2 text-sm font-semibold text-gray-900">
+                Venda base: {cloneTarget.description}
+              </p>
+            )}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-brand-purple/20 bg-brand-purple/5 p-4">
+              <p className="font-semibold text-brand-purple">Copiar tudo</p>
+              <p className="mt-1 text-sm text-gray-600">
+                Duplica os dados preenchidos, status atuais, serviços e valores.
+                Os anexos não são copiados para evitar referência duplicada de
+                arquivo.
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <p className="font-semibold text-amber-900">
+                Resetar para nova venda
+              </p>
+              <p className="mt-1 text-sm text-amber-800">
+                Define nova data de venda, deixa entrega em aberto, limpa
+                agendas e ocorrências e volta pago, entregue e impresso para
+                falso. O clone entra como rascunho para revisão posterior.
+              </p>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
         isOpen={!!showIncidentsModal}
         onClose={() => {
           setShowIncidentsModal(null);
@@ -1960,9 +2199,13 @@ function SalesPageContent() {
 
                       {getIncidentWasteTotal(incident) > 0 ? (
                         <p className="mt-2 text-xs font-medium text-amber-700">
-                          Desperdício registrado: {getIncidentWasteTotal(incident).toLocaleString("pt-BR", {
-                            maximumFractionDigits: 2,
-                          })}{" "}
+                          Desperdício registrado:{" "}
+                          {getIncidentWasteTotal(incident).toLocaleString(
+                            "pt-BR",
+                            {
+                              maximumFractionDigits: 2,
+                            },
+                          )}{" "}
                           g
                         </p>
                       ) : null}
@@ -1974,9 +2217,11 @@ function SalesPageContent() {
                               key={`${entry.filamentId}-${entry.massGrams}`}
                               className="text-[11px] text-amber-700"
                             >
-                              {getFilamentName(entry.filamentId)}: {entry.massGrams.toLocaleString("pt-BR", {
+                              {getFilamentName(entry.filamentId)}:{" "}
+                              {entry.massGrams.toLocaleString("pt-BR", {
                                 maximumFractionDigits: 2,
-                              })} g
+                              })}{" "}
+                              g
                             </p>
                           ))}
                         </div>
