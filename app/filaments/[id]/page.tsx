@@ -10,6 +10,7 @@ import {
     getIncidentWasteForFilament,
     getSaleWasteForFilament,
 } from "@/utils/printWaste";
+import { formatDateOnly } from "@/utils/dateOnly";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
@@ -149,9 +150,7 @@ export default function EditFilamentPage({
   };
 
   const formatSaleDate = (date?: string) => {
-    return date
-      ? new Date(date).toLocaleDateString("pt-BR")
-      : "Data não informada";
+    return formatDateOnly(date, "Data não informada");
   };
 
   const formatIncidentTimestamp = (timestamp?: string) => {

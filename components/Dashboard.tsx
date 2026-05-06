@@ -10,6 +10,7 @@ import {
   PrintFeedbackHistoryEntry,
   toStoredPrintFeedback,
 } from "@/utils/printFeedback";
+import { formatDateOnly } from "@/utils/dateOnly";
 import { mapSaleFilamentPayload } from "@/utils/filamentUsage";
 import { getIncidentWasteEntries, getIncidentWasteTotal } from "@/utils/printWaste";
 import axios from "axios";
@@ -2425,11 +2426,7 @@ export default function Dashboard() {
 
                     const scheduleLabel =
                       item.type === "print"
-                        ? item.deliveryDate
-                          ? new Date(item.deliveryDate).toLocaleDateString(
-                              "pt-BR",
-                            )
-                          : "-"
+                        ? formatDateOnly(item.deliveryDate)
                         : item.scheduledAt
                           ? new Date(item.scheduledAt).toLocaleString("pt-BR")
                           : "-";

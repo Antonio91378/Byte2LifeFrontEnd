@@ -17,6 +17,7 @@ import {
     PrintFeedback,
     PrintFeedbackHistoryEntry,
 } from "@/utils/printFeedback";
+import { formatDateOnly } from "@/utils/dateOnly";
 import axios from "axios";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -1187,16 +1188,7 @@ function InfoPill({
 }
 
 function formatDate(value?: string) {
-  if (!value) {
-    return "Não informado";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Não informado";
-  }
-
-  return date.toLocaleDateString("pt-BR");
+  return formatDateOnly(value, "Não informado");
 }
 
 function formatDateTime(value?: string) {

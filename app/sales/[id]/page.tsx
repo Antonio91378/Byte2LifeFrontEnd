@@ -26,6 +26,7 @@ import {
     SaleAttachmentCategory,
 } from "@/utils/saleAttachments";
 import { applyDraftFlags, getSaleDraftIssues } from "@/utils/saleDraft";
+import { toDateOnlyValue } from "@/utils/dateOnly";
 import {
     formatSaleProfitPercentage,
     getSaleProfitValue,
@@ -422,10 +423,8 @@ function EditSaleContent({
           isPaid: sale.isPaid,
           filamentId: sale.filamentId || "",
           clientId: sale.clientId || "",
-          saleDate: sale.saleDate ? sale.saleDate.split("T")[0] : "",
-          deliveryDate: sale.deliveryDate
-            ? sale.deliveryDate.split("T")[0]
-            : "",
+          saleDate: toDateOnlyValue(sale.saleDate),
+          deliveryDate: toDateOnlyValue(sale.deliveryDate),
           printStatus: sale.printStatus || "Pending",
           hasCustomArt: sale.hasCustomArt || false,
           hasPainting: sale.hasPainting || false,

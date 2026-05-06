@@ -24,6 +24,7 @@ import {
     SaleAttachmentCategory,
 } from "@/utils/saleAttachments";
 import { applyDraftFlags, getSaleDraftIssues } from "@/utils/saleDraft";
+import { getLocalDateOnlyValue } from "@/utils/dateOnly";
 import {
     formatSaleProfitPercentage,
     getSaleProfitValue,
@@ -137,7 +138,7 @@ function NewSaleContent() {
     isPaid: false,
     filamentId: "",
     clientId: "",
-    saleDate: new Date().toISOString().split("T")[0],
+    saleDate: getLocalDateOnlyValue(),
     deliveryDate: "",
     hasCustomArt: false,
     hasPainting: false,

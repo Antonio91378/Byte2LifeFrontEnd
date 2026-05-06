@@ -10,6 +10,7 @@ import {
     formatFilamentDisplayName,
     mapSaleFilamentPayload,
 } from "@/utils/filamentUsage";
+import { formatDateOnly, getDateOnlySortValue } from "@/utils/dateOnly";
 import {
     getIncidentWasteEntries,
     getIncidentWasteTotal,
@@ -697,11 +698,9 @@ function SalesPageContent() {
   };
 
   const getSaleSortValue = (sale: Sale) => {
-    if (sale.saleDate) {
-      const parsedSaleDate = new Date(sale.saleDate).getTime();
-      if (!Number.isNaN(parsedSaleDate)) {
-        return parsedSaleDate;
-      }
+    const parsedSaleDate = getDateOnlySortValue(sale.saleDate);
+    if (parsedSaleDate !== null) {
+      return parsedSaleDate;
     }
 
     const objectIdPrefix = sale.id?.slice(0, 8);
@@ -836,7 +835,7 @@ function SalesPageContent() {
       filterDate || filterClientId || filterClientName || filterProductName,
     ) || activeStatusFilters > 0;
   const formatDisplayDate = (value?: string) =>
-    value ? new Date(value).toLocaleDateString("pt-BR") : "-";
+    formatDateOnly(value);
   const getSaleCardClassName = (sale: Sale) =>
     isSaleActive(sale)
       ? "bg-white border-gray-100 shadow-sm"
@@ -1820,18 +1819,12 @@ function SalesPageContent() {
                         <td
                           className={`px-4 py-3 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
                         >
-                          {s.saleDate
-                            ? new Date(s.saleDate).toLocaleDateString("pt-BR")
-                            : "-"}
+                          {formatDisplayDate(s.saleDate)}
                         </td>
                         <td
                           className={`hidden md:table-cell px-4 py-3 whitespace-nowrap text-sm ${getSaleSecondaryTextClassName(s)}`}
                         >
-                          {s.deliveryDate
-                            ? new Date(s.deliveryDate).toLocaleDateString(
-                                "pt-BR",
-                              )
-                            : "-"}
+                          {formatDisplayDate(s.deliveryDate)}
                         </td>
                         <td
                           className={`w-[31%] px-4 py-3 text-sm font-medium ${getSaleMutedTextClassName(s)}`}

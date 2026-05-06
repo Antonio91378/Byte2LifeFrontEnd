@@ -1,4 +1,5 @@
 import { parseDurationToHours } from "./time";
+import { getLocalDateOnlyValue } from "./dateOnly";
 import {
   hasPrintFeedback,
   PrintFeedback,
@@ -126,12 +127,6 @@ function getPrintTimeHours(input: SaleDraftInput): number {
   }
 
   return parseDurationToHours(normalizeText(input.designPrintTime));
-}
-
-function getTodayDateInputValue(): string {
-  const now = new Date();
-  const timezoneOffset = now.getTimezoneOffset() * 60_000;
-  return new Date(now.getTime() - timezoneOffset).toISOString().slice(0, 10);
 }
 
 export function getSaleDraftIssues(input: SaleDraftInput): SaleDraftIssue[] {
@@ -268,7 +263,7 @@ export function buildClonedSalePayload<T extends CloneableSale>(
     incidents: [],
     errorReason: null,
     wastedFilamentGrams: null,
-    saleDate: getTodayDateInputValue(),
+    saleDate: getLocalDateOnlyValue(),
     deliveryDate: null,
     printStatus: "Pending",
     isPrintConcluded: false,
