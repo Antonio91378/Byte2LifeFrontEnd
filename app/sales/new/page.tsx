@@ -2,6 +2,7 @@
 
 import FilamentUsageEditor from "@/components/FilamentUsageEditor";
 import PrintScheduleCalendar from "@/components/PrintScheduleCalendar";
+import PrintFeedbackForm from "@/components/sale/PrintFeedbackForm";
 import SaleAttachmentsPanel from "@/components/sale/SaleAttachmentsPanel";
 import { DETAIL_LEVELS } from "@/constants/printQuality";
 import { useDialog } from "@/context/DialogContext";
@@ -27,6 +28,11 @@ import {
     formatSaleProfitPercentage,
     getSaleProfitValue,
 } from "@/utils/saleFinancials";
+import {
+    createEmptyPrintFeedback,
+    PrintFeedbackHistoryEntry,
+    toStoredPrintFeedback,
+} from "@/utils/printFeedback";
 import { parseDurationToHours } from "@/utils/time";
 import axios from "axios";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -148,6 +154,8 @@ function NewSaleContent() {
     nozzleDiameter: "",
     layerHeight: "",
     printStartConfirmedAt: "",
+    printFeedback: createEmptyPrintFeedback(),
+    printFeedbackHistory: [] as PrintFeedbackHistoryEntry[],
     costDetails: null as any,
   });
 
@@ -339,6 +347,8 @@ function NewSaleContent() {
           ? formData.clientId
           : null,
       stockItemId: stockId || null,
+      printFeedback: toStoredPrintFeedback(formData.printFeedback),
+      printFeedbackHistory: formData.printFeedbackHistory,
     };
   };
 
@@ -1555,6 +1565,16 @@ function NewSaleContent() {
             onRemovePending={handleRemovePendingAttachment}
           />
         </div>
+
+        <PrintFeedbackForm
+          value={formData.printFeedback}
+          onChange={(nextFeedback) =>
+            setFormData((prev) => ({
+              ...prev,
+              printFeedback: nextFeedback,
+            }))
+          }
+        />
 
         {/* Checkboxes */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 border-t border-gray-100">

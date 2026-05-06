@@ -4,6 +4,10 @@ import {
     getResponsiveCalendarConfig,
     useCompactCalendarMode,
 } from "@/utils/calendar";
+import {
+  hasFeedbackHistory,
+  type PrintFeedbackHistoryEntry,
+} from "@/utils/printFeedback";
 import { parseDurationToHours } from "@/utils/time";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
@@ -58,6 +62,7 @@ interface QueueSale {
   designResponsible?: string;
   designValue?: number;
   designStatus?: "Active" | "Concluded";
+  printFeedbackHistory?: PrintFeedbackHistoryEntry[] | null;
 }
 
 interface DesignTask {
@@ -213,6 +218,35 @@ function getDurationHours(sale: QueueSale) {
   const hours = Number(sale.printTimeHours) || 0;
   if (hours > 0) return hours;
   return parseDurationToHours(sale.designPrintTime || "");
+}
+
+function buildFeedbackHistoryReviewMessage(sale: QueueSale) {
+  const historyEntries = (sale.printFeedbackHistory ?? []).filter(
+    (entry) => entry.feedback,
+  );
+  const historyText = historyEntries
+    .slice(0, 3)
+    .map((entry, index) => {
+      const fileStars = entry.feedback?.fileQuality?.stars ?? 0;
+      const fileReason = entry.feedback?.fileQuality?.reason?.trim();
+      const printStars = entry.feedback?.printQuality?.stars ?? 0;
+      const printReason = entry.feedback?.printQuality?.reason?.trim();
+      const notes = entry.feedback?.generalNotes?.trim();
+      return [
+        `${index + 1}. ${entry.sourceSaleDescription || "Venda anterior"}`,
+        `Arquivo: ${fileStars}/5${fileReason ? ` - ${fileReason}` : ""}`,
+        `Impressao: ${printStars}/5${printReason ? ` - ${printReason}` : ""}`,
+        notes ? `Obs.: ${notes}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
+  const hiddenCount = historyEntries.length - 3;
+  const suffix =
+    hiddenCount > 0 ? `\n\n... e mais ${hiddenCount} registro(s).` : "";
+
+  return `Esta venda foi clonada de uma venda com historico de avaliacao.\n\nLeia os pontos anteriores antes de preparar a impressao atual:\n\n${historyText}${suffix}\n\nConfirme somente se as melhorias necessarias ja foram consideradas.`;
 }
 
 function getPaintDurationHours(sale: QueueSale) {
@@ -1938,20 +1972,33 @@ export default function PrintScheduleCalendar({
       }
     };
 
-    if (
-      currentPrint &&
-      currentPrint.printStatus === "Staged" &&
-      currentPrint.id !== targetSaleId
-    ) {
+    const confirmReplacementIfNeeded = () => {
+      if (
+        currentPrint &&
+        currentPrint.printStatus === "Staged" &&
+        currentPrint.id !== targetSaleId
+      ) {
+        showConfirm(
+          "Substituir item preparado",
+          "Ja existe um item preparado. Deseja devolve-lo para a fila e preparar este agora?",
+          runStage,
+        );
+        return;
+      }
+
+      void runStage();
+    };
+
+    if (hasFeedbackHistory(hoverQueueSale.printFeedbackHistory ?? null)) {
       showConfirm(
-        "Substituir item preparado",
-        "Ja existe um item preparado. Deseja devolve-lo para a fila e preparar este agora?",
-        runStage,
+        "Revisar historico antes de iniciar",
+        buildFeedbackHistoryReviewMessage(hoverQueueSale),
+        confirmReplacementIfNeeded,
       );
       return;
     }
 
-    runStage();
+    confirmReplacementIfNeeded();
   };
 
   const handleEventMouseLeave = () => {

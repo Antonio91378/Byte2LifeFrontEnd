@@ -1,5 +1,15 @@
 "use client";
 
+import PrintFeedbackForm from "@/components/sale/PrintFeedbackForm";
+import PrintFeedbackSummary from "@/components/sale/PrintFeedbackSummary";
+import {
+  createEmptyPrintFeedback,
+  hasFeedbackHistory,
+  normalizePrintFeedback,
+  PrintFeedback,
+  PrintFeedbackHistoryEntry,
+  toStoredPrintFeedback,
+} from "@/utils/printFeedback";
 import { mapSaleFilamentPayload } from "@/utils/filamentUsage";
 import { getIncidentWasteEntries, getIncidentWasteTotal } from "@/utils/printWaste";
 import axios from "axios";
@@ -40,6 +50,10 @@ interface Sale {
   }>;
 
   printStatus: string;
+
+  printFeedback?: PrintFeedback | null;
+
+  printFeedbackHistory?: PrintFeedbackHistoryEntry[] | null;
 
   priority: number;
 
@@ -455,9 +469,19 @@ export default function Dashboard() {
 
   const [showFinishModal, setShowFinishModal] = useState(false);
 
+  const [reviewStartSale, setReviewStartSale] = useState<Sale | null>(null);
+
+  const [hasReadStartHistory, setHasReadStartHistory] = useState(false);
+
+  const [isStartingPrint, setIsStartingPrint] = useState(false);
+
   const [finishStatus, setFinishStatus] = useState("Concluded");
 
   const [finishTags, setFinishTags] = useState("");
+
+  const [finishFeedback, setFinishFeedback] = useState<PrintFeedback>(
+    createEmptyPrintFeedback(),
+  );
 
   const [errorReason, setErrorReason] = useState("");
 
@@ -1377,9 +1401,22 @@ export default function Dashboard() {
       };
 
       if (finishStatus === "Concluded") {
+        const storedFeedback = toStoredPrintFeedback(finishFeedback);
+        if (!storedFeedback?.fileQuality.reason?.trim()) {
+          alert("Informe a justificativa da nota de qualidade do arquivo.");
+          return;
+        }
+
+        if (!storedFeedback?.printQuality.reason?.trim()) {
+          alert("Informe a justificativa da nota de qualidade da impressão.");
+          return;
+        }
+
         updateData.printStatus = "Concluded";
 
         updateData.isPrintConcluded = true;
+
+        updateData.printFeedback = storedFeedback;
       }
 
       if (finishStatus === "Failed") {
@@ -1451,6 +1488,8 @@ export default function Dashboard() {
 
       setFinishStatus("Concluded");
 
+      setFinishFeedback(createEmptyPrintFeedback());
+
       setErrorReason("");
 
       setWastedFilamentById({});
@@ -1463,22 +1502,40 @@ export default function Dashboard() {
     }
   };
 
-  const handleStartPrint = async () => {
-    if (!currentPrint) return;
+  const startPrint = async (sale: Sale) => {
+    setIsStartingPrint(true);
 
     try {
-      await axios.put(`http://localhost:5000/api/sales/${currentPrint.id}`, {
-        ...currentPrint,
+      await axios.put(`http://localhost:5000/api/sales/${sale.id}`, {
+        ...sale,
 
         printStatus: "InProgress",
       });
 
-      fetchData();
+      setReviewStartSale(null);
+
+      setHasReadStartHistory(false);
+
+      await fetchData();
     } catch (error) {
       console.error("Error starting print", error);
 
       alert("Erro ao iniciar impressão");
+    } finally {
+      setIsStartingPrint(false);
     }
+  };
+
+  const handleStartPrint = async () => {
+    if (!currentPrint) return;
+
+    if (hasFeedbackHistory(currentPrint.printFeedbackHistory ?? null)) {
+      setReviewStartSale(currentPrint);
+      setHasReadStartHistory(false);
+      return;
+    }
+
+    await startPrint(currentPrint);
   };
 
   const handleStageItem = async (item: Sale) => {
@@ -1523,7 +1580,10 @@ export default function Dashboard() {
     <div className="space-y-8 mb-12">
       <Modal
         isOpen={showFinishModal}
-        onClose={() => setShowFinishModal(false)}
+        onClose={() => {
+          setShowFinishModal(false);
+          setFinishFeedback(createEmptyPrintFeedback());
+        }}
         title="Finalizar Impressão"
       >
         <div className="space-y-4">
@@ -1627,6 +1687,15 @@ export default function Dashboard() {
             </>
           )}
 
+          {finishStatus === "Concluded" && (
+            <PrintFeedbackForm
+              value={finishFeedback}
+              onChange={setFinishFeedback}
+              title="Feedback da impressão"
+              description="Registre o resultado antes de concluir a impressão em andamento."
+            />
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Tags (separadas por vírgula)
@@ -1647,6 +1716,8 @@ export default function Dashboard() {
                 setShowFinishModal(false);
 
                 setForceZeroTimer(false);
+
+                setFinishFeedback(createEmptyPrintFeedback());
               }}
               className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
             >
@@ -1660,6 +1731,72 @@ export default function Dashboard() {
               Confirmar
             </button>
           </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!reviewStartSale}
+        onClose={() => {
+          if (isStartingPrint) return;
+          setReviewStartSale(null);
+          setHasReadStartHistory(false);
+        }}
+        title="Revisar histórico antes de iniciar"
+        type="warning"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setReviewStartSale(null);
+                setHasReadStartHistory(false);
+              }}
+              disabled={isStartingPrint}
+              className="px-4 py-2 rounded-lg font-medium text-gray-600 hover:bg-gray-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!reviewStartSale) return;
+                void startPrint(reviewStartSale);
+              }}
+              disabled={!hasReadStartHistory || isStartingPrint}
+              className="px-4 py-2 rounded-lg bg-brand-purple font-medium text-white transition-colors hover:bg-purple-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isStartingPrint ? "Iniciando..." : "Li e quero iniciar"}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm leading-6 text-gray-700">
+            Esta venda foi clonada de uma venda com histórico de avaliação.
+            Leia os problemas anteriores antes de iniciar o contador e confirme
+            que as melhorias para esta nova impressão foram consideradas.
+          </p>
+
+          <PrintFeedbackSummary
+            feedback={null}
+            history={reviewStartSale?.printFeedbackHistory ?? null}
+            compact
+            showHistory
+            emptyText="Nenhum histórico herdado foi encontrado."
+          />
+
+          <label className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium text-amber-900">
+            <input
+              type="checkbox"
+              checked={hasReadStartHistory}
+              onChange={(event) => setHasReadStartHistory(event.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-amber-300 text-brand-purple focus:ring-brand-purple"
+            />
+            <span>
+              Li o histórico de avaliação e conferi se esta nova impressão já
+              considera as melhorias necessárias.
+            </span>
+          </label>
         </div>
       </Modal>
 
@@ -2000,6 +2137,10 @@ export default function Dashboard() {
                           onClick={() => {
                             setForceZeroTimer(true);
 
+                            setFinishFeedback(
+                              normalizePrintFeedback(currentPrint.printFeedback),
+                            );
+
                             setShowFinishModal(true);
                           }}
                           className="w-full rounded-lg bg-brand-purple px-6 py-3 text-base font-semibold text-white shadow-md transition-colors hover:bg-purple-800 sm:w-auto sm:py-2 sm:text-sm"
@@ -2055,7 +2196,8 @@ export default function Dashboard() {
 
                         <button
                           onClick={handleStartPrint}
-                          className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-6 py-3 text-base font-bold text-white shadow-md transition-colors hover:bg-green-700 sm:w-auto sm:text-lg"
+                          disabled={isStartingPrint}
+                          className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-6 py-3 text-base font-bold text-white shadow-md transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:text-lg"
                         >
                           <svg
                             className="w-6 h-6"

@@ -3,6 +3,7 @@
 import FilamentUsageEditor from "@/components/FilamentUsageEditor";
 import LoadingPanel from "@/components/LoadingPanel";
 import PrintScheduleCalendar from "@/components/PrintScheduleCalendar";
+import PrintFeedbackForm from "@/components/sale/PrintFeedbackForm";
 import SaleAttachmentsPanel from "@/components/sale/SaleAttachmentsPanel";
 import { DETAIL_LEVELS } from "@/constants/printQuality";
 import { useDialog } from "@/context/DialogContext";
@@ -29,6 +30,12 @@ import {
     formatSaleProfitPercentage,
     getSaleProfitValue,
 } from "@/utils/saleFinancials";
+import {
+    createEmptyPrintFeedback,
+    normalizePrintFeedback,
+    PrintFeedbackHistoryEntry,
+    toStoredPrintFeedback,
+} from "@/utils/printFeedback";
 import { parseDurationToHours } from "@/utils/time";
 import axios from "axios";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -174,6 +181,8 @@ function EditSaleContent({
     errorReason: null,
     wastedFilamentGrams: null,
     stockItemId: null,
+    printFeedback: createEmptyPrintFeedback(),
+    printFeedbackHistory: [] as PrintFeedbackHistoryEntry[],
   });
 
   useEffect(() => {
@@ -360,6 +369,8 @@ function EditSaleContent({
           ? filamentPayload[0].filamentId
           : null,
       clientId: formData.clientId?.length === 24 ? formData.clientId : null,
+      printFeedback: toStoredPrintFeedback(formData.printFeedback),
+      printFeedbackHistory: formData.printFeedbackHistory,
     };
   };
 
@@ -440,6 +451,8 @@ function EditSaleContent({
           errorReason: sale.errorReason || null,
           wastedFilamentGrams: sale.wastedFilamentGrams || null,
           stockItemId: sale.stockItemId || null,
+          printFeedback: normalizePrintFeedback(sale.printFeedback),
+          printFeedbackHistory: sale.printFeedbackHistory || [],
         });
       } catch (error) {
         console.error("Error fetching data:", error);
@@ -1571,6 +1584,16 @@ function EditSaleContent({
             onRemovePending={handleRemovePendingAttachment}
           />
         </div>
+
+        <PrintFeedbackForm
+          value={formData.printFeedback}
+          onChange={(nextFeedback) =>
+            setFormData((prev) => ({
+              ...prev,
+              printFeedback: nextFeedback,
+            }))
+          }
+        />
 
         {/* Checkboxes */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 border-t border-gray-100">

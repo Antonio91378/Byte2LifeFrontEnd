@@ -1,4 +1,9 @@
 import { parseDurationToHours } from "./time";
+import {
+  hasPrintFeedback,
+  PrintFeedback,
+  PrintFeedbackHistoryEntry,
+} from "./printFeedback";
 
 type NumericLike = number | string | null | undefined;
 
@@ -61,6 +66,8 @@ export interface CloneableSale extends SaleDraftInput {
   stockItemId?: string | null;
   priority?: NumericLike;
   isActive?: boolean | null;
+  printFeedback?: PrintFeedback | null;
+  printFeedbackHistory?: PrintFeedbackHistoryEntry[] | null;
   [key: string]: unknown;
 }
 
@@ -215,22 +222,49 @@ export function applyDraftFlags(payload: CloneableSale): CloneableSale {
   };
 }
 
+function buildCloneFeedbackHistory(
+  sale: CloneableSale,
+): PrintFeedbackHistoryEntry[] {
+  const history = Array.isArray(sale.printFeedbackHistory)
+    ? [...sale.printFeedbackHistory]
+    : [];
+
+  if (!hasPrintFeedback(sale.printFeedback ?? null)) {
+    return history;
+  }
+
+  return [
+    ...history,
+    {
+      sourceSaleId: sale.id ?? null,
+      sourceSaleDescription: sale.description ?? null,
+      clonedAt: new Date().toISOString(),
+      feedback: sale.printFeedback ?? null,
+    },
+  ];
+}
+
 export function buildClonedSalePayload<T extends CloneableSale>(
   sale: CloneableSale,
   mode: CloneMode,
 ): CloneableSale {
   const { id: _id, ...saleWithoutId } = sale;
+  const printFeedbackHistory = buildCloneFeedbackHistory(sale);
 
   if (mode === "copy") {
     return applyDraftFlags({
       ...saleWithoutId,
       attachments: [],
+      printFeedback: null,
+      printFeedbackHistory,
     });
   }
 
   return applyDraftFlags({
     ...saleWithoutId,
     attachments: [],
+    printFeedback: null,
+    printFeedbackHistory,
     incidents: [],
     errorReason: null,
     wastedFilamentGrams: null,

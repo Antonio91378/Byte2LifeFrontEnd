@@ -1,6 +1,10 @@
 "use client";
 
 import Modal from "@/components/Modal";
+import PrintFeedbackForm from "@/components/sale/PrintFeedbackForm";
+import PrintFeedbackSummary, {
+    PrintFeedbackBadge,
+} from "@/components/sale/PrintFeedbackSummary";
 import { useDialog } from "@/context/DialogContext";
 import {
     formatFilamentDisplayName,
@@ -22,6 +26,15 @@ import {
     formatSaleDraftIssuesSummary,
     getSaleDraftIssues,
 } from "@/utils/saleDraft";
+import {
+    createEmptyPrintFeedback,
+    hasAnyPrintFeedback,
+    hasPrintFeedback,
+    normalizePrintFeedback,
+    PrintFeedback,
+    PrintFeedbackHistoryEntry,
+    toStoredPrintFeedback,
+} from "@/utils/printFeedback";
 import axios from "axios";
 import {
     Fragment,
@@ -85,6 +98,7 @@ interface Sale {
   deliveryDate?: string;
   printStartScheduledAt?: string;
   printStartConfirmedAt?: string;
+  printStatus?: string;
   productLink?: string;
   clientId?: string;
   filamentId?: string;
@@ -111,6 +125,8 @@ interface Sale {
   incidents?: PrintIncident[];
   attachments?: SaleAttachment[];
   isActive?: boolean | null;
+  printFeedback?: PrintFeedback | null;
+  printFeedbackHistory?: PrintFeedbackHistoryEntry[] | null;
 }
 
 export default function SalesPage() {
@@ -153,6 +169,12 @@ function SalesPageContent() {
   const [cloneModeLoading, setCloneModeLoading] = useState<CloneMode | null>(
     null,
   );
+  const [hasReadCloneFeedback, setHasReadCloneFeedback] = useState(false);
+  const [feedbackSale, setFeedbackSale] = useState<Sale | null>(null);
+  const [feedbackDraft, setFeedbackDraft] = useState<PrintFeedback>(
+    createEmptyPrintFeedback(),
+  );
+  const [isSavingFeedback, setIsSavingFeedback] = useState(false);
   const [isAddingIncident, setIsAddingIncident] = useState(false);
   const [newIncidentReason, setNewIncidentReason] = useState("Other");
   const [newIncidentComment, setNewIncidentComment] = useState("");
@@ -402,11 +424,99 @@ function SalesPageContent() {
     );
   };
 
+  const openPrintFeedbackModal = (sale: Sale) => {
+    setFeedbackSale(sale);
+    setFeedbackDraft(normalizePrintFeedback(sale.printFeedback));
+  };
+
+  const closePrintFeedbackModal = () => {
+    if (isSavingFeedback) {
+      return;
+    }
+
+    setFeedbackSale(null);
+    setFeedbackDraft(createEmptyPrintFeedback());
+  };
+
+  const handleSavePrintFeedback = async () => {
+    if (!feedbackSale) {
+      return;
+    }
+
+    const storedFeedback = toStoredPrintFeedback(feedbackDraft);
+    if (!storedFeedback?.fileQuality.reason?.trim()) {
+      await showAlert(
+        "Feedback incompleto",
+        "Informe a justificativa da nota de qualidade do arquivo.",
+        "warning",
+      );
+      return;
+    }
+
+    if (!storedFeedback?.printQuality.reason?.trim()) {
+      await showAlert(
+        "Feedback incompleto",
+        "Informe a justificativa da nota de qualidade da impressão.",
+        "warning",
+      );
+      return;
+    }
+
+    const updatedSale: Sale = {
+      ...feedbackSale,
+      isPrintConcluded: true,
+      printStatus: "Concluded",
+      printFeedback: storedFeedback,
+    };
+
+    setIsSavingFeedback(true);
+    try {
+      await axios.put(
+        `http://localhost:5000/api/sales/${feedbackSale.id}`,
+        updatedSale,
+      );
+
+      setSales((prev) =>
+        prev.map((item) =>
+          item.id === feedbackSale.id ? { ...item, ...updatedSale } : item,
+        ),
+      );
+      setFeedbackSale(null);
+      setFeedbackDraft(createEmptyPrintFeedback());
+      await showAlert(
+        "Sucesso",
+        "Feedback salvo e impressão concluída.",
+        "success",
+      );
+    } catch (error) {
+      console.error(error);
+      await showAlert(
+        "Erro",
+        resolveRequestErrorMessage(error, "Falha ao salvar feedback."),
+        "error",
+      );
+    } finally {
+      setIsSavingFeedback(false);
+    }
+  };
+
   const handleToggleStatus = async (
     sale: Sale,
     field: "isPrintConcluded" | "isDelivered" | "isPaid",
   ) => {
+    if (field === "isPrintConcluded" && !sale.isPrintConcluded) {
+      openPrintFeedbackModal(sale);
+      return;
+    }
+
     const updatedSale: any = { ...sale, [field]: !sale[field] };
+    if (
+      field === "isPrintConcluded" &&
+      sale.isPrintConcluded &&
+      sale.printStatus === "Concluded"
+    ) {
+      updatedSale.printStatus = "Pending";
+    }
     try {
       await axios.put(
         `http://localhost:5000/api/sales/${sale.id}`,
@@ -414,7 +524,13 @@ function SalesPageContent() {
       );
       setSales((prev) =>
         prev.map((item) =>
-          item.id === sale.id ? { ...item, [field]: updatedSale[field] } : item,
+          item.id === sale.id
+            ? {
+                ...item,
+                [field]: updatedSale[field],
+                printStatus: updatedSale.printStatus,
+              }
+            : item,
         ),
       );
     } catch (error) {
@@ -472,6 +588,7 @@ function SalesPageContent() {
   const handleClone = (sale: Sale) => {
     setCloneTarget(sale);
     setCloneModeLoading(null);
+    setHasReadCloneFeedback(false);
   };
 
   const closeCloneModal = () => {
@@ -480,10 +597,20 @@ function SalesPageContent() {
     }
 
     setCloneTarget(null);
+    setHasReadCloneFeedback(false);
   };
 
   const handleCloneConfirm = async (mode: CloneMode) => {
     if (!cloneTarget) {
+      return;
+    }
+
+    if (hasAnyPrintFeedback(cloneTarget) && !hasReadCloneFeedback) {
+      await showAlert(
+        "Feedback obrigatório",
+        "Leia o feedback da venda anterior antes de criar o clone.",
+        "warning",
+      );
       return;
     }
 
@@ -505,6 +632,7 @@ function SalesPageContent() {
       }
 
       setCloneTarget(null);
+      setHasReadCloneFeedback(false);
 
       if (clonedDraftIssues.length > 0) {
         await showAlert(
@@ -839,6 +967,15 @@ function SalesPageContent() {
             </p>
           )}
         </div>
+        {hasAnyPrintFeedback(sale) && (
+          <div className="md:col-span-3 rounded-xl border border-orange-100 bg-white/80 p-4">
+            <PrintFeedbackSummary
+              feedback={sale.printFeedback}
+              history={sale.printFeedbackHistory}
+              compact
+            />
+          </div>
+        )}
         <div className="md:col-span-3 flex flex-col sm:flex-row sm:justify-end mt-4 pt-4 border-t border-purple-100 gap-3">
           <button
             onClick={() => {
@@ -885,6 +1022,11 @@ function SalesPageContent() {
       </div>
     );
   };
+
+  const cloneRequiresFeedbackRead = hasAnyPrintFeedback(cloneTarget);
+  const isCloneActionDisabled =
+    cloneModeLoading !== null ||
+    (cloneRequiresFeedbackRead && !hasReadCloneFeedback);
 
   return (
     <div className="space-y-8">
@@ -1373,6 +1515,10 @@ function SalesPageContent() {
                             {getSaleActivityLabel(s)}
                           </span>
                         )}
+                        <PrintFeedbackBadge
+                          feedback={s.printFeedback}
+                          history={s.printFeedbackHistory}
+                        />
                       </div>
                     </div>
                   </div>
@@ -1738,6 +1884,10 @@ function SalesPageContent() {
                                 Rascunho
                               </span>
                             )}
+                            <PrintFeedbackBadge
+                              feedback={s.printFeedback}
+                              history={s.printFeedbackHistory}
+                            />
                             {s.incidents && s.incidents.length > 0 && (
                               <button
                                 onClick={(e) => {
@@ -2019,6 +2169,50 @@ function SalesPageContent() {
       )}
 
       <Modal
+        isOpen={!!feedbackSale}
+        onClose={closePrintFeedbackModal}
+        title="Concluir impressão"
+        type="success"
+        footer={
+          <>
+            <button
+              onClick={closePrintFeedbackModal}
+              disabled={isSavingFeedback}
+              className="px-4 py-2 rounded-lg font-medium text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleSavePrintFeedback}
+              disabled={isSavingFeedback}
+              className="px-4 py-2 rounded-lg font-medium bg-brand-purple text-white hover:bg-purple-800 transition-colors disabled:opacity-50"
+            >
+              {isSavingFeedback ? "Salvando..." : "Salvar e concluir"}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          {feedbackSale ? (
+            <div className="rounded-xl border border-green-100 bg-green-50 px-4 py-3 text-sm text-green-900">
+              <p className="font-semibold">{feedbackSale.description}</p>
+              <p className="mt-1 text-green-800">
+                A impressão será marcada como concluída após salvar este
+                feedback.
+              </p>
+            </div>
+          ) : null}
+
+          <PrintFeedbackForm
+            value={feedbackDraft}
+            onChange={setFeedbackDraft}
+            title="Feedback da impressão"
+            description="Use este registro para orientar reimpressões e clones deste produto."
+          />
+        </div>
+      </Modal>
+
+      <Modal
         isOpen={!!cloneTarget}
         onClose={closeCloneModal}
         title="Clonar venda"
@@ -2034,14 +2228,14 @@ function SalesPageContent() {
             </button>
             <button
               onClick={() => handleCloneConfirm("copy")}
-              disabled={cloneModeLoading !== null}
+              disabled={isCloneActionDisabled}
               className="px-4 py-2 rounded-lg font-medium bg-brand-purple text-white hover:bg-purple-800 transition-colors disabled:opacity-50"
             >
               {cloneModeLoading === "copy" ? "Clonando..." : "Copiar tudo"}
             </button>
             <button
               onClick={() => handleCloneConfirm("reset")}
-              disabled={cloneModeLoading !== null}
+              disabled={isCloneActionDisabled}
               className="px-4 py-2 rounded-lg font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors disabled:opacity-50"
             >
               {cloneModeLoading === "reset"
@@ -2064,6 +2258,41 @@ function SalesPageContent() {
               </p>
             )}
           </div>
+
+          {cloneTarget && cloneRequiresFeedbackRead && (
+            <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
+              <div className="mb-3">
+                <p className="text-sm font-bold text-orange-900">
+                  Leitura obrigatória do feedback anterior
+                </p>
+                <p className="mt-1 text-sm text-orange-800">
+                  O clone vai carregar este histórico e ficará pronto para
+                  receber uma nova avaliação depois da próxima impressão.
+                </p>
+              </div>
+
+              <PrintFeedbackSummary
+                feedback={cloneTarget.printFeedback}
+                history={cloneTarget.printFeedbackHistory}
+                compact
+              />
+
+              <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-orange-900 ring-1 ring-orange-200">
+                <input
+                  type="checkbox"
+                  checked={hasReadCloneFeedback}
+                  onChange={(event) =>
+                    setHasReadCloneFeedback(event.target.checked)
+                  }
+                  className="mt-0.5 h-4 w-4 rounded border-orange-300 text-brand-orange focus:ring-brand-orange"
+                />
+                <span>
+                  Li o feedback anterior e vou usar estas observações para
+                  ajustar o clone.
+                </span>
+              </label>
+            </div>
+          )}
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-xl border border-brand-purple/20 bg-brand-purple/5 p-4">

@@ -12,6 +12,11 @@ import {
     SALE_ATTACHMENT_CATEGORIES,
     SaleAttachment,
 } from "@/utils/saleAttachments";
+import PrintFeedbackSummary from "@/components/sale/PrintFeedbackSummary";
+import {
+    PrintFeedback,
+    PrintFeedbackHistoryEntry,
+} from "@/utils/printFeedback";
 import axios from "axios";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -98,6 +103,8 @@ interface SaleDetail {
   incidents?: PrintIncident[];
   errorReason?: string | null;
   wastedFilamentGrams?: number | null;
+  printFeedback?: PrintFeedback | null;
+  printFeedbackHistory?: PrintFeedbackHistoryEntry[] | null;
   attachments?: SaleAttachment[];
 }
 
@@ -455,6 +462,11 @@ function SaleViewContent({
               value={`R$ ${Number(sale.productionCost || Math.max((sale.cost || 0) - (sale.shippingCost || 0), 0)).toFixed(2)}`}
             />
           </DetailCard>
+
+          <PrintFeedbackSummary
+            feedback={sale.printFeedback}
+            history={sale.printFeedbackHistory}
+          />
 
           <DetailCard title="Serviços adicionais">
             <DetailRow
