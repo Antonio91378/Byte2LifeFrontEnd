@@ -1,7 +1,6 @@
 "use client";
 
 import { Loader2, LockKeyhole, LogIn, Mail } from "lucide-react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
@@ -62,15 +61,7 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-[#f4f6fb] px-5 py-8 text-slate-950">
       <section className="w-full max-w-[420px]">
         <div className="mb-7 flex flex-col items-center text-center">
-          <Image
-            src="/byte2life-logo.png"
-            alt="Byte2Life"
-            width={64}
-            height={64}
-            priority
-            className="mb-4 h-16 w-16 rounded-2xl object-cover shadow-md"
-          />
-          <h1 className="text-3xl font-black tracking-normal text-brand-purple">
+          <h1 className="text-4xl font-black tracking-normal text-brand-purple">
             Byte<span className="text-brand-orange">2</span>Life
           </h1>
           <p className="mt-2 text-sm font-medium text-slate-600">
