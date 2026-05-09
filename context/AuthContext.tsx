@@ -36,20 +36,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthChange(async (firebaseUser) => {
-      setUser(firebaseUser);
+    try {
+      const unsubscribe = onAuthChange(async (firebaseUser) => {
+        try {
+          setUser(firebaseUser);
 
-      if (firebaseUser) {
-        const idToken = await firebaseUser.getIdToken();
-        setToken(idToken);
-      } else {
-        setToken(null);
-      }
+          if (firebaseUser) {
+            const idToken = await firebaseUser.getIdToken();
+            setToken(idToken);
+          } else {
+            setToken(null);
+          }
+        } finally {
+          setLoading(false);
+        }
+      });
 
+      return () => unsubscribe();
+    } catch (error) {
+      console.error("Erro ao inicializar autenticacao Firebase:", error);
+      setUser(null);
+      setToken(null);
       setLoading(false);
-    });
-
-    return () => unsubscribe();
+      return () => undefined;
+    }
   }, []);
 
   const signInWithEmail = useCallback(
