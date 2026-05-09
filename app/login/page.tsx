@@ -196,6 +196,10 @@ function translateAuthError(err: unknown): string {
       return "Email ou senha incorretos.";
     case "auth/google-user-not-authorized":
       return "Esta conta Google nao esta autorizada no Byte2Life.";
+    case "auth/unauthorized-domain":
+      return "Dominio nao autorizado no Firebase. Adicione este dominio em Authentication > Settings > Authorized domains.";
+    case "auth/operation-not-allowed":
+      return "Login com Google desativado no Firebase. Ative o provedor Google em Authentication > Sign-in method.";
     case "auth/account-exists-with-different-credential":
       return "Este email ja existe com outro metodo. Entre com email e senha.";
     case "auth/popup-closed-by-user":
