@@ -7,26 +7,38 @@ import {
   signInWithPopup,
   signOut,
 } from "firebase/auth";
-import { auth } from "./firebase";
+import { getFirebaseAuth, hasFirebaseConfig } from "./firebase";
 
 const googleProvider = new GoogleAuthProvider();
 
 export const loginWithEmail = (email: string, password: string) =>
-  signInWithEmailAndPassword(auth, email, password);
+  signInWithEmailAndPassword(getFirebaseAuth(), email, password);
 
 export const registerWithEmail = (email: string, password: string) =>
-  createUserWithEmailAndPassword(auth, email, password);
+  createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
 
-export const loginWithGoogle = () => signInWithPopup(auth, googleProvider);
+export const loginWithGoogle = () =>
+  signInWithPopup(getFirebaseAuth(), googleProvider);
 
-export const logout = () => signOut(auth);
+export const logout = () => signOut(getFirebaseAuth());
 
-export const onAuthChange = (callback: (user: User | null) => void) =>
-  onAuthStateChanged(auth, callback);
+export const onAuthChange = (callback: (user: User | null) => void) => {
+  if (typeof window === "undefined" || !hasFirebaseConfig()) {
+    callback(null);
+    return () => undefined;
+  }
+
+  return onAuthStateChanged(getFirebaseAuth(), callback);
+};
 
 export const getIdToken = async (
   forceRefresh = false,
 ): Promise<string | null> => {
+  if (typeof window === "undefined" || !hasFirebaseConfig()) {
+    return null;
+  }
+
+  const auth = getFirebaseAuth();
   const user = auth.currentUser;
   if (!user) {
     return null;
