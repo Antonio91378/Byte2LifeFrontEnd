@@ -1,7 +1,8 @@
 import {
   GoogleAuthProvider,
   User,
-  createUserWithEmailAndPassword,
+  deleteUser,
+  getAdditionalUserInfo,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -14,11 +15,29 @@ const googleProvider = new GoogleAuthProvider();
 export const loginWithEmail = (email: string, password: string) =>
   signInWithEmailAndPassword(getFirebaseAuth(), email, password);
 
-export const registerWithEmail = (email: string, password: string) =>
-  createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
+function unauthorizedGoogleUserError() {
+  const error = new Error("Google account is not authorized for Byte2Life.");
+  (error as { code?: string }).code = "auth/google-user-not-authorized";
+  return error;
+}
 
-export const loginWithGoogle = () =>
-  signInWithPopup(getFirebaseAuth(), googleProvider);
+export const loginWithGoogle = async () => {
+  const auth = getFirebaseAuth();
+  const result = await signInWithPopup(auth, googleProvider);
+  const additionalInfo = getAdditionalUserInfo(result);
+
+  if (additionalInfo?.isNewUser) {
+    try {
+      await deleteUser(result.user);
+    } finally {
+      await signOut(auth).catch(() => undefined);
+    }
+
+    throw unauthorizedGoogleUserError();
+  }
+
+  return result;
+};
 
 export const logout = () => signOut(getFirebaseAuth());
 

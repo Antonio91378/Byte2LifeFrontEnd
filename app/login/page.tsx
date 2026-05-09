@@ -1,18 +1,18 @@
 "use client";
 
-import { Loader2, LockKeyhole, LogIn, Mail } from "lucide-react";
+import { Chrome, Loader2, LockKeyhole, LogIn, Mail } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 
 export default function LoginPage() {
-  const { user, loading, signInWithEmail } = useAuth();
+  const { user, loading, signInWithEmail, signInWithGoogle } = useAuth();
   const router = useRouter();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [submitting, setSubmitting] = useState<"email" | "google" | null>(null);
 
   const resolveNextPath = () => {
     if (typeof window === "undefined") {
@@ -38,14 +38,28 @@ export default function LoginPage() {
       return;
     }
 
-    setSubmitting(true);
+    setSubmitting("email");
     try {
       await signInWithEmail(email, password);
       router.replace(resolveNextPath());
     } catch (err: unknown) {
       setError(translateAuthError(err));
     } finally {
-      setSubmitting(false);
+      setSubmitting(null);
+    }
+  }
+
+  async function handleGoogleLogin() {
+    setError("");
+    setSubmitting("google");
+
+    try {
+      await signInWithGoogle();
+      router.replace(resolveNextPath());
+    } catch (err: unknown) {
+      setError(translateAuthError(err));
+    } finally {
+      setSubmitting(null);
     }
   }
 
@@ -79,7 +93,31 @@ export default function LoginPage() {
             </h2>
           </div>
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-5">
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={submitting !== null}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white text-sm font-bold text-slate-900 shadow-sm transition hover:border-brand-purple hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {submitting === "google" ? (
+                <Loader2 className="h-5 w-5 animate-spin text-brand-purple" />
+              ) : (
+                <Chrome className="h-5 w-5 text-[#1a73e8]" />
+              )}
+              Entrar com Google
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="h-px flex-1 bg-slate-200" />
+              <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                ou
+              </span>
+              <div className="h-px flex-1 bg-slate-200" />
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} className="mt-5 flex flex-col gap-4">
             <div>
               <label className="mb-2 block text-sm font-bold text-slate-800">
                 Email
@@ -124,10 +162,10 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting !== null}
               className="mt-1 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand-purple font-bold text-white shadow-lg shadow-brand-purple/20 transition-colors hover:bg-brand-purple-light disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {submitting ? (
+              {submitting === "email" ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
               ) : (
                 <LogIn className="h-5 w-5" />
@@ -156,6 +194,14 @@ function translateAuthError(err: unknown): string {
     case "auth/wrong-password":
     case "auth/invalid-credential":
       return "Email ou senha incorretos.";
+    case "auth/google-user-not-authorized":
+      return "Esta conta Google nao esta autorizada no Byte2Life.";
+    case "auth/account-exists-with-different-credential":
+      return "Este email ja existe com outro metodo. Entre com email e senha.";
+    case "auth/popup-closed-by-user":
+      return "Login com Google cancelado.";
+    case "auth/popup-blocked":
+      return "O navegador bloqueou a janela do Google.";
     case "auth/too-many-requests":
       return "Muitas tentativas. Tente novamente mais tarde.";
     case "auth/network-request-failed":

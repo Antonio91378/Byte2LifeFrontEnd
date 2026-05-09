@@ -14,7 +14,6 @@ import {
   loginWithGoogle,
   logout,
   onAuthChange,
-  registerWithEmail,
 } from "../services/auth.service";
 
 interface AuthContextType {
@@ -23,7 +22,6 @@ interface AuthContextType {
   loading: boolean;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
-  register: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshToken: () => Promise<string | null>;
 }
@@ -79,13 +77,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(idToken);
   }, []);
 
-  const register = useCallback(async (email: string, password: string) => {
-    const result = await registerWithEmail(email, password);
-    const idToken = await result.user.getIdToken();
-    setUser(result.user);
-    setToken(idToken);
-  }, []);
-
   const handleSignOut = useCallback(async () => {
     await logout();
     setUser(null);
@@ -106,7 +97,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loading,
         signInWithEmail,
         signInWithGoogle,
-        register,
         signOut: handleSignOut,
         refreshToken,
       }}
