@@ -63,12 +63,12 @@ export default function LoginPage() {
       <section className="w-full max-w-[420px]">
         <div className="mb-7 flex flex-col items-center text-center">
           <Image
-            src="/byte2life-mark.svg"
+            src="/byte2life-logo.png"
             alt="Byte2Life"
             width={64}
             height={64}
             priority
-            className="mb-4 h-16 w-16 rounded-2xl shadow-md"
+            className="mb-4 h-16 w-16 rounded-2xl object-cover shadow-md"
           />
           <h1 className="text-3xl font-black tracking-normal text-brand-purple">
             Byte<span className="text-brand-orange">2</span>Life
