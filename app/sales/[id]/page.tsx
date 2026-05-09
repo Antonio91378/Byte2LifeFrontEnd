@@ -1,0 +1,1652 @@
+"use client";
+
+import FilamentUsageEditor from "@/components/FilamentUsageEditor";
+import LoadingPanel from "@/components/LoadingPanel";
+import PrintScheduleCalendar from "@/components/PrintScheduleCalendar";
+import PrintFeedbackForm from "@/components/sale/PrintFeedbackForm";
+import SaleAttachmentsPanel from "@/components/sale/SaleAttachmentsPanel";
+import { DETAIL_LEVELS } from "@/constants/printQuality";
+import { useDialog } from "@/context/DialogContext";
+import {
+    ensureFilamentUsageCount,
+    formatFilamentDisplayName,
+    getPrimaryFilamentId,
+    getTotalFilamentUsageMass,
+    hasCompleteFilamentUsages,
+    mapSaleFilamentUsages,
+    toFilamentUsagePayload,
+} from "@/utils/filamentUsage";
+import {
+    appendPendingAttachmentsToFormData,
+    buildPendingSaleAttachments,
+    PendingSaleAttachment,
+    revokePendingSaleAttachmentPreview,
+    revokePendingSaleAttachmentPreviews,
+    SaleAttachment,
+    SaleAttachmentCategory,
+} from "@/utils/saleAttachments";
+import { applyDraftFlags, getSaleDraftIssues } from "@/utils/saleDraft";
+import { toDateOnlyValue } from "@/utils/dateOnly";
+import {
+    formatSaleProfitPercentage,
+    getSaleProfitValue,
+} from "@/utils/saleFinancials";
+import {
+    createEmptyPrintFeedback,
+    normalizePrintFeedback,
+    PrintFeedbackHistoryEntry,
+    toStoredPrintFeedback,
+} from "@/utils/printFeedback";
+import { parseDurationToHours } from "@/utils/time";
+import axios from "axios";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, use, useEffect, useMemo, useRef, useState } from "react";
+
+interface Filament {
+  id: string;
+  description: string;
+  color: string;
+  colorHex?: string;
+  type?: string;
+  remainingMassGrams: number;
+  warningComment?: string;
+  slicingProfile3mfPath?: string;
+}
+
+interface Client {
+  id: string;
+  name: string;
+  phoneNumber: string;
+}
+
+interface ServiceProvider {
+  id: string;
+  name: string;
+  email?: string;
+  categories: string[];
+  category?: string;
+}
+
+const normalizeCategory = (value?: string) =>
+  (value || "").trim().toLowerCase();
+const hasCategory = (
+  categories: string[] | undefined,
+  matcher: (value: string) => boolean,
+) =>
+  (categories || []).some((category) => matcher(normalizeCategory(category)));
+const isDesignerCategory = (categories?: string[]) =>
+  hasCategory(categories, (value) => value.includes("design"));
+const isPainterCategory = (categories?: string[]) =>
+  hasCategory(
+    categories,
+    (value) => value.includes("pint") || value.includes("paint"),
+  );
+
+export default function EditSalePage({
+  params,
+}: {
+  readonly params: Promise<{ id: string }>;
+}) {
+  return (
+    <Suspense
+      fallback={
+        <LoadingPanel
+          compact
+          title="Preparando edição"
+          description="Carregando a venda e os dados auxiliares..."
+        />
+      }
+    >
+      <EditSaleContent params={params} />
+    </Suspense>
+  );
+}
+
+function EditSaleContent({
+  params,
+}: Readonly<{ params: Promise<{ id: string }> }>) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { id } = use(params);
+  const { showAlert } = useDialog();
+  const [isMobile, setIsMobile] = useState(false);
+  const [showMobileSchedule, setShowMobileSchedule] = useState(false);
+  const [showMobileAdvanced, setShowMobileAdvanced] = useState(false);
+  const [showMobileCostDetails, setShowMobileCostDetails] = useState(false);
+
+  const parseNumericValue = (value: string | number) => {
+    const normalized = String(value ?? "").replace(",", ".");
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const [filaments, setFilaments] = useState<Filament[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [serviceProviders, setServiceProviders] = useState<ServiceProvider[]>(
+    [],
+  );
+  const [pageLoading, setPageLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [existingAttachments, setExistingAttachments] = useState<
+    SaleAttachment[]
+  >([]);
+  const [pendingAttachments, setPendingAttachments] = useState<
+    PendingSaleAttachment[]
+  >([]);
+  const [processingCategories, setProcessingCategories] = useState<
+    SaleAttachmentCategory[]
+  >([]);
+  const pendingAttachmentsRef = useRef<PendingSaleAttachment[]>([]);
+
+  const [formData, setFormData] = useState({
+    description: "",
+    productLink: "",
+    printQuality: "Normal",
+    filamentUsages: ensureFilamentUsageCount([], 1),
+    massGrams: 0,
+    cost: 0,
+    shippingCost: 0,
+    saleValue: 0,
+    profit: 0,
+    profitPercentage: "",
+    designPrintTime: "",
+    isPrintConcluded: false,
+    isDelivered: false,
+    isPaid: false,
+    filamentId: "",
+    clientId: "",
+    saleDate: "",
+    deliveryDate: "",
+    printStatus: "Pending",
+    hasCustomArt: false,
+    hasPainting: false,
+    hasVarnish: false,
+    designTimeHours: 0,
+    designResponsible: "",
+    designStartConfirmedAt: "",
+    designValue: 0,
+    paintTimeHours: 0,
+    paintResponsible: "",
+    paintStartConfirmedAt: "",
+    productionCost: 0,
+    baseCost: 0,
+    nozzleDiameter: "",
+    layerHeight: "",
+    costDetails: null as any,
+    incidents: [],
+    tags: [],
+    priority: 0,
+    printStartedAt: null,
+    printStartScheduledAt: null,
+    printStartConfirmedAt: "",
+    errorReason: null,
+    wastedFilamentGrams: null,
+    stockItemId: null,
+    printFeedback: createEmptyPrintFeedback(),
+    printFeedbackHistory: [] as PrintFeedbackHistoryEntry[],
+  });
+
+  useEffect(() => {
+    if (globalThis.window === undefined) return;
+
+    const mediaQuery = globalThis.window.matchMedia("(max-width: 767px)");
+    const syncViewport = () => setIsMobile(mediaQuery.matches);
+
+    syncViewport();
+
+    mediaQuery.addEventListener("change", syncViewport);
+    return () => mediaQuery.removeEventListener("change", syncViewport);
+  }, []);
+
+  useEffect(() => {
+    pendingAttachmentsRef.current = pendingAttachments;
+  }, [pendingAttachments]);
+
+  useEffect(() => {
+    return () => {
+      revokePendingSaleAttachmentPreviews(pendingAttachmentsRef.current);
+    };
+  }, []);
+
+  const buildReturnToSalesUrl = () => {
+    if (!searchParams) {
+      return "/sales";
+    }
+    const params = new URLSearchParams();
+    const filterType = searchParams.get("filterType");
+    if (filterType === "date" || filterType === "month") {
+      params.set("filterType", filterType);
+    }
+    const filterDate = searchParams.get("filterDate");
+    if (filterDate) {
+      params.set("filterDate", filterDate);
+    }
+    const filterClientName = searchParams.get("filterClientName");
+    if (filterClientName) {
+      params.set("filterClientName", filterClientName);
+    }
+    const filterClientId = searchParams.get("filterClientId");
+    if (filterClientId) {
+      params.set("filterClientId", filterClientId);
+    }
+    const filterProductName = searchParams.get("filterProductName");
+    if (filterProductName) {
+      params.set("filterProductName", filterProductName);
+    }
+    const paymentStatus = searchParams.get("paymentStatus");
+    if (paymentStatus === "paid" || paymentStatus === "unpaid") {
+      params.set("paymentStatus", paymentStatus);
+    } else if (searchParams.get("filterUnpaid") === "1") {
+      params.set("paymentStatus", "unpaid");
+    }
+    const deliveryStatus = searchParams.get("deliveryStatus");
+    if (deliveryStatus === "delivered" || deliveryStatus === "undelivered") {
+      params.set("deliveryStatus", deliveryStatus);
+    } else if (searchParams.get("filterUndelivered") === "1") {
+      params.set("deliveryStatus", "undelivered");
+    }
+    const printStatus = searchParams.get("printStatus");
+    if (printStatus === "printed" || printStatus === "pending") {
+      params.set("printStatus", printStatus);
+    }
+    const query = params.toString();
+    return query ? `/sales?${query}` : "/sales";
+  };
+
+  const getApiErrorMessage = (error: unknown, fallbackMessage: string) => {
+    if (axios.isAxiosError(error)) {
+      const responseData = error.response?.data;
+      if (typeof responseData === "string" && responseData.trim() !== "") {
+        return responseData;
+      }
+
+      if (
+        responseData &&
+        typeof responseData === "object" &&
+        "message" in responseData &&
+        typeof responseData.message === "string"
+      ) {
+        return responseData.message;
+      }
+    }
+
+    return fallbackMessage;
+  };
+
+  const setCategoryProcessing = (
+    category: SaleAttachmentCategory,
+    active: boolean,
+  ) => {
+    setProcessingCategories((prev) => {
+      if (active) {
+        return prev.includes(category) ? prev : [...prev, category];
+      }
+
+      return prev.filter((item) => item !== category);
+    });
+  };
+
+  const handleFilesSelected = async (
+    category: SaleAttachmentCategory,
+    files: File[],
+  ) => {
+    setCategoryProcessing(category, true);
+
+    try {
+      const nextPendingAttachments = await buildPendingSaleAttachments(
+        files,
+        category,
+      );
+      setPendingAttachments((prev) => [...prev, ...nextPendingAttachments]);
+    } catch (error) {
+      await showAlert(
+        "Erro",
+        error instanceof Error
+          ? error.message
+          : "Falha ao preparar os arquivos.",
+        "error",
+      );
+    } finally {
+      setCategoryProcessing(category, false);
+    }
+  };
+
+  const handleRemoveExistingAttachment = (storageId: string) => {
+    setExistingAttachments((prev) =>
+      prev.filter((attachment) => attachment.storageId !== storageId),
+    );
+  };
+
+  const handleRemovePendingAttachment = (localId: string) => {
+    setPendingAttachments((prev) => {
+      const targetAttachment = prev.find(
+        (attachment) => attachment.localId === localId,
+      );
+
+      if (targetAttachment) {
+        revokePendingSaleAttachmentPreview(targetAttachment);
+      }
+
+      return prev.filter((attachment) => attachment.localId !== localId);
+    });
+  };
+
+  const clearPendingAttachments = () => {
+    revokePendingSaleAttachmentPreviews(pendingAttachmentsRef.current);
+    pendingAttachmentsRef.current = [];
+    setPendingAttachments([]);
+  };
+
+  const buildSalePayload = () => {
+    const { baseCost, costDetails, ...saleData } = formData;
+    const filamentPayload = toFilamentUsagePayload(formData.filamentUsages);
+
+    return {
+      ...saleData,
+      attachments: existingAttachments,
+      filaments: filamentPayload,
+      massGrams: massGramsValue,
+      printTimeHours: parseDurationToHours(formData.designPrintTime),
+      deliveryDate: formData.deliveryDate === "" ? null : formData.deliveryDate,
+      printStartConfirmedAt:
+        formData.printStartConfirmedAt === ""
+          ? null
+          : formData.printStartConfirmedAt,
+      designStartConfirmedAt:
+        formData.designStartConfirmedAt === ""
+          ? null
+          : formData.designStartConfirmedAt,
+      designTimeHours: Number(formData.designTimeHours) || 0,
+      designResponsible: formData.designResponsible || "",
+      designValue: Number(formData.designValue) || 0,
+      paintStartConfirmedAt:
+        formData.paintStartConfirmedAt === ""
+          ? null
+          : formData.paintStartConfirmedAt,
+      paintTimeHours: Number(formData.paintTimeHours) || 0,
+      paintResponsible: formData.paintResponsible || "",
+      filamentId:
+        filamentPayload[0]?.filamentId?.length === 24
+          ? filamentPayload[0].filamentId
+          : null,
+      clientId: formData.clientId?.length === 24 ? formData.clientId : null,
+      printFeedback: toStoredPrintFeedback(formData.printFeedback),
+      printFeedbackHistory: formData.printFeedbackHistory,
+    };
+  };
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [filamentsRes, clientsRes, providersRes, saleRes] =
+          await Promise.all([
+            axios.get("http://localhost:5000/api/filaments"),
+            axios.get("http://localhost:5000/api/clients"),
+            axios
+              .get("http://localhost:5000/api/service-providers")
+              .catch(() => ({ data: [] })),
+            axios.get(`http://localhost:5000/api/sales/${id}`),
+          ]);
+
+        setFilaments(filamentsRes.data);
+        setClients(clientsRes.data);
+        setServiceProviders(providersRes.data || []);
+
+        const sale = saleRes.data;
+        setExistingAttachments(sale.attachments || []);
+        const initialShippingCost = sale.shippingCost || 0;
+        const initialBaseCost =
+          sale.productionCost ||
+          Math.max((sale.cost || 0) - initialShippingCost, 0);
+
+        // Map old quality values
+        let quality = sale.printQuality || "Normal";
+        if (quality === "Draft") quality = "Baixo";
+        if (quality === "Standard") quality = "Normal";
+        if (quality === "High") quality = "Alto";
+        if (quality === "Ultra") quality = "Extremo";
+
+        setFormData({
+          description: sale.description,
+          productLink: sale.productLink || "",
+          printQuality: quality,
+          filamentUsages: mapSaleFilamentUsages(sale),
+          massGrams: sale.massGrams,
+          cost: sale.cost,
+          shippingCost: initialShippingCost,
+          saleValue: sale.saleValue,
+          profit: sale.profit,
+          profitPercentage: sale.profitPercentage,
+          designPrintTime: sale.designPrintTime || "",
+          isPrintConcluded: sale.isPrintConcluded,
+          isDelivered: sale.isDelivered,
+          isPaid: sale.isPaid,
+          filamentId: sale.filamentId || "",
+          clientId: sale.clientId || "",
+          saleDate: toDateOnlyValue(sale.saleDate),
+          deliveryDate: toDateOnlyValue(sale.deliveryDate),
+          printStatus: sale.printStatus || "Pending",
+          hasCustomArt: sale.hasCustomArt || false,
+          hasPainting: sale.hasPainting || false,
+          hasVarnish: sale.hasVarnish || false,
+          designTimeHours: sale.designTimeHours || 0,
+          designResponsible: sale.designResponsible || "",
+          designStartConfirmedAt: sale.designStartConfirmedAt || "",
+          designValue: sale.designValue || 0,
+          paintTimeHours: sale.paintTimeHours || 0,
+          paintResponsible: sale.paintResponsible || "",
+          paintStartConfirmedAt: sale.paintStartConfirmedAt || "",
+          productionCost: sale.productionCost || initialBaseCost,
+          baseCost: initialBaseCost,
+          nozzleDiameter: sale.nozzleDiameter || "",
+          layerHeight: sale.layerHeight || "",
+          costDetails: null, // Will be recalculated
+          incidents: sale.incidents || [],
+          tags: sale.tags || [],
+          priority: sale.priority || 0,
+          printStartedAt: sale.printStartedAt || null,
+          printStartScheduledAt: sale.printStartScheduledAt || null,
+          printStartConfirmedAt: sale.printStartConfirmedAt || "",
+          errorReason: sale.errorReason || null,
+          wastedFilamentGrams: sale.wastedFilamentGrams || null,
+          stockItemId: sale.stockItemId || null,
+          printFeedback: normalizePrintFeedback(sale.printFeedback),
+          printFeedbackHistory: sale.printFeedbackHistory || [],
+        });
+      } catch (error) {
+        console.error("Error fetching data:", error);
+        await showAlert("Erro", "Erro ao carregar dados da venda", "error");
+      } finally {
+        setPageLoading(false);
+      }
+    };
+    fetchData();
+  }, [id, showAlert]);
+
+  const filamentPayload = useMemo(
+    () => toFilamentUsagePayload(formData.filamentUsages),
+    [formData.filamentUsages],
+  );
+  const massGramsValue = getTotalFilamentUsageMass(formData.filamentUsages);
+  const selectedFilamentWarnings = useMemo(() => {
+    return filamentPayload
+      .map((usage) => {
+        const filament = filaments.find((item) => item.id === usage.filamentId);
+        if (!filament) {
+          return null;
+        }
+
+        const details = [
+          filament.warningComment?.trim(),
+          filament.slicingProfile3mfPath?.trim()
+            ? `3MF: ${filament.slicingProfile3mfPath.trim()}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" | ");
+
+        if (!details) {
+          return null;
+        }
+
+        return `${formatFilamentDisplayName(filament)}: ${details}`;
+      })
+      .filter(Boolean) as string[];
+  }, [filamentPayload, filaments]);
+  const selectedFilamentNames = useMemo(() => {
+    return filamentPayload
+      .map((usage) => {
+        const filament = filaments.find((item) => item.id === usage.filamentId);
+        if (!filament) {
+          return null;
+        }
+
+        return `${formatFilamentDisplayName(filament)} • ${usage.massGrams.toLocaleString(
+          "pt-BR",
+          {
+            maximumFractionDigits: 1,
+          },
+        )}g`;
+      })
+      .filter(Boolean) as string[];
+  }, [filamentPayload, filaments]);
+  const designerProviders = serviceProviders.filter((provider) =>
+    isDesignerCategory(
+      provider.categories && provider.categories.length > 0
+        ? provider.categories
+        : provider.category
+          ? [provider.category]
+          : [],
+    ),
+  );
+  const painterProviders = serviceProviders.filter((provider) =>
+    isPainterCategory(
+      provider.categories && provider.categories.length > 0
+        ? provider.categories
+        : provider.category
+          ? [provider.category]
+          : [],
+    ),
+  );
+  const normalizedDesignResponsible = formData.designResponsible
+    .trim()
+    .toLowerCase();
+  const normalizedPaintResponsible = formData.paintResponsible
+    .trim()
+    .toLowerCase();
+  const hasDesignOption =
+    normalizedDesignResponsible !== "" &&
+    designerProviders.some(
+      (provider) =>
+        provider.name.trim().toLowerCase() === normalizedDesignResponsible,
+    );
+  const hasPaintOption =
+    normalizedPaintResponsible !== "" &&
+    painterProviders.some(
+      (provider) =>
+        provider.name.trim().toLowerCase() === normalizedPaintResponsible,
+    );
+  const printStatusLabels: Record<string, string> = {
+    Pending: "Pendente",
+    InQueue: "Na fila",
+    Staged: "Preparado",
+    InProgress: "Em andamento",
+    Concluded: "Concluído",
+    Concluido: "Concluído",
+  };
+  const selectedPrintScheduleLabel = formData.printStartConfirmedAt
+    ? new Date(formData.printStartConfirmedAt).toLocaleString("pt-BR", {
+        dateStyle: "short",
+        timeStyle: "short",
+      })
+    : "Nenhum horário selecionado";
+  const mobileAdvancedSummary = `${formData.printQuality} • ${printStatusLabels[formData.printStatus] ?? formData.printStatus}`;
+  const productionCostValue = Number(
+    formData.productionCost || formData.baseCost || 0,
+  );
+  const draftIssues = useMemo(
+    () =>
+      getSaleDraftIssues({
+        ...formData,
+        filaments: filamentPayload,
+        printTimeHours: parseDurationToHours(formData.designPrintTime),
+      }),
+    [filamentPayload, formData],
+  );
+  const isDraft = draftIssues.length > 0;
+  const submitButtonClassName = isDraft
+    ? "bg-amber-600 hover:bg-amber-700"
+    : "bg-brand-purple hover:bg-purple-800";
+  let submitButtonLabel = "Salvar Alterações";
+  if (saving) {
+    submitButtonLabel = "Salvando...";
+  } else if (isDraft) {
+    submitButtonLabel = "Salvar Rascunho";
+  }
+
+  useEffect(() => {
+    const nextMassGrams = getTotalFilamentUsageMass(formData.filamentUsages);
+    const nextFilamentId = getPrimaryFilamentId(formData.filamentUsages);
+
+    if (
+      formData.massGrams === nextMassGrams &&
+      formData.filamentId === nextFilamentId
+    ) {
+      return;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      massGrams: nextMassGrams,
+      filamentId: nextFilamentId,
+    }));
+  }, [formData.filamentUsages, formData.massGrams, formData.filamentId]);
+
+  useEffect(() => {
+    if (pageLoading) {
+      return;
+    }
+
+    let hasChanges = false;
+    const nextUsages = formData.filamentUsages.map((usage) => {
+      if (!usage.filamentId) {
+        return usage;
+      }
+
+      const selectedFilament = filaments.find(
+        (filament) => filament.id === usage.filamentId,
+      );
+      const requestedMass = Number(usage.massGrams || 0);
+
+      if (
+        !selectedFilament ||
+        (requestedMass > 0 &&
+          selectedFilament.remainingMassGrams < requestedMass)
+      ) {
+        hasChanges = true;
+        return { ...usage, filamentId: "" };
+      }
+
+      return usage;
+    });
+
+    if (!hasChanges) {
+      return;
+    }
+
+    setFormData((prev) => ({ ...prev, filamentUsages: nextUsages }));
+  }, [filaments, formData.filamentUsages, pageLoading]);
+
+  // Calculate cost and suggested price automatically
+  useEffect(() => {
+    const calculatePrice = async () => {
+      if (
+        !hasCompleteFilamentUsages(formData.filamentUsages) ||
+        massGramsValue <= 0 ||
+        filamentPayload.length === 0
+      ) {
+        return;
+      }
+
+      const hours = parseDurationToHours(formData.designPrintTime);
+      const level =
+        DETAIL_LEVELS.find((l) => l.label === formData.printQuality)?.value ??
+        1;
+
+      try {
+        const res = await axios.post(
+          "http://localhost:5000/api/budget/calculate",
+          {
+            filaments: filamentPayload,
+            filamentId: filamentPayload[0].filamentId,
+            detailLevel: level,
+            massGrams: massGramsValue,
+            hasCustomArt: formData.hasCustomArt,
+            hasPainting: formData.hasPainting,
+            hasVarnish: formData.hasVarnish,
+            printTimeHours: hours > 0 ? hours : undefined,
+            nozzleDiameter: formData.nozzleDiameter,
+            layerHeight: formData.layerHeight,
+          },
+        );
+
+        // Only update if not loading (to avoid overwriting initial data immediately if we wanted to preserve it)
+        // But here we want to update to current rules
+        setFormData((prev) => ({
+          ...prev,
+          baseCost: res.data.totalProductionCost,
+          // saleValue: res.data.totalPrice, // Don't overwrite sale value on edit, user might have set a custom price
+          productionCost: res.data.totalProductionCost,
+          nozzleDiameter: res.data.nozzleDiameter,
+          layerHeight: res.data.layerHeightRange,
+          costDetails: {
+            breakdown: res.data.breakdown,
+            materialCost: res.data.materialCost,
+            energyCost: res.data.energyCost,
+            machineCost: res.data.machineCost,
+          },
+        }));
+      } catch (err) {
+        console.error("Error calculating price", err);
+      }
+    };
+
+    if (!pageLoading) {
+      const timeoutId = setTimeout(() => {
+        calculatePrice();
+      }, 500);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [
+    formData.filamentUsages,
+    formData.printQuality,
+    formData.designPrintTime,
+    formData.hasCustomArt,
+    formData.hasPainting,
+    formData.hasVarnish,
+    formData.nozzleDiameter,
+    formData.layerHeight,
+    pageLoading,
+  ]);
+
+  const handleChange = (
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+    >,
+  ) => {
+    const { name, value, type } = e.target;
+
+    if (type === "checkbox") {
+      const checked = (e.target as HTMLInputElement).checked;
+      setFormData((prev) => ({ ...prev, [name]: checked }));
+    } else {
+      setFormData((prev) => {
+        const updates: any = { [name]: value };
+        if (
+          name === "paintTimeHours" ||
+          name === "designTimeHours" ||
+          name === "designValue" ||
+          name === "shippingCost"
+        ) {
+          updates[name] = parseNumericValue(value);
+        }
+        // If quality changes, clear manual overrides so defaults are recalculated
+        if (name === "printQuality") {
+          updates.nozzleDiameter = "";
+          updates.layerHeight = "";
+        }
+        return { ...prev, ...updates };
+      });
+    }
+  };
+
+  useEffect(() => {
+    setFormData((prev) => {
+      const totalCost =
+        parseNumericValue(prev.baseCost) + parseNumericValue(prev.shippingCost);
+      return prev.cost === totalCost ? prev : { ...prev, cost: totalCost };
+    });
+  }, [formData.baseCost, formData.shippingCost]);
+
+  // Auto-calculate profit
+  useEffect(() => {
+    const profit = getSaleProfitValue({
+      saleValue: formData.saleValue,
+      cost: formData.cost,
+      shippingCost: formData.shippingCost,
+      baseCost: formData.baseCost,
+    });
+    const profitPercent = formatSaleProfitPercentage({
+      saleValue: formData.saleValue,
+      cost: formData.cost,
+      shippingCost: formData.shippingCost,
+      baseCost: formData.baseCost,
+    });
+
+    setFormData((prev) => ({
+      ...prev,
+      profit: profit,
+      profitPercentage: profitPercent,
+    }));
+  }, [formData.cost, formData.saleValue]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const payload = applyDraftFlags(buildSalePayload());
+      const savedAsDraft = getSaleDraftIssues(payload).length > 0;
+      const multipartData = new FormData();
+      multipartData.append("sale", JSON.stringify(payload));
+      appendPendingAttachmentsToFormData(multipartData, pendingAttachments);
+
+      await axios.put(
+        `http://localhost:5000/api/sales/${id}/with-media`,
+        multipartData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        },
+      );
+      clearPendingAttachments();
+
+      if (savedAsDraft) {
+        await showAlert(
+          "Rascunho atualizado",
+          "A venda continua como rascunho. Complete os dados obrigatórios pendentes para remover o aviso do relatório.",
+          "warning",
+        );
+      }
+
+      router.push(buildReturnToSalesUrl());
+    } catch (error) {
+      console.error("Error updating sale:", error);
+      await showAlert(
+        "Erro",
+        getApiErrorMessage(error, "Erro ao atualizar venda"),
+        "error",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (pageLoading) {
+    return (
+      <LoadingPanel
+        title="Carregando venda"
+        description="Buscando detalhes, filamentos, clientes e anexos..."
+      />
+    );
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto px-3 sm:px-4 md:px-0">
+      <h1 className="text-2xl md:text-3xl font-bold text-brand-purple mb-6 md:mb-8 border-b-2 border-brand-orange pb-4">
+        Editar Venda
+      </h1>
+
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white p-3 md:p-8 rounded-xl shadow-sm border border-gray-100 space-y-5 md:space-y-6"
+      >
+        {isDraft && (
+          <div className="rounded-2xl border border-amber-200 bg-linear-to-r from-amber-50 via-orange-50 to-white px-4 py-4 shadow-sm">
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    ></path>
+                  </svg>
+                  Venda em rascunho
+                </div>
+                <p className="mt-1 text-sm text-amber-800">
+                  Esta venda ainda tem dados obrigatórios pendentes. Você pode
+                  salvar assim e concluir depois, sem perder o que já foi
+                  preenchido.
+                </p>
+              </div>
+              <span className="inline-flex rounded-full bg-white px-3 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200">
+                {draftIssues.length} pendência
+                {draftIssues.length > 1 ? "s" : ""}
+              </span>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {draftIssues.map((issue) => (
+                <span
+                  key={issue.id}
+                  className="rounded-full bg-white px-3 py-1 text-xs font-medium text-amber-900 ring-1 ring-amber-200"
+                >
+                  {issue.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+          {/* Description */}
+          <div className="col-span-1 md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Descricao do Produto
+            </label>
+            <input
+              type="text"
+              name="description"
+              value={formData.description}
+              onChange={handleChange}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+            />
+          </div>
+
+          <div className="col-span-1 md:col-span-2 space-y-3">
+            <FilamentUsageEditor
+              filaments={filaments}
+              usages={formData.filamentUsages}
+              onChange={(value) =>
+                setFormData((prev) => ({ ...prev, filamentUsages: value }))
+              }
+              loading={pageLoading}
+              disabled={pageLoading && filaments.length === 0}
+              showRemaining
+              showType
+              description="Revise a composição usada na impressão. A soma das massas ajusta custo, sugestão de material e histórico por filamento."
+            />
+
+            <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+              <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <span className="font-medium">Massa total calculada</span>
+                <span className="text-lg font-bold text-gray-900">
+                  {massGramsValue.toLocaleString("pt-BR", {
+                    maximumFractionDigits: 1,
+                  })}
+                  g
+                </span>
+              </div>
+              {selectedFilamentNames.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-600">
+                  {selectedFilamentNames.map((name) => (
+                    <span
+                      key={name}
+                      className="rounded-full bg-white px-3 py-1 font-medium text-gray-700 ring-1 ring-gray-200"
+                    >
+                      {name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {selectedFilamentWarnings.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <div className="flex items-start gap-2 font-semibold text-amber-900">
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    ></path>
+                  </svg>
+                  Ressalvas dos filamentos selecionados
+                </div>
+                <div className="mt-2 space-y-2">
+                  {selectedFilamentWarnings.map((warning) => (
+                    <p key={warning}>{warning}</p>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Cliente
+            </label>
+            <select
+              name="clientId"
+              value={formData.clientId}
+              onChange={handleChange}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+            >
+              <option value="">Selecione um cliente...</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name || client.phoneNumber}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Sale Date */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Data da Venda
+            </label>
+            <input
+              type="date"
+              name="saleDate"
+              value={formData.saleDate}
+              onChange={handleChange}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+            />
+          </div>
+
+          {/* Delivery Date */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Data de Entrega
+            </label>
+            <input
+              type="date"
+              name="deliveryDate"
+              value={formData.deliveryDate}
+              onChange={handleChange}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+            />
+          </div>
+
+          {/* Time */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Tempo de Impressao
+            </label>
+            <input
+              type="text"
+              name="designPrintTime"
+              placeholder="ex: 4h 30m"
+              value={formData.designPrintTime}
+              onChange={handleChange}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+            />
+          </div>
+
+          {/* Extras */}
+          <div className="col-span-1 md:col-span-2 pt-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Adicionais
+            </label>
+            <div className="flex flex-wrap gap-6">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="hasCustomArt"
+                  checked={formData.hasCustomArt}
+                  onChange={handleChange}
+                  className="w-5 h-5 text-brand-purple rounded focus:ring-brand-purple"
+                />
+                <span className="text-gray-700">Arte Personalizada</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="hasPainting"
+                  checked={formData.hasPainting}
+                  onChange={handleChange}
+                  className="w-5 h-5 text-brand-purple rounded focus:ring-brand-purple"
+                />
+                <span className="text-gray-700">Pintura</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="hasVarnish"
+                  checked={formData.hasVarnish}
+                  onChange={handleChange}
+                  className="w-5 h-5 text-brand-purple rounded focus:ring-brand-purple"
+                />
+                <span className="text-gray-700">Verniz</span>
+              </label>
+            </div>
+          </div>
+
+          {formData.hasCustomArt && (
+            <div className="col-span-1 md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Responsavel pelo Design
+                </label>
+                <select
+                  name="designResponsible"
+                  value={formData.designResponsible}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                >
+                  <option value="">Selecione um responsavel...</option>
+                  {!hasDesignOption && formData.designResponsible && (
+                    <option value={formData.designResponsible}>
+                      {formData.designResponsible}
+                    </option>
+                  )}
+                  {designerProviders.map((provider) => (
+                    <option key={provider.id} value={provider.name}>
+                      {provider.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tempo de Design (h)
+                </label>
+                <input
+                  type="number"
+                  name="designTimeHours"
+                  step="0.1"
+                  min="0"
+                  value={formData.designTimeHours}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Valor do Design (R$)
+                </label>
+                <input
+                  type="number"
+                  name="designValue"
+                  step="0.01"
+                  min="0"
+                  value={formData.designValue}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                />
+              </div>
+            </div>
+          )}
+
+          {formData.hasPainting && (
+            <div className="col-span-1 md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Responsavel pela Pintura
+                </label>
+                <select
+                  name="paintResponsible"
+                  value={formData.paintResponsible}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                >
+                  <option value="">Selecione um responsavel...</option>
+                  {!hasPaintOption && formData.paintResponsible && (
+                    <option value={formData.paintResponsible}>
+                      {formData.paintResponsible}
+                    </option>
+                  )}
+                  {painterProviders.map((provider) => (
+                    <option key={provider.id} value={provider.name}>
+                      {provider.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tempo de Pintura (h)
+                </label>
+                <input
+                  type="number"
+                  name="paintTimeHours"
+                  step="0.1"
+                  min="0"
+                  value={formData.paintTimeHours}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="col-span-1 md:col-span-2">
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 md:p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-sm md:text-base font-bold text-brand-purple">
+                    Agenda de impressão
+                  </h2>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {isMobile
+                      ? `Horário atual: ${selectedPrintScheduleLabel}`
+                      : "Escolha um horário para impressão e serviços adicionais."}
+                  </p>
+                </div>
+                {isMobile && (
+                  <button
+                    type="button"
+                    onClick={() => setShowMobileSchedule((prev) => !prev)}
+                    className="shrink-0 rounded-lg border border-brand-purple/20 bg-white px-3 py-2 text-xs font-semibold text-brand-purple"
+                  >
+                    {showMobileSchedule ? "Ocultar agenda" : "Abrir agenda"}
+                  </button>
+                )}
+              </div>
+
+              {(!isMobile || showMobileSchedule) && (
+                <PrintScheduleCalendar
+                  estimatedHours={parseDurationToHours(
+                    formData.designPrintTime,
+                  )}
+                  hasCustomArt={formData.hasCustomArt}
+                  hasPainting={formData.hasPainting}
+                  showDesign={formData.hasCustomArt}
+                  showPainting={formData.hasPainting}
+                  value={formData.printStartConfirmedAt}
+                  onChange={(value) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      printStartConfirmedAt: value || "",
+                    }))
+                  }
+                  designHours={Number(formData.designTimeHours) || 0}
+                  designStartValue={formData.designStartConfirmedAt}
+                  onDesignChange={(value) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      designStartConfirmedAt: value || "",
+                    }))
+                  }
+                  designResponsible={formData.designResponsible}
+                  paintHours={Number(formData.paintTimeHours) || 0}
+                  paintValue={formData.paintStartConfirmedAt}
+                  onPaintChange={(value) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      paintStartConfirmedAt: value || "",
+                    }))
+                  }
+                  paintResponsible={formData.paintResponsible}
+                  saleId={id}
+                  layout={isMobile ? "stacked" : "auto"}
+                  showSuggestionSummary={!isMobile}
+                />
+              )}
+            </div>
+          </div>
+
+          <div className="col-span-1 md:col-span-2">
+            {isMobile ? (
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => setShowMobileAdvanced((prev) => !prev)}
+                  className="flex w-full items-center justify-between gap-3 text-left"
+                >
+                  <div>
+                    <p className="text-sm font-bold text-gray-800">
+                      Configurações avançadas
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {mobileAdvancedSummary}
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold text-brand-purple">
+                    {showMobileAdvanced ? "Ocultar" : "Mostrar"}
+                  </span>
+                </button>
+
+                {showMobileAdvanced && (
+                  <div className="grid grid-cols-1 gap-4 pt-1">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Link do Produto (STL)
+                      </label>
+                      <input
+                        type="url"
+                        name="productLink"
+                        value={formData.productLink ?? ""}
+                        onChange={handleChange}
+                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="edit-mobile-print-quality"
+                        className="block text-sm font-medium text-gray-700 mb-1"
+                      >
+                        Qualidade de Impressao
+                      </label>
+                      <select
+                        id="edit-mobile-print-quality"
+                        name="printQuality"
+                        value={formData.printQuality}
+                        onChange={handleChange}
+                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                      >
+                        {DETAIL_LEVELS.map((level) => (
+                          <option key={level.value} value={level.label}>
+                            {level.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="edit-mobile-print-status"
+                        className="block text-sm font-medium text-gray-700 mb-1"
+                      >
+                        Status da Impressao
+                      </label>
+                      <select
+                        id="edit-mobile-print-status"
+                        name="printStatus"
+                        value={formData.printStatus}
+                        onChange={handleChange}
+                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                      >
+                        <option value="Pending">Pendente</option>
+                        <option value="InQueue">Na Fila</option>
+                        <option value="Staged">Preparado</option>
+                        <option value="InProgress">Em Andamento</option>
+                        <option value="Concluded">Concluído</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Link do Produto (STL)
+                  </label>
+                  <input
+                    type="url"
+                    name="productLink"
+                    value={formData.productLink ?? ""}
+                    onChange={handleChange}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="edit-desktop-print-quality"
+                    className="block text-sm font-medium text-gray-700 mb-1"
+                  >
+                    Qualidade de Impressao
+                  </label>
+                  <select
+                    id="edit-desktop-print-quality"
+                    name="printQuality"
+                    value={formData.printQuality}
+                    onChange={handleChange}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                  >
+                    {DETAIL_LEVELS.map((level) => (
+                      <option key={level.value} value={level.label}>
+                        {level.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor="edit-desktop-print-status"
+                    className="block text-sm font-medium text-gray-700 mb-1"
+                  >
+                    Status da Impressao
+                  </label>
+                  <select
+                    id="edit-desktop-print-status"
+                    name="printStatus"
+                    value={formData.printStatus}
+                    onChange={handleChange}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900"
+                  >
+                    <option value="Pending">Pendente</option>
+                    <option value="InQueue">Na Fila</option>
+                    <option value="Staged">Preparado</option>
+                    <option value="InProgress">Em Andamento</option>
+                    <option value="Concluded">Concluído</option>
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="col-span-1 md:col-span-2 bg-gray-50 p-4 rounded-xl border border-gray-200">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                  ></path>
+                </svg>
+                Detalhamento de Custos
+              </h3>
+              {isMobile && (
+                <button
+                  type="button"
+                  onClick={() => setShowMobileCostDetails((prev) => !prev)}
+                  className="text-xs font-semibold text-brand-purple"
+                >
+                  {showMobileCostDetails ? "Ocultar ajustes" : "Ver ajustes"}
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 mb-4">
+              <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">
+                  Custo de Produção
+                </span>
+                <span className="text-lg font-bold text-gray-800">
+                  R$ {productionCostValue.toFixed(2)}
+                </span>
+              </div>
+              <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+                <label
+                  htmlFor="edit-shipping-cost"
+                  className="block text-xs text-gray-500 uppercase font-bold mb-1"
+                >
+                  Frete
+                </label>
+                <input
+                  id="edit-shipping-cost"
+                  type="number"
+                  name="shippingCost"
+                  step="0.01"
+                  min="0"
+                  value={formData.shippingCost}
+                  onChange={handleChange}
+                  className="w-full text-sm font-medium text-gray-800 border-b border-gray-200 focus:border-brand-purple focus:outline-none"
+                  placeholder="0.00"
+                />
+              </div>
+              <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">
+                  Custo Total
+                </span>
+                <span className="text-lg font-bold text-gray-800">
+                  R$ {(formData.cost || 0).toFixed(2)}
+                </span>
+              </div>
+              <div
+                className={`bg-white p-3 rounded-lg border border-gray-100 shadow-sm ${isMobile && !showMobileCostDetails ? "hidden" : ""}`}
+              >
+                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">
+                  Nozzle
+                </span>
+                <input
+                  type="text"
+                  name="nozzleDiameter"
+                  value={formData.nozzleDiameter}
+                  onChange={handleChange}
+                  className="w-full text-sm font-medium text-gray-800 border-b border-gray-200 focus:border-brand-purple focus:outline-none"
+                  placeholder="0.4mm"
+                />
+              </div>
+              <div
+                className={`bg-white p-3 rounded-lg border border-gray-100 shadow-sm ${isMobile && !showMobileCostDetails ? "hidden" : ""}`}
+              >
+                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">
+                  Camada
+                </span>
+                <input
+                  type="text"
+                  name="layerHeight"
+                  value={formData.layerHeight}
+                  onChange={handleChange}
+                  className="w-full text-sm font-medium text-gray-800 border-b border-gray-200 focus:border-brand-purple focus:outline-none"
+                  placeholder="0.2mm"
+                />
+              </div>
+            </div>
+
+            {(!isMobile || showMobileCostDetails) &&
+              (formData.costDetails ||
+                formData.shippingCost > 0 ||
+                formData.cost > 0) && (
+                <div className="space-y-3">
+                  {formData.costDetails && (
+                    <>
+                      <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
+                        <span>Material</span>
+                        <span className="font-medium">
+                          R${" "}
+                          {(formData.costDetails.materialCost || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
+                        <span>Energia</span>
+                        <span className="font-medium">
+                          R$ {(formData.costDetails.energyCost || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
+                        <span>Máquina (Depreciação)</span>
+                        <span className="font-medium">
+                          R${" "}
+                          {(formData.costDetails.machineCost || 0).toFixed(2)}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                  <div className="flex justify-between text-xs text-gray-600 border-b border-gray-200 pb-2">
+                    <span>Frete</span>
+                    <span className="font-medium">
+                      R$ {(formData.shippingCost || 0).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm text-gray-800 font-semibold border-b border-gray-200 pb-2">
+                    <span>Custo Total</span>
+                    <span>R$ {(formData.cost || 0).toFixed(2)}</span>
+                  </div>
+
+                  {formData.costDetails && (
+                    <div className="mt-3 pt-2">
+                      <p className="text-xs font-bold text-gray-700 mb-1">
+                        Cálculo da Margem:
+                      </p>
+                      <pre className="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-white p-2 rounded border border-gray-100">
+                        {formData.costDetails.breakdown}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+          </div>
+
+          <div className="col-span-1 md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+              <label
+                htmlFor="edit-cost"
+                className="block text-sm font-medium text-gray-700 mb-1"
+              >
+                Custo Total (R$)
+              </label>
+              <input
+                id="edit-cost"
+                type="number"
+                name="cost"
+                step="0.01"
+                value={formData.cost}
+                onChange={handleChange}
+                className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-purple focus:border-transparent text-gray-900 bg-gray-50"
+                readOnly
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="edit-sale-value"
+                className="block text-sm font-medium text-gray-700 mb-1"
+              >
+                Valor de Venda (R$)
+              </label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">
+                  R$
+                </span>
+                <input
+                  id="edit-sale-value"
+                  type="number"
+                  name="saleValue"
+                  step="0.01"
+                  value={formData.saleValue}
+                  onChange={handleChange}
+                  className="w-full pl-10 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-purple focus:border-transparent text-lg font-bold text-green-700"
+                />
+              </div>
+            </div>
+            <div>
+              <p className="block text-sm font-medium text-gray-700 mb-1">
+                Lucro Estimado
+              </p>
+              <div
+                className={`p-3 rounded-xl border flex justify-between items-center ${formData.profit >= 0 ? "bg-green-50 border-green-100 text-green-800" : "bg-red-50 border-red-100 text-red-800"}`}
+              >
+                <span className="font-bold text-lg">
+                  R$ {formData.profit.toFixed(2)}
+                </span>
+                <span className="text-sm font-medium bg-white/50 px-2 py-1 rounded-lg">
+                  {formData.profitPercentage}
+                </span>
+              </div>
+              <p className="mt-2 text-xs text-gray-500">
+                Margem calculada sobre o custo de producao. O frete fica fora da
+                base percentual.
+              </p>
+            </div>
+          </div>
+
+          <SaleAttachmentsPanel
+            existingAttachments={existingAttachments}
+            pendingAttachments={pendingAttachments}
+            processingCategories={processingCategories}
+            onFilesSelected={handleFilesSelected}
+            onRemoveExisting={handleRemoveExistingAttachment}
+            onRemovePending={handleRemovePendingAttachment}
+          />
+        </div>
+
+        <PrintFeedbackForm
+          value={formData.printFeedback}
+          onChange={(nextFeedback) =>
+            setFormData((prev) => ({
+              ...prev,
+              printFeedback: nextFeedback,
+            }))
+          }
+        />
+
+        {/* Checkboxes */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 border-t border-gray-100">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              name="isPrintConcluded"
+              checked={formData.isPrintConcluded}
+              onChange={handleChange}
+              className="w-5 h-5 text-brand-purple rounded focus:ring-brand-purple"
+            />
+            <span className="text-gray-700">Impressao Concluida</span>
+          </label>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              name="isDelivered"
+              checked={formData.isDelivered}
+              onChange={handleChange}
+              className="w-5 h-5 text-brand-purple rounded focus:ring-brand-purple"
+            />
+            <span className="text-gray-700">Entregue</span>
+          </label>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              name="isPaid"
+              checked={formData.isPaid}
+              onChange={handleChange}
+              className="w-5 h-5 text-brand-purple rounded focus:ring-brand-purple"
+            />
+            <span className="text-gray-700">Pago</span>
+          </label>
+        </div>
+
+        <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 sm:gap-4 pt-6">
+          <button
+            type="button"
+            onClick={() => router.push(buildReturnToSalesUrl())}
+            className="w-full sm:w-auto px-6 py-3 sm:py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className={`w-full sm:w-auto px-6 py-3 sm:py-2 text-white rounded-lg transition-colors disabled:opacity-50 ${submitButtonClassName}`}
+          >
+            {submitButtonLabel}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}

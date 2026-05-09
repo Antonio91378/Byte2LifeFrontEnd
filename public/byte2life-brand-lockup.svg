@@ -1,0 +1,95 @@
+<svg width="768" height="768" viewBox="0 0 768 768" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="64" y1="48" x2="710" y2="724" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3D0B63" />
+      <stop offset="1" stop-color="#230437" />
+    </linearGradient>
+    <linearGradient id="armor" x1="384" y1="76" x2="384" y2="368" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7C3AED" />
+      <stop offset="0.55" stop-color="#5B21B6" />
+      <stop offset="1" stop-color="#2E1065" />
+    </linearGradient>
+    <linearGradient id="visor" x1="384" y1="214" x2="384" y2="352" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6D28D9" />
+      <stop offset="1" stop-color="#2E0249" />
+    </linearGradient>
+  </defs>
+
+  <rect width="768" height="768" rx="176" fill="url(#bg)" />
+  <circle cx="384" cy="226" r="152" stroke="#FF9900" stroke-width="14" opacity="0.95" />
+
+  <path
+    d="M306 364L322 232L340 120L362 76L356 224L384 190L412 224L406 76L428 120L446 232L462 364L426 342L394 326H374L342 342L306 364Z"
+    fill="url(#armor)"
+    stroke="#FF9900"
+    stroke-linejoin="round"
+    stroke-width="10"
+  />
+  <path
+    d="M342 142H426V216L410 236V308H358V236L342 216V142Z"
+    fill="#5B21B6"
+    stroke="#FF9900"
+    stroke-linejoin="round"
+    stroke-width="8"
+  />
+  <rect x="372" y="168" width="24" height="44" rx="4" fill="#4C1D95" stroke="#FF9900" stroke-width="6" />
+
+  <path
+    d="M314 226L278 248V306L312 324L334 304L340 252L314 226Z"
+    fill="#4C1D95"
+    stroke="#FF9900"
+    stroke-linejoin="round"
+    stroke-width="8"
+  />
+  <path
+    d="M454 226L490 248V306L456 324L434 304L428 252L454 226Z"
+    fill="#4C1D95"
+    stroke="#FF9900"
+    stroke-linejoin="round"
+    stroke-width="8"
+  />
+
+  <path
+    d="M336 234L384 212L432 234L416 352H352L336 234Z"
+    fill="url(#visor)"
+    stroke="#FF9900"
+    stroke-linejoin="round"
+    stroke-width="8"
+  />
+  <path d="M342 250L377 240L358 268L320 272L342 250Z" fill="#FF9900" />
+  <path d="M426 250L391 240L410 268L448 272L426 250Z" fill="#FF9900" />
+  <path
+    d="M354 314H414L403 360H365L354 314Z"
+    fill="#2E0249"
+    stroke="#FF9900"
+    stroke-linejoin="round"
+    stroke-width="6"
+  />
+  <path d="M344 384H424" stroke="#FF9900" stroke-linecap="round" stroke-width="10" />
+  <path d="M334 402H434" stroke="#FF9900" stroke-linecap="round" stroke-width="10" opacity="0.8" />
+
+  <text
+    x="384"
+    y="560"
+    fill="#FF9900"
+    font-family="Arial Black, Montserrat, sans-serif"
+    font-size="92"
+    font-weight="900"
+    letter-spacing="2"
+    text-anchor="middle"
+  >
+    BYTE2LIFE
+  </text>
+  <text
+    x="384"
+    y="632"
+    fill="#6D28D9"
+    font-family="Arial Black, Montserrat, sans-serif"
+    font-size="40"
+    font-weight="800"
+    letter-spacing="11"
+    text-anchor="middle"
+  >
+    3D PRINTING
+  </text>
+</svg>

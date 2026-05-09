@@ -1,0 +1,70 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="44" y1="32" x2="472" y2="480" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3D0B63" />
+      <stop offset="1" stop-color="#230437" />
+    </linearGradient>
+    <linearGradient id="armor" x1="256" y1="64" x2="256" y2="390" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7C3AED" />
+      <stop offset="0.55" stop-color="#5B21B6" />
+      <stop offset="1" stop-color="#2E1065" />
+    </linearGradient>
+    <linearGradient id="visor" x1="256" y1="218" x2="256" y2="366" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6D28D9" />
+      <stop offset="1" stop-color="#2E0249" />
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="120" fill="url(#bg)" />
+  <circle cx="256" cy="228" r="142" stroke="#FF9900" stroke-width="14" opacity="0.95" />
+
+  <path
+    d="M181 352L199 224L220 111L244 64L236 216L256 190L276 216L268 64L292 111L313 224L331 352L300 329L272 314H240L212 329L181 352Z"
+    fill="url(#armor)"
+    stroke="#FF9900"
+    stroke-linejoin="round"
+    stroke-width="10"
+  />
+  <path
+    d="M222 132H290V214L276 232V312H236V232L222 214V132Z"
+    fill="#5B21B6"
+    stroke="#FF9900"
+    stroke-linejoin="round"
+    stroke-width="8"
+  />
+  <rect x="243" y="160" width="26" height="48" rx="4" fill="#4C1D95" stroke="#FF9900" stroke-width="6" />
+
+  <path
+    d="M189 214L151 239V309L184 329L211 305L219 245L189 214Z"
+    fill="#4C1D95"
+    stroke="#FF9900"
+    stroke-linejoin="round"
+    stroke-width="8"
+  />
+  <path
+    d="M323 214L361 239V309L328 329L301 305L293 245L323 214Z"
+    fill="#4C1D95"
+    stroke="#FF9900"
+    stroke-linejoin="round"
+    stroke-width="8"
+  />
+
+  <path
+    d="M208 230L256 208L304 230L287 356H225L208 230Z"
+    fill="url(#visor)"
+    stroke="#FF9900"
+    stroke-linejoin="round"
+    stroke-width="8"
+  />
+  <path d="M215 246L252 236L231 266L191 272L215 246Z" fill="#FF9900" />
+  <path d="M297 246L260 236L281 266L321 272L297 246Z" fill="#FF9900" />
+  <path
+    d="M226 315H286L275 355H237L226 315Z"
+    fill="#2E0249"
+    stroke="#FF9900"
+    stroke-linejoin="round"
+    stroke-width="6"
+  />
+  <path d="M218 378H294" stroke="#FF9900" stroke-linecap="round" stroke-width="10" />
+  <path d="M204 396H308" stroke="#FF9900" stroke-linecap="round" stroke-width="10" opacity="0.8" />
+</svg>
