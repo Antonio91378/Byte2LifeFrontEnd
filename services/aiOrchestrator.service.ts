@@ -355,6 +355,27 @@ export async function sendPublicBotInviteMessage(
   });
 }
 
+export async function uploadPublicBotInviteAttachment(
+  baseUrl: string,
+  inviteToken: string,
+  payload: {
+    filename: string;
+    data: string;
+  },
+) {
+  return request<BotConversationAttachment>(
+    baseUrl,
+    `/public/invites/${encodeURIComponent(inviteToken)}/upload`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        filename: payload.filename,
+        data: payload.data,
+      }),
+    },
+  );
+}
+
 export async function deleteBotConversation(
   baseUrl: string,
   conversationId: string,

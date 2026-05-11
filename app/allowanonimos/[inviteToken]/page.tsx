@@ -6,20 +6,32 @@ import {
     resolveAiOrchestratorAssetUrl,
     sendPublicBotInviteMessage,
     type BotConversation,
+  type BotConversationAttachment,
     type BotConversationMessage,
     type BotPublicInvite,
+  uploadPublicBotInviteAttachment,
 } from "@/services/aiOrchestrator.service";
 import {
     Bot,
     Clock3,
     LoaderCircle,
+  Paperclip,
     SendHorizontal,
     ShieldCheck,
     Sparkles,
     WifiOff,
+  X,
 } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+
+const MAX_PUBLIC_ATTACHMENTS = 3;
+const PUBLIC_ATTACHMENT_ACCEPT = ".jpg,.jpeg,.png,.webp,.gif,.stl,.obj,.3mf";
+
+interface PendingAttachment {
+  id: string;
+  file: File;
+}
 
 const STATE_LABELS: Record<string, string> = {
   new_lead: "Novo lead",
@@ -62,6 +74,45 @@ function getGeneratedImageUrl(baseUrl: string, text?: string | null) {
   return resolveAiOrchestratorAssetUrl(baseUrl, match[1]);
 }
 
+function isImageAttachment(attachment?: BotConversationAttachment | null) {
+  const source = [
+    attachment?.type || "",
+    attachment?.ext || "",
+    attachment?.filename || "",
+    attachment?.url || "",
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return /(image|generated_image|\.png|\.jpe?g|\.gif|\.webp)/.test(source);
+}
+
+function attachmentLabel(attachment?: BotConversationAttachment | null) {
+  if (!attachment) return "anexo";
+  return attachment.filename || attachment.url?.split("/").pop() || "anexo";
+}
+
+function getMessageAttachments(
+  baseUrl: string,
+  message: BotConversationMessage,
+) {
+  return (Array.isArray(message.attachments) ? message.attachments : []).map(
+    (attachment) => ({
+      ...attachment,
+      absoluteUrl: resolveAiOrchestratorAssetUrl(baseUrl, attachment.url),
+    }),
+  );
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error(`Não foi possível ler ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
+}
+
 function formatInviteError(message?: string | null) {
   const raw = String(message || "").trim();
   if (!raw) return "Não foi possível abrir esta conversa pública.";
@@ -89,6 +140,7 @@ function ChatBubble({
 }>) {
   const outbound = message.direction === "outbound";
   const previewUrl = getGeneratedImageUrl(baseUrl, message.text);
+  const attachments = getMessageAttachments(baseUrl, message);
   const text = getDisplayText(message.text);
   const timestamp = message.sent_at || message.received_at;
 
@@ -137,6 +189,58 @@ function ChatBubble({
             />
           </div>
         )}
+
+        {attachments.length > 0 && (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {attachments.map((attachment) => {
+              const imageAttachment = isImageAttachment(attachment);
+
+              if (imageAttachment && attachment.absoluteUrl) {
+                return (
+                  <a
+                    key={`${attachment.url || attachment.filename}`}
+                    href={attachment.absoluteUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={`overflow-hidden rounded-[1.25rem] border ${outbound ? "border-white/15 bg-white/10" : "border-gray-200 bg-gray-50"}`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={attachment.absoluteUrl}
+                      alt={attachmentLabel(attachment)}
+                      className="h-44 w-full object-cover"
+                    />
+                    <div className={`px-3 py-2 text-xs font-semibold ${outbound ? "text-white/85" : "text-gray-700"}`}>
+                      {attachmentLabel(attachment)}
+                    </div>
+                  </a>
+                );
+              }
+
+              return (
+                <a
+                  key={`${attachment.url || attachment.filename}`}
+                  href={attachment.absoluteUrl || undefined}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`rounded-[1.25rem] border px-3 py-3 ${outbound ? "border-white/15 bg-white/10 text-white/85" : "border-gray-200 bg-gray-50 text-gray-700"}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <Paperclip className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">
+                        {attachmentLabel(attachment)}
+                      </p>
+                      <p className={`mt-1 text-xs ${outbound ? "text-white/65" : "text-gray-500"}`}>
+                        Arquivo de referência
+                      </p>
+                    </div>
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -151,6 +255,7 @@ export default function PublicInvitePage() {
   );
   const [invite, setInvite] = useState<BotPublicInvite | null>(null);
   const [message, setMessage] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -202,18 +307,55 @@ export default function PublicInvitePage() {
     [error, loading, remainingMessages, sending],
   );
 
+  function handleAttachmentSelection(
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const selectedFiles = Array.from(event.target.files || []);
+    if (selectedFiles.length === 0) return;
+
+    setPendingAttachments((current) => {
+      const slotsLeft = Math.max(0, MAX_PUBLIC_ATTACHMENTS - current.length);
+      const nextFiles = selectedFiles.slice(0, slotsLeft).map((file) => ({
+        id: `${file.name}-${file.size}-${file.lastModified}`,
+        file,
+      }));
+      return [...current, ...nextFiles];
+    });
+
+    event.target.value = "";
+  }
+
+  function removePendingAttachment(attachmentId: string) {
+    setPendingAttachments((current) =>
+      current.filter((attachment) => attachment.id !== attachmentId),
+    );
+  }
+
   async function handleSendMessage() {
     const trimmed = message.trim();
-    if (!trimmed || !canSend) return;
+    if ((!trimmed && pendingAttachments.length === 0) || !canSend) return;
 
     try {
       setSending(true);
+      const uploadedAttachments: BotConversationAttachment[] = [];
+
+      for (const attachment of pendingAttachments) {
+        const data = await readFileAsDataUrl(attachment.file);
+        const uploaded = await uploadPublicBotInviteAttachment(baseUrl, inviteToken, {
+          filename: attachment.file.name,
+          data,
+        });
+        uploadedAttachments.push(uploaded);
+      }
+
       const result = await sendPublicBotInviteMessage(baseUrl, inviteToken, {
         message: trimmed,
+        attachments: uploadedAttachments,
       });
       setConversation(result.conversation);
       setInvite(result.invite);
       setMessage("");
+      setPendingAttachments([]);
       setError(null);
     } catch (sendError) {
       setError(
@@ -352,8 +494,8 @@ export default function PublicInvitePage() {
                 Enviar mensagem
               </h2>
               <p className="text-sm text-gray-500">
-                Explique o produto, material, prazo ou envie os detalhes do
-                orçamento desejado.
+                Explique o produto, material, prazo ou envie imagens e arquivos
+                de referência para o orçamento desejado.
               </p>
             </div>
             <span className="rounded-full border border-brand-purple/15 bg-brand-purple/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-brand-purple">
@@ -368,6 +510,53 @@ export default function PublicInvitePage() {
             className="min-h-32 w-full rounded-[1.5rem] border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 shadow-sm outline-none transition focus:border-brand-purple focus:ring-2 focus:ring-brand-purple/20"
           />
 
+          <div className="mt-4 rounded-[1.5rem] border border-dashed border-brand-purple/20 bg-brand-purple/[0.03] px-4 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">
+                  Anexar referências
+                </p>
+                <p className="mt-1 text-sm text-gray-500">
+                  Envie até {MAX_PUBLIC_ATTACHMENTS} arquivo(s): imagens, STL, OBJ ou 3MF.
+                </p>
+              </div>
+
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-brand-purple/15 bg-white px-4 py-3 text-sm font-semibold text-brand-purple transition hover:border-brand-purple/30 hover:bg-brand-purple/[0.04]">
+                <Paperclip className="h-4 w-4" />
+                Escolher arquivos
+                <input
+                  type="file"
+                  accept={PUBLIC_ATTACHMENT_ACCEPT}
+                  multiple
+                  onChange={handleAttachmentSelection}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {pendingAttachments.length > 0 && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {pendingAttachments.map((attachment) => (
+                  <div
+                    key={attachment.id}
+                    className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm"
+                  >
+                    <Paperclip className="h-4 w-4 text-brand-purple" />
+                    <span className="max-w-48 truncate">{attachment.file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removePendingAttachment(attachment.id)}
+                      className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+                      aria-label={`Remover ${attachment.file.name}`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-gray-500">
               Esse canal não aceita comandos internos nem pedidos fora do escopo
@@ -377,7 +566,10 @@ export default function PublicInvitePage() {
             <button
               type="button"
               onClick={handleSendMessage}
-              disabled={!canSend || !message.trim()}
+              disabled={
+                !canSend ||
+                (!message.trim() && pendingAttachments.length === 0)
+              }
               className="inline-flex items-center gap-2 rounded-2xl bg-brand-purple px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-purple-light disabled:cursor-not-allowed disabled:opacity-60"
             >
               {sending ? (
