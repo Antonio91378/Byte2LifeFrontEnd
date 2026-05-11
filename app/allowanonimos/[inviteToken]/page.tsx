@@ -10,6 +10,7 @@ import {
     type BotConversationAttachment,
     type BotConversationMessage,
     type BotPublicInvite,
+    type BotSuggestedModel,
 } from "@/services/aiOrchestrator.service";
 import {
     Bot,
@@ -59,7 +60,10 @@ function formatStateLabel(value?: string | null) {
 
 function getDisplayText(text?: string | null) {
   if (!text) return "";
-  const cleaned = text.replaceAll(/\[IMAGEM_GERADA:[^\]]+\]/g, "").trim();
+  const cleaned = text
+    .replaceAll(/\[IMAGEM_GERADA:[^\]]+\]/g, "")
+    .replaceAll(/\[Aqui voc[eê] colocaria os links[^\]]+MakerWorld\]/gi, "")
+    .trim();
   if (cleaned) return cleaned;
   if (text.includes("[IMAGEM_GERADA:")) {
     return "Prévia gerada pela Byte2Life.";
@@ -251,6 +255,63 @@ function ChatBubble({
   );
 }
 
+function MakerWorldSuggestionBubble({
+  suggestions,
+}: Readonly<{
+  suggestions: BotSuggestedModel[];
+}>) {
+  const safeSuggestions = suggestions.filter(
+    (suggestion) => suggestion.url && suggestion.term,
+  );
+
+  if (safeSuggestions.length === 0) return null;
+
+  return (
+    <div className="flex justify-end">
+      <div className="w-full max-w-2xl rounded-[1.75rem] border border-brand-purple/20 bg-brand-purple px-4 py-4 text-white shadow-sm">
+        <div className="flex items-center justify-between gap-3 text-xs uppercase tracking-[0.16em]">
+          <span className="inline-flex items-center gap-2 font-semibold text-brand-orange">
+            <Sparkles className="h-4 w-4" />
+            Referências MakerWorld
+          </span>
+          <span className="text-white/65">modelos prontos</span>
+        </div>
+
+        <p className="mt-3 text-sm leading-relaxed text-white/90">
+          Separei alguns links clicáveis para você abrir os modelos prontos no
+          MakerWorld.
+        </p>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {safeSuggestions.map((suggestion, index) => (
+            <a
+              key={`${suggestion.url}-${index}`}
+              href={suggestion.url || undefined}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-[1.25rem] border border-white/15 bg-white/10 px-4 py-3 transition hover:border-white/25 hover:bg-white/15"
+            >
+              <div className="flex items-start gap-3">
+                <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-orange text-xs font-bold text-brand-purple">
+                  {suggestion.rank || index + 1}
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-white">
+                    {suggestion.term}
+                  </p>
+                  <p className="mt-1 text-xs text-white/65">
+                    Abrir busca no MakerWorld
+                  </p>
+                </div>
+              </div>
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PublicInvitePage() {
   const params = useParams<{ inviteToken: string }>();
   const inviteToken = decodeURIComponent(String(params?.inviteToken || ""));
@@ -309,6 +370,7 @@ export default function PublicInvitePage() {
   }, [baseUrl, inviteToken]);
 
   const remainingMessages = invite?.remaining_messages ?? 0;
+  const suggestedModels = conversation?.suggested_models || [];
   const canSend = useMemo(
     () => !loading && !sending && !error && remainingMessages > 0,
     [error, loading, remainingMessages, sending],
@@ -342,8 +404,11 @@ export default function PublicInvitePage() {
     const trimmed = message.trim();
     if ((!trimmed && pendingAttachments.length === 0) || !canSend) return;
 
+    const originalMessage = message;
+
     try {
       setSending(true);
+      setMessage("");
       const uploadedAttachments: BotConversationAttachment[] = [];
 
       for (const attachment of pendingAttachments) {
@@ -365,10 +430,10 @@ export default function PublicInvitePage() {
       });
       setConversation(result.conversation);
       setInvite(result.invite);
-      setMessage("");
       setPendingAttachments([]);
       setError(null);
     } catch (sendError) {
+      setMessage((currentMessage) => currentMessage || originalMessage);
       setError(
         formatInviteError(
           sendError instanceof Error ? sendError.message : undefined,
@@ -478,14 +543,23 @@ export default function PublicInvitePage() {
           ) : (
             <div className="space-y-4">
               {(conversation?.messages || []).map((item, index) => (
-                <ChatBubble
+                <div
                   key={
                     item.message_id ||
                     `${index}-${item.sent_at || item.received_at}`
                   }
-                  baseUrl={baseUrl}
-                  message={item}
-                />
+                  className="space-y-3"
+                >
+                  <ChatBubble baseUrl={baseUrl} message={item} />
+
+                  {item.direction === "outbound" &&
+                    item.text === conversation?.last_reply &&
+                    suggestedModels.length > 0 && (
+                      <MakerWorldSuggestionBubble
+                        suggestions={suggestedModels}
+                      />
+                    )}
+                </div>
               ))}
 
               {!conversation?.messages?.length && (

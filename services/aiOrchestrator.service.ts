@@ -34,6 +34,13 @@ export interface BotConversationAccess {
   public_invite?: BotPublicInvite | null;
 }
 
+export interface BotSuggestedModel {
+  rank?: number | null;
+  term?: string | null;
+  url?: string | null;
+  source?: string | null;
+}
+
 export interface BotConversationMessage {
   message_id?: string;
   direction?: string;
@@ -57,6 +64,7 @@ export interface BotConversation {
     | null;
   attachments?: BotConversationAttachment[];
   messages?: BotConversationMessage[];
+  suggested_models?: BotSuggestedModel[];
   missing_fields?: Array<{ path?: string; label?: string; reason?: string }>;
   blocker?: BotConversationBlocker | null;
   access?: BotConversationAccess | null;
