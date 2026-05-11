@@ -1,94 +1,225 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import {
+  Boxes,
+  CircleDollarSign,
+  Home,
+  Menu,
+  MessageSquareText,
+  Package2,
+  Palette,
+  Printer,
+  Upload,
+  Users,
+  Wrench,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import { useState } from 'react';
-import { Printer } from 'lucide-react';
 import LogoutButton from './LogoutButton';
 
+interface NavItem {
+  href: string;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+}
+
+const NAV_ITEMS: NavItem[] = [
+  {
+    href: '/',
+    label: 'Início',
+    description: 'Resumo do negócio e atalhos principais.',
+    icon: Home,
+  },
+  {
+    href: '/stock',
+    label: 'Estoque',
+    description: 'Controle de insumos, materiais e entradas.',
+    icon: Package2,
+  },
+  {
+    href: '/filaments',
+    label: 'Filamentos',
+    description: 'Massas, cores e disponibilidade por bobina.',
+    icon: Boxes,
+  },
+  {
+    href: '/paints',
+    label: 'Tintas',
+    description: 'Gestão de tintas e consumíveis de acabamento.',
+    icon: Palette,
+  },
+  {
+    href: '/services',
+    label: 'Serviços',
+    description: 'Catálogo de serviços e composição da operação.',
+    icon: Wrench,
+  },
+  {
+    href: '/clients',
+    label: 'Clientes',
+    description: 'Cadastro e acompanhamento da base de clientes.',
+    icon: Users,
+  },
+  {
+    href: '/sales',
+    label: 'Vendas',
+    description: 'Pedidos, status, pagamentos e entrega.',
+    icon: CircleDollarSign,
+  },
+  {
+    href: '/printer',
+    label: 'Impressora',
+    description: 'Monitoramento da impressora e da fila de produção.',
+    icon: Printer,
+  },
+  {
+    href: '/import',
+    label: 'Importar',
+    description: 'Entradas em lote e cargas auxiliares.',
+    icon: Upload,
+  },
+  {
+    href: '/bot-chats',
+    label: 'Chats IA',
+    description: 'Painel dev com histórico, anexos e remoção de conversas.',
+    icon: MessageSquareText,
+  },
+];
+
+function isActivePath(pathname: string, href: string) {
+  if (href === '/') return pathname === '/';
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function prettifyActiveLabel(pathname: string) {
+  const activeItem = NAV_ITEMS.find((item) => isActivePath(pathname, item.href));
+  return activeItem?.label || 'Menu';
+}
+
 export default function Navbar() {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const pathname = usePathname();
+  const [menuPathname, setMenuPathname] = useState<string | null>(null);
+  const isMenuOpen = menuPathname === pathname;
+
+  function closeMenu() {
+    setMenuPathname(null);
+  }
+
+  function toggleMenu() {
+    setMenuPathname((current) => (current === pathname ? null : pathname));
+  }
 
   return (
-    <nav className="bg-brand-purple/90 backdrop-blur-md shadow-lg sticky top-0 z-50">
-      <div className="container mx-auto px-6 py-4 flex justify-between items-center">
-        <Link href="/" className="flex items-center gap-2 group">
-          <div className="bg-brand-orange p-2 rounded-lg group-hover:rotate-12 transition-transform">
+    <nav className="sticky top-0 z-50 border-b border-white/10 bg-brand-purple/92 shadow-[0_18px_48px_-24px_rgba(46,2,73,0.8)] backdrop-blur-xl">
+      <div className="container mx-auto px-4 sm:px-6">
+        <div className="flex items-center justify-between gap-3 py-3">
+          <Link href="/" className="group flex items-center gap-3">
+            <div className="rounded-xl bg-brand-orange p-2.5 shadow-lg shadow-brand-orange/20 transition-transform duration-300 group-hover:rotate-6 group-hover:scale-105">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
             </svg>
+            </div>
+            <div className="space-y-0.5">
+              <span className="block text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-white/55 sm:text-[0.7rem]">
+                Byte2Life
+              </span>
+              <span className="block text-lg font-bold tracking-[0.22em] text-white sm:text-xl">
+                BYTE<span className="text-brand-orange">2</span>LIFE
+              </span>
+            </div>
+          </Link>
+
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs font-medium text-white/75 sm:flex">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(74,222,128,0.8)]" />
+              {prettifyActiveLabel(pathname)}
+            </div>
+
+            <button
+              type="button"
+              onClick={toggleMenu}
+              className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/8 px-3 py-2 text-sm font-semibold text-white transition-all duration-300 hover:border-brand-orange/40 hover:bg-white/12 hover:text-brand-orange focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange/60"
+              aria-expanded={isMenuOpen}
+              aria-controls="byte2life-menu-panel"
+            >
+              {isMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+              <span>{isMenuOpen ? 'Fechar' : 'Menu'}</span>
+            </button>
           </div>
-          <span className="font-bold text-2xl text-white tracking-wider">
-            BYTE<span className="text-brand-orange">2</span>LIFE
-          </span>
-        </Link>
-
-        {/* Desktop Menu */}
-        <div className="hidden md:flex space-x-8 font-medium text-gray-200">
-          <Link href="/stock" className="hover:text-brand-orange transition-colors flex items-center gap-1">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path></svg>
-            Estoque
-          </Link>
-          <Link href="/filaments" className="hover:text-brand-orange transition-colors flex items-center gap-1">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-            Filamentos
-          </Link>
-          <Link href="/paints" className="hover:text-brand-orange transition-colors flex items-center gap-1">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path></svg>
-            Tintas
-          </Link>
-          <Link href="/services" className="hover:text-brand-orange transition-colors flex items-center gap-1">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            Servicos
-          </Link>
-          <Link href="/clients" className="hover:text-brand-orange transition-colors flex items-center gap-1">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-            Clientes
-          </Link>
-          <Link href="/sales" className="hover:text-brand-orange transition-colors flex items-center gap-1">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            Vendas
-          </Link>
-          <Link href="/printer" className="hover:text-brand-orange transition-colors flex items-center gap-1">
-            <Printer className="h-4 w-4" />
-            Impressora
-          </Link>
-          <Link href="/import" className="hover:text-brand-orange transition-colors flex items-center gap-1">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-            Importar
-          </Link>
-          <LogoutButton className="hover:text-red-300" />
-        </div>
-
-        {/* Mobile Menu Button */}
-        <div className="md:hidden">
-          <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="text-white focus:outline-none">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              {isMenuOpen ? (
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-              ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
-              )}
-            </svg>
-          </button>
         </div>
       </div>
 
-      {/* Mobile Menu */}
-      {isMenuOpen && (
-        <div className="md:hidden bg-brand-purple border-t border-purple-800">
-          <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-            <Link href="/stock" className="block px-3 py-2 rounded-md text-base font-medium text-white hover:bg-purple-800">Estoque</Link>
-            <Link href="/filaments" className="block px-3 py-2 rounded-md text-base font-medium text-white hover:bg-purple-800">Filamentos</Link>
-            <Link href="/paints" className="block px-3 py-2 rounded-md text-base font-medium text-white hover:bg-purple-800">Tintas</Link>
-            <Link href="/services" className="block px-3 py-2 rounded-md text-base font-medium text-white hover:bg-purple-800">Servicos</Link>
-            <Link href="/clients" className="block px-3 py-2 rounded-md text-base font-medium text-white hover:bg-purple-800">Clientes</Link>
-            <Link href="/sales" className="block px-3 py-2 rounded-md text-base font-medium text-white hover:bg-purple-800">Vendas</Link>
-            <Link href="/printer" className="block px-3 py-2 rounded-md text-base font-medium text-white hover:bg-purple-800">Impressora</Link>
-            <Link href="/import" className="block px-3 py-2 rounded-md text-base font-medium text-white hover:bg-purple-800">Importar</Link>
-            <LogoutButton className="w-full px-3 py-2 rounded-md text-base font-medium text-white hover:bg-purple-800" />
+      <div
+        id="byte2life-menu-panel"
+        className={`grid overflow-hidden transition-all duration-300 ease-out ${
+          isMenuOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+        }`}
+      >
+        <div className="overflow-hidden border-t border-white/10 bg-[linear-gradient(180deg,rgba(87,10,133,0.24),rgba(46,2,73,0.96))]">
+          <div className="container mx-auto px-4 py-4 sm:px-6 sm:py-5">
+            <div className="mb-4 flex flex-col gap-3 rounded-3xl border border-white/10 bg-white/5 px-4 py-4 text-white/80 shadow-[0_16px_40px_-28px_rgba(0,0,0,0.9)] sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-white">Navegação principal</p>
+                <p className="mt-1 text-sm text-white/65">
+                  Menu único para desktop e mobile, com fechamento automático ao navegar.
+                </p>
+              </div>
+              <span className="inline-flex w-fit items-center rounded-full border border-brand-orange/30 bg-brand-orange/12 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-brand-orange">
+                {NAV_ITEMS.length + 1} atalhos
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {NAV_ITEMS.map((item) => {
+                const Icon = item.icon;
+                const isActive = isActivePath(pathname, item.href);
+
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={closeMenu}
+                    className={`group flex items-start gap-3 rounded-3xl border px-4 py-4 transition-all duration-300 ${
+                      isActive
+                        ? 'border-brand-orange/45 bg-brand-orange/12 text-white shadow-[0_18px_36px_-26px_rgba(255,153,0,0.8)]'
+                        : 'border-white/10 bg-white/6 text-white/88 hover:border-brand-orange/30 hover:bg-white/10 hover:shadow-[0_18px_36px_-26px_rgba(0,0,0,0.9)]'
+                    }`}
+                  >
+                    <div className={`rounded-2xl p-2.5 transition-colors duration-300 ${isActive ? 'bg-brand-orange text-white' : 'bg-white/10 text-brand-orange group-hover:bg-brand-orange group-hover:text-white'}`}>
+                      <Icon className="h-5 w-5" />
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-sm font-semibold sm:text-base">{item.label}</span>
+                        {isActive && (
+                          <span className="rounded-full border border-brand-orange/35 bg-brand-orange/15 px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-[0.14em] text-brand-orange">
+                            atual
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-sm leading-relaxed text-white/60">
+                        {item.description}
+                      </p>
+                    </div>
+                  </Link>
+                );
+              })}
+
+              <div className="rounded-3xl border border-white/10 bg-white/6 p-1">
+                <LogoutButton
+                  label="Sair da sessão"
+                  className="w-full rounded-[1.25rem] px-4 py-4 text-sm font-semibold text-white/88 transition-all duration-300 hover:bg-red-500/12 hover:text-red-200"
+                />
+              </div>
+            </div>
           </div>
         </div>
-      )}
+      </div>
     </nav>
   );
 }

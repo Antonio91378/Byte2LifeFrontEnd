@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useAuth } from "../hooks/useAuth";
 
-const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PATHS = ["/login", "/allowanonimos"];
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -22,7 +22,10 @@ export default function AuthGuard({ children, publicSlot }: AuthGuardProps) {
 
   useEffect(() => {
     if (!loading && !user && !isPublic) {
-      const next = pathname && pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
+      const next =
+        pathname && pathname !== "/"
+          ? `?next=${encodeURIComponent(pathname)}`
+          : "";
       router.replace(`/login${next}`);
     }
   }, [user, loading, isPublic, pathname, router]);
