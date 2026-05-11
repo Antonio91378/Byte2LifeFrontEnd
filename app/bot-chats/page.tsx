@@ -9,6 +9,7 @@ import {
   getStoredAiOrchestratorBaseUrl,
   listBotConversations,
   resolveAiOrchestratorAssetUrl,
+  saveBotConversationDeveloperNote,
   saveAiOrchestratorBaseUrl,
   simulateBotConversation,
   type BotConversation,
@@ -339,6 +340,8 @@ export default function BotChatsPage() {
   const [inviteHours, setInviteHours] = useState('72');
   const [inviteLoading, setInviteLoading] = useState(false);
   const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(null);
+  const [developerNoteInput, setDeveloperNoteInput] = useState('');
+  const [developerNoteSaving, setDeveloperNoteSaving] = useState(false);
   const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
@@ -443,6 +446,7 @@ export default function BotChatsPage() {
   useEffect(() => {
     if (!selectedConversationId) {
       setSelectedConversation(null);
+      setDeveloperNoteInput('');
       return;
     }
 
@@ -457,9 +461,11 @@ export default function BotChatsPage() {
         const result = await getBotConversation(baseUrl, conversationId);
         if (ignore) return;
         setSelectedConversation(result.conversation);
+        setDeveloperNoteInput(result.conversation.developer_note?.note || '');
       } catch (loadError) {
         if (ignore) return;
         setSelectedConversation(null);
+        setDeveloperNoteInput('');
         setError(
           loadError instanceof Error
             ? loadError.message
@@ -775,6 +781,52 @@ export default function BotChatsPage() {
           </div>
         </div>
 
+        <div className="rounded-[1.75rem] border border-gray-200 bg-white p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h3 className="text-lg font-bold text-gray-900">
+                Diagnóstico do dev
+              </h3>
+              <p className="text-sm text-gray-500">
+                Registre aqui o que falhou ou o que chamou atenção nessa conversa para reutilizar depois em análise com IA.
+              </p>
+            </div>
+
+            {selectedConversation.developer_note?.updated_at && (
+              <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
+                Atualizado em {formatDateTime(selectedConversation.developer_note.updated_at)}
+              </span>
+            )}
+          </div>
+
+          <textarea
+            value={developerNoteInput}
+            onChange={(event) => setDeveloperNoteInput(event.target.value)}
+            placeholder="Ex.: o cliente anexou foto corretamente, mas a geração ignorou a referência porque o upload público persistiu o type como .png em vez de image."
+            className="mt-4 min-h-32 w-full rounded-[1.5rem] border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 shadow-sm outline-none transition focus:border-brand-purple focus:ring-2 focus:ring-brand-purple/20"
+          />
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-gray-500">
+              Esse comentário fica salvo junto da conversa para facilitar a cópia do caso completo.
+            </p>
+
+            <button
+              type="button"
+              onClick={handleSaveDeveloperNote}
+              disabled={developerNoteSaving}
+              className="inline-flex items-center gap-2 rounded-2xl bg-brand-purple px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-purple-light disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {developerNoteSaving ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : (
+                <ShieldCheck className="h-4 w-4" />
+              )}
+              Salvar comentário
+            </button>
+          </div>
+        </div>
+
         <div className="rounded-[1.75rem] border border-gray-200 bg-gray-50/80 p-4">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
@@ -1002,6 +1054,53 @@ export default function BotChatsPage() {
       await showAlert('Link copiado', 'O link público foi copiado para a área de transferência.', 'success');
     } catch {
       await showAlert('Não foi possível copiar', generatedInviteUrl, 'info');
+    }
+  }
+
+  async function handleCopyConversationJson() {
+    if (!selectedConversation) return;
+
+    const serialized = JSON.stringify(selectedConversation, null, 2);
+
+    try {
+      await navigator.clipboard.writeText(serialized);
+      await showAlert(
+        'JSON copiado',
+        'O JSON completo da conversa foi copiado para a área de transferência.',
+        'success',
+      );
+    } catch {
+      await showAlert('Não foi possível copiar', serialized, 'info');
+    }
+  }
+
+  async function handleSaveDeveloperNote() {
+    if (!selectedConversation) return;
+
+    try {
+      setDeveloperNoteSaving(true);
+      const result = await saveBotConversationDeveloperNote(
+        baseUrl,
+        selectedConversation.conversation_id,
+        { note: developerNoteInput },
+      );
+      setSelectedConversation(result.conversation);
+      setDeveloperNoteInput(result.conversation.developer_note?.note || '');
+      await showAlert(
+        'Comentário salvo',
+        'A observação de diagnóstico foi persistida nesta conversa.',
+        'success',
+      );
+    } catch (saveError) {
+      await showAlert(
+        'Falha ao salvar comentário',
+        saveError instanceof Error
+          ? saveError.message
+          : 'Não foi possível salvar a observação do dev.',
+        'error',
+      );
+    } finally {
+      setDeveloperNoteSaving(false);
     }
   }
 
@@ -1381,14 +1480,25 @@ export default function BotChatsPage() {
               </div>
 
               {selectedConversation && (
-                <button
-                  type="button"
-                  onClick={() => handleDelete(selectedConversation.conversation_id)}
-                  className="inline-flex items-center justify-center gap-2 rounded-full border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Excluir conversa
-                </button>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleCopyConversationJson}
+                    className="inline-flex items-center justify-center gap-2 rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:border-brand-purple/25 hover:text-brand-purple"
+                  >
+                    <Copy className="h-4 w-4" />
+                    Copiar JSON
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(selectedConversation.conversation_id)}
+                    className="inline-flex items-center justify-center gap-2 rounded-full border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Excluir conversa
+                  </button>
+                </div>
               )}
             </div>
           </div>

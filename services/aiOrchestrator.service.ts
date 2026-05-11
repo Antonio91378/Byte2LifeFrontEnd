@@ -58,6 +58,10 @@ export interface BotConversation {
   missing_fields?: Array<{ path?: string; label?: string; reason?: string }>;
   blocker?: BotConversationBlocker | null;
   access?: BotConversationAccess | null;
+  developer_note?: {
+    note?: string | null;
+    updated_at?: string | null;
+  } | null;
   integration?: {
     backend_client_id?: string | null;
     backend_sale_id?: string | null;
@@ -270,6 +274,25 @@ export async function getBotConversation(baseUrl: string, conversationId: string
   return request<{ conversation: BotConversation }>(
     baseUrl,
     `/conversations/${encodeURIComponent(conversationId)}`,
+  );
+}
+
+export async function saveBotConversationDeveloperNote(
+  baseUrl: string,
+  conversationId: string,
+  payload: {
+    note: string;
+  },
+) {
+  return request<{ conversation: BotConversation }>(
+    baseUrl,
+    `/conversations/${encodeURIComponent(conversationId)}/developer-note`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        note: payload.note,
+      }),
+    },
   );
 }
 
