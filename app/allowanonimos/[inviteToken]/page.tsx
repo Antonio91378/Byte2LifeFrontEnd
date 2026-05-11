@@ -5,22 +5,22 @@ import {
     getPublicBotInvite,
     resolveAiOrchestratorAssetUrl,
     sendPublicBotInviteMessage,
+    uploadPublicBotInviteAttachment,
     type BotConversation,
-  type BotConversationAttachment,
+    type BotConversationAttachment,
     type BotConversationMessage,
     type BotPublicInvite,
-  uploadPublicBotInviteAttachment,
 } from "@/services/aiOrchestrator.service";
 import {
     Bot,
     Clock3,
     LoaderCircle,
-  Paperclip,
+    Paperclip,
     SendHorizontal,
     ShieldCheck,
     Sparkles,
     WifiOff,
-  X,
+    X,
 } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -108,7 +108,8 @@ function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error(`Não foi possível ler ${file.name}.`));
+    reader.onerror = () =>
+      reject(new Error(`Não foi possível ler ${file.name}.`));
     reader.readAsDataURL(file);
   });
 }
@@ -210,7 +211,9 @@ function ChatBubble({
                       alt={attachmentLabel(attachment)}
                       className="h-44 w-full object-cover"
                     />
-                    <div className={`px-3 py-2 text-xs font-semibold ${outbound ? "text-white/85" : "text-gray-700"}`}>
+                    <div
+                      className={`px-3 py-2 text-xs font-semibold ${outbound ? "text-white/85" : "text-gray-700"}`}
+                    >
                       {attachmentLabel(attachment)}
                     </div>
                   </a>
@@ -231,7 +234,9 @@ function ChatBubble({
                       <p className="truncate text-sm font-semibold">
                         {attachmentLabel(attachment)}
                       </p>
-                      <p className={`mt-1 text-xs ${outbound ? "text-white/65" : "text-gray-500"}`}>
+                      <p
+                        className={`mt-1 text-xs ${outbound ? "text-white/65" : "text-gray-500"}`}
+                      >
                         Arquivo de referência
                       </p>
                     </div>
@@ -255,7 +260,9 @@ export default function PublicInvitePage() {
   );
   const [invite, setInvite] = useState<BotPublicInvite | null>(null);
   const [message, setMessage] = useState("");
-  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [pendingAttachments, setPendingAttachments] = useState<
+    PendingAttachment[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -341,10 +348,14 @@ export default function PublicInvitePage() {
 
       for (const attachment of pendingAttachments) {
         const data = await readFileAsDataUrl(attachment.file);
-        const uploaded = await uploadPublicBotInviteAttachment(baseUrl, inviteToken, {
-          filename: attachment.file.name,
-          data,
-        });
+        const uploaded = await uploadPublicBotInviteAttachment(
+          baseUrl,
+          inviteToken,
+          {
+            filename: attachment.file.name,
+            data,
+          },
+        );
         uploadedAttachments.push(uploaded);
       }
 
@@ -517,7 +528,8 @@ export default function PublicInvitePage() {
                   Anexar referências
                 </p>
                 <p className="mt-1 text-sm text-gray-500">
-                  Envie até {MAX_PUBLIC_ATTACHMENTS} arquivo(s): imagens, STL, OBJ ou 3MF.
+                  Envie até {MAX_PUBLIC_ATTACHMENTS} arquivo(s): imagens, STL,
+                  OBJ ou 3MF.
                 </p>
               </div>
 
@@ -542,7 +554,9 @@ export default function PublicInvitePage() {
                     className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm"
                   >
                     <Paperclip className="h-4 w-4 text-brand-purple" />
-                    <span className="max-w-48 truncate">{attachment.file.name}</span>
+                    <span className="max-w-48 truncate">
+                      {attachment.file.name}
+                    </span>
                     <button
                       type="button"
                       onClick={() => removePendingAttachment(attachment.id)}
@@ -567,8 +581,7 @@ export default function PublicInvitePage() {
               type="button"
               onClick={handleSendMessage}
               disabled={
-                !canSend ||
-                (!message.trim() && pendingAttachments.length === 0)
+                !canSend || (!message.trim() && pendingAttachments.length === 0)
               }
               className="inline-flex items-center gap-2 rounded-2xl bg-brand-purple px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-purple-light disabled:cursor-not-allowed disabled:opacity-60"
             >

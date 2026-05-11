@@ -52,7 +52,9 @@ export interface BotConversation {
   created_at?: string | null;
   updated_at?: string | null;
   last_reply?: string | null;
-  last_image?: (BotConversationAttachment & { generated_at?: string | null }) | null;
+  last_image?:
+    | (BotConversationAttachment & { generated_at?: string | null })
+    | null;
   attachments?: BotConversationAttachment[];
   messages?: BotConversationMessage[];
   missing_fields?: Array<{ path?: string; label?: string; reason?: string }>;
@@ -161,13 +163,13 @@ export interface BotRuntimeStatus {
 }
 
 const DEFAULT_AI_ORCHESTRATOR_URL =
-  process.env.NEXT_PUBLIC_AI_ORCHESTRATOR_URL || 'http://localhost:4310';
+  process.env.NEXT_PUBLIC_AI_ORCHESTRATOR_URL || "http://localhost:4310";
 
-const STORAGE_KEY = 'byte2life.aiOrchestratorBaseUrl';
+const STORAGE_KEY = "byte2life.aiOrchestratorBaseUrl";
 
 function normalizeBaseUrl(value?: string | null) {
   const raw = (value || DEFAULT_AI_ORCHESTRATOR_URL).trim();
-  return raw.replace(/\/+$/, '');
+  return raw.replace(/\/+$/, "");
 }
 
 async function request<T>(
@@ -181,7 +183,7 @@ async function request<T>(
     response = await fetch(`${normalizeBaseUrl(baseUrl)}${path}`, {
       ...init,
       headers: {
-        Accept: 'application/json',
+        Accept: "application/json",
         ...init?.headers,
       },
     });
@@ -189,7 +191,7 @@ async function request<T>(
     throw new Error(
       error instanceof Error
         ? error.message
-        : 'Não foi possível conectar ao ai-orchestrator.',
+        : "Não foi possível conectar ao ai-orchestrator.",
     );
   }
 
@@ -202,7 +204,9 @@ async function request<T>(
 
   if (!response.ok) {
     throw new Error(
-      body?.message || body?.error || `Request failed with status ${response.status}`,
+      body?.message ||
+        body?.error ||
+        `Request failed with status ${response.status}`,
     );
   }
 
@@ -239,7 +243,9 @@ export function resolveAiOrchestratorAssetUrl(
   try {
     return new URL(assetUrl).toString();
   } catch {
-    const normalizedAssetUrl = assetUrl.startsWith('/') ? assetUrl : `/${assetUrl}`;
+    const normalizedAssetUrl = assetUrl.startsWith("/")
+      ? assetUrl
+      : `/${assetUrl}`;
     return `${normalizeBaseUrl(baseUrl)}${normalizedAssetUrl}`;
   }
 }
@@ -256,13 +262,14 @@ export async function listBotConversations(
   },
 ) {
   const params = new URLSearchParams();
-  if (filters?.search) params.set('search', filters.search);
-  if (filters?.state) params.set('state', filters.state);
-  if (filters?.channel) params.set('channel', filters.channel);
-  if (filters?.attachmentType) params.set('attachment_type', filters.attachmentType);
-  if (filters?.page) params.set('page', String(filters.page));
-  if (filters?.limit) params.set('limit', String(filters.limit));
-  const suffix = params.size ? `?${params.toString()}` : '';
+  if (filters?.search) params.set("search", filters.search);
+  if (filters?.state) params.set("state", filters.state);
+  if (filters?.channel) params.set("channel", filters.channel);
+  if (filters?.attachmentType)
+    params.set("attachment_type", filters.attachmentType);
+  if (filters?.page) params.set("page", String(filters.page));
+  if (filters?.limit) params.set("limit", String(filters.limit));
+  const suffix = params.size ? `?${params.toString()}` : "";
 
   return request<BotConversationListResponse>(
     baseUrl,
@@ -270,7 +277,10 @@ export async function listBotConversations(
   );
 }
 
-export async function getBotConversation(baseUrl: string, conversationId: string) {
+export async function getBotConversation(
+  baseUrl: string,
+  conversationId: string,
+) {
   return request<{ conversation: BotConversation }>(
     baseUrl,
     `/conversations/${encodeURIComponent(conversationId)}`,
@@ -288,7 +298,7 @@ export async function saveBotConversationDeveloperNote(
     baseUrl,
     `/conversations/${encodeURIComponent(conversationId)}/developer-note`,
     {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify({
         note: payload.note,
       }),
@@ -308,9 +318,9 @@ export async function simulateBotConversation(
 ) {
   return request<{
     conversation: BotConversation;
-    queue_stats?: BotRuntimeStatus['queue'];
-  }>(baseUrl, '/simulate-message', {
-    method: 'POST',
+    queue_stats?: BotRuntimeStatus["queue"];
+  }>(baseUrl, "/simulate-message", {
+    method: "POST",
     body: JSON.stringify({
       conversation_id: payload.conversationId,
       sender_id: payload.senderId,
@@ -322,7 +332,7 @@ export async function simulateBotConversation(
 }
 
 export async function getBotRuntimeStatus(baseUrl: string) {
-  return request<BotRuntimeStatus>(baseUrl, '/health');
+  return request<BotRuntimeStatus>(baseUrl, "/health");
 }
 
 export async function createPublicBotInvite(
@@ -337,8 +347,8 @@ export async function createPublicBotInvite(
   return request<{
     invite: BotPublicInvite;
     conversation: BotConversation;
-  }>(baseUrl, '/public/invites', {
-    method: 'POST',
+  }>(baseUrl, "/public/invites", {
+    method: "POST",
     body: JSON.stringify({
       frontend_base_url: payload.frontendBaseUrl,
       label: payload.label,
@@ -348,10 +358,7 @@ export async function createPublicBotInvite(
   });
 }
 
-export async function getPublicBotInvite(
-  baseUrl: string,
-  inviteToken: string,
-) {
+export async function getPublicBotInvite(baseUrl: string, inviteToken: string) {
   return request<{
     invite: BotPublicInvite;
     conversation: BotConversation;
@@ -370,7 +377,7 @@ export async function sendPublicBotInviteMessage(
     invite: BotPublicInvite;
     conversation: BotConversation;
   }>(baseUrl, `/public/invites/${encodeURIComponent(inviteToken)}/messages`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify({
       message: payload.message,
       attachments: payload.attachments,
@@ -390,7 +397,7 @@ export async function uploadPublicBotInviteAttachment(
     baseUrl,
     `/public/invites/${encodeURIComponent(inviteToken)}/upload`,
     {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify({
         filename: payload.filename,
         data: payload.data,
@@ -406,6 +413,6 @@ export async function deleteBotConversation(
   return request<void>(
     baseUrl,
     `/conversations/${encodeURIComponent(conversationId)}`,
-    { method: 'DELETE' },
+    { method: "DELETE" },
   );
 }
