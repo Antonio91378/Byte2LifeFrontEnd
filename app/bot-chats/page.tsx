@@ -17,10 +17,14 @@ import {
     type BotConversationBlocker,
     type BotConversationMessage,
     type BotConversationSummary,
+    type BotImagePromptTrace,
+    type BotLlmPromptTrace,
     type BotRuntimeStatus,
 } from "@/services/aiOrchestrator.service";
 import {
     Bot,
+    ChevronDown,
+    ChevronUp,
     Clock3,
     Copy,
     Download,
@@ -105,6 +109,51 @@ function formatChannelLabel(value?: string | null) {
 function formatAttachmentTypeLabel(value?: string | null) {
   if (!value) return "—";
   return ATTACHMENT_TYPE_LABELS[value] || value.replaceAll("_", " ");
+}
+
+function formatPromptTraceRole(value?: string | null) {
+  switch (value) {
+    case "system":
+      return "System prompt";
+    case "assistant":
+      return "Histórico do bot";
+    case "user":
+      return "Histórico / input do cliente";
+    default:
+      return value || "Mensagem";
+  }
+}
+
+function formatPromptTraceStatus(value?: string | null) {
+  switch (value) {
+    case "success":
+      return "Sucesso";
+    case "unavailable":
+      return "Indisponível";
+    case "error":
+      return "Erro";
+    default:
+      return value || "—";
+  }
+}
+
+function formatPromptReferenceMode(value?: string | null) {
+  switch (value) {
+    case "reference_image":
+      return "Com referência visual";
+    case "text_only":
+      return "Só descrição textual";
+    default:
+      return value || "—";
+  }
+}
+
+function buildLlmTraceClipboardText(trace: BotLlmPromptTrace) {
+  return JSON.stringify(trace, null, 2);
+}
+
+function buildImageTraceClipboardText(trace: BotImagePromptTrace) {
+  return JSON.stringify(trace, null, 2);
 }
 
 function formatBlockerOwner(value?: string | null) {
@@ -363,6 +412,7 @@ export default function BotChatsPage() {
   );
   const [developerNoteInput, setDeveloperNoteInput] = useState("");
   const [developerNoteSaving, setDeveloperNoteSaving] = useState(false);
+  const [promptInspectorExpanded, setPromptInspectorExpanded] = useState(false);
   const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
@@ -518,6 +568,10 @@ export default function BotChatsPage() {
     };
   }, [baseUrl, refreshTick, selectedConversationId]);
 
+  useEffect(() => {
+    setPromptInspectorExpanded(false);
+  }, [selectedConversationId]);
+
   const availableChannels = [
     ...new Set([
       ...Object.keys(CHANNEL_LABELS),
@@ -537,6 +591,9 @@ export default function BotChatsPage() {
   const allAttachments = selectedConversation
     ? getConversationAttachments(baseUrl, selectedConversation)
     : [];
+  const llmPromptTraces = selectedConversation?.prompt_traces?.llm || [];
+  const imagePromptTraces =
+    selectedConversation?.prompt_traces?.image_generation || [];
   const runtimeIsOnline =
     !runtimeError && runtimeStatus?.heartbeat?.status === "online";
   const trainingTargetId = selectedConversationId || trainingConversationId;
@@ -874,6 +931,323 @@ export default function BotChatsPage() {
         </div>
 
         <div className="rounded-[1.75rem] border border-gray-200 bg-white p-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h3 className="text-lg font-bold text-gray-900">
+                Inspector de prompts
+              </h3>
+              <p className="text-sm text-gray-500">
+                Abra uma visão organizada do que foi enviado ao LLM e do texto
+                que alimentou a geração da imagem no fluxo visual.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-brand-purple/15 bg-brand-purple/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-brand-purple">
+                LLM {llmPromptTraces.length}
+              </span>
+              <span className="rounded-full border border-brand-orange/15 bg-brand-orange/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-brand-orange">
+                Imagem {imagePromptTraces.length}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setPromptInspectorExpanded((current) => !current)
+                }
+                className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 transition hover:border-brand-purple/30 hover:text-brand-purple"
+              >
+                {promptInspectorExpanded ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+                {promptInspectorExpanded
+                  ? "Ocultar prompts"
+                  : "Visualizar prompts"}
+              </button>
+            </div>
+          </div>
+
+          {promptInspectorExpanded ? (
+            <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+              <div className="rounded-3xl border border-gray-200 bg-gray-50/80 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-bold uppercase tracking-[0.16em] text-gray-900">
+                      Chamadas ao LLM
+                    </h4>
+                    <p className="text-sm text-gray-500">
+                      Prompt do sistema, histórico enviado e saída estruturada.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
+                    {llmPromptTraces.length} registro(s)
+                  </span>
+                </div>
+
+                {llmPromptTraces.length === 0 ? (
+                  <div className="mt-4 rounded-3xl border border-dashed border-gray-300 bg-white px-4 py-8 text-center text-sm text-gray-500">
+                    Nenhum trace do LLM foi persistido nesta conversa ainda.
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-4">
+                    {[...llmPromptTraces].reverse().map((trace, index) => (
+                      <div
+                        key={trace.trace_id || `${trace.at || "llm"}-${index}`}
+                        className="rounded-[1.5rem] border border-gray-200 bg-white p-4 shadow-sm"
+                      >
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
+                            <span className="rounded-full border border-brand-purple/15 bg-brand-purple/8 px-2.5 py-1 text-brand-purple">
+                              {trace.provider || "LLM"}
+                            </span>
+                            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1">
+                              {trace.model || "modelo não informado"}
+                            </span>
+                            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1">
+                              {formatDateTime(trace.at)}
+                            </span>
+                            {trace.fallback_used && (
+                              <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-700">
+                                fallback
+                              </span>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleCopyStructuredTrace(
+                                "trace do LLM",
+                                buildLlmTraceClipboardText(trace),
+                              )
+                            }
+                            className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-gray-600 transition hover:border-brand-purple/30 hover:text-brand-purple"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                            Copiar
+                          </button>
+                        </div>
+
+                        <div className="mt-4 space-y-3">
+                          {(trace.request_messages || []).map(
+                            (message, messageIndex) => (
+                              <div
+                                key={`${trace.trace_id || index}-${message.role || "role"}-${messageIndex}`}
+                                className="rounded-3xl border border-gray-200 bg-gray-50 px-4 py-3"
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
+                                  <span>
+                                    {formatPromptTraceRole(message.role)}
+                                  </span>
+                                  {typeof message.image_count === "number" &&
+                                    message.image_count > 0 && (
+                                      <span>
+                                        {message.image_count} imagem(ns)
+                                      </span>
+                                    )}
+                                </div>
+                                <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-gray-700">
+                                  {message.content || "—"}
+                                </pre>
+                              </div>
+                            ),
+                          )}
+                        </div>
+
+                        <div className="mt-4 rounded-3xl border border-gray-200 bg-gray-50 px-4 py-4 text-sm text-gray-700">
+                          <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
+                            <span className="rounded-full border border-gray-200 bg-white px-2.5 py-1">
+                              intenção {trace.output?.intent || "—"}
+                            </span>
+                            <span className="rounded-full border border-gray-200 bg-white px-2.5 py-1">
+                              gerar imagem{" "}
+                              {trace.output?.generate_image ? "sim" : "não"}
+                            </span>
+                            <span className="rounded-full border border-gray-200 bg-white px-2.5 py-1">
+                              atendimento humano{" "}
+                              {trace.output?.needs_human ? "sim" : "não"}
+                            </span>
+                          </div>
+
+                          <div className="mt-3 space-y-3">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
+                                Reply estruturado
+                              </p>
+                              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-700">
+                                {trace.output?.reply || "—"}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
+                                Image prompt retornado
+                              </p>
+                              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-gray-200 bg-white px-3 py-3 text-xs leading-relaxed text-gray-700">
+                                {trace.output?.image_prompt || "—"}
+                              </pre>
+                            </div>
+
+                            {trace.error && (
+                              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-700">
+                                {trace.error}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-3xl border border-gray-200 bg-gray-50/80 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-bold uppercase tracking-[0.16em] text-gray-900">
+                      Geração de imagem
+                    </h4>
+                    <p className="text-sm text-gray-500">
+                      Texto que foi para a geração visual e o modo usado na
+                      prévia.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
+                    {imagePromptTraces.length} registro(s)
+                  </span>
+                </div>
+
+                {imagePromptTraces.length === 0 ? (
+                  <div className="mt-4 rounded-3xl border border-dashed border-gray-300 bg-white px-4 py-8 text-center text-sm text-gray-500">
+                    Nenhuma tentativa de geração de imagem foi registrada nesta
+                    conversa.
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-4">
+                    {[...imagePromptTraces].reverse().map((trace, index) => {
+                      const outputUrl = resolveAiOrchestratorAssetUrl(
+                        baseUrl,
+                        trace.output_url,
+                      );
+
+                      return (
+                        <div
+                          key={
+                            trace.trace_id || `${trace.at || "img"}-${index}`
+                          }
+                          className="rounded-[1.5rem] border border-gray-200 bg-white p-4 shadow-sm"
+                        >
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
+                              <span className="rounded-full border border-brand-orange/15 bg-brand-orange/10 px-2.5 py-1 text-brand-orange">
+                                {trace.provider ||
+                                  trace.requested_provider ||
+                                  "imagem"}
+                              </span>
+                              <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1">
+                                {formatPromptTraceStatus(trace.status)}
+                              </span>
+                              <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1">
+                                {formatPromptReferenceMode(
+                                  trace.reference_mode,
+                                )}
+                              </span>
+                              <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1">
+                                {formatDateTime(trace.at)}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleCopyStructuredTrace(
+                                  "trace de imagem",
+                                  buildImageTraceClipboardText(trace),
+                                )
+                              }
+                              className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-gray-600 transition hover:border-brand-orange/30 hover:text-brand-orange"
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                              Copiar
+                            </button>
+                          </div>
+
+                          <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
+                            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1">
+                              workflow {trace.workflow_type || "—"}
+                            </span>
+                            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1">
+                              fallback {trace.fallback_from || "—"}
+                            </span>
+                            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1">
+                              refs {trace.reference_image_count || 0}
+                            </span>
+                          </div>
+
+                          <div className="mt-4 space-y-3">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
+                                Prompt enviado ao fluxo visual
+                              </p>
+                              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-gray-200 bg-gray-50 px-3 py-3 text-xs leading-relaxed text-gray-700">
+                                {trace.prompt_text || "—"}
+                              </pre>
+                            </div>
+
+                            <div className="grid gap-3 text-sm text-gray-600 sm:grid-cols-2">
+                              <div>
+                                <span className="font-semibold text-gray-800">
+                                  Arquivo de referência
+                                </span>
+                                <p className="mt-1">
+                                  {trace.reference_filename || "Sem arquivo"}
+                                </p>
+                              </div>
+                              <div>
+                                <span className="font-semibold text-gray-800">
+                                  Prompt ID
+                                </span>
+                                <p className="mt-1">{trace.prompt_id || "—"}</p>
+                              </div>
+                            </div>
+
+                            {trace.error && (
+                              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-700">
+                                {trace.error}
+                              </div>
+                            )}
+
+                            {outputUrl && (
+                              <a
+                                href={outputUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-2 text-sm font-semibold text-brand-purple transition hover:text-brand-purple-light"
+                              >
+                                <ExternalLink className="h-4 w-4" />
+                                Abrir última saída dessa geração
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 rounded-3xl border border-dashed border-gray-300 bg-gray-50 px-4 py-5 text-sm text-gray-500">
+              Use o botão acima para abrir a trilha organizada dos prompts. O
+              fluxo agora separa claramente o que foi para o LLM e o que foi
+              para a geração visual, inclusive quando a prévia foi feita só por
+              descrição textual.
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-[1.75rem] border border-gray-200 bg-white p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h3 className="text-lg font-bold text-gray-900">
@@ -1184,6 +1558,19 @@ export default function BotChatsPage() {
       await showAlert(
         "JSON copiado",
         "O JSON completo da conversa foi copiado para a área de transferência.",
+        "success",
+      );
+    } catch {
+      await showAlert("Não foi possível copiar", serialized, "info");
+    }
+  }
+
+  async function handleCopyStructuredTrace(label: string, serialized: string) {
+    try {
+      await navigator.clipboard.writeText(serialized);
+      await showAlert(
+        "Trace copiado",
+        `O ${label} foi copiado para a área de transferência.`,
         "success",
       );
     } catch {

@@ -51,6 +51,53 @@ export interface BotConversationMessage {
   meta?: Record<string, unknown> | null;
 }
 
+export interface BotPromptTraceMessage {
+  role?: string | null;
+  content?: string | null;
+  image_count?: number | null;
+}
+
+export interface BotLlmPromptTrace {
+  trace_id?: string;
+  at?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  num_ctx?: number | null;
+  source_message_id?: string | null;
+  conversation_id?: string | null;
+  request_messages?: BotPromptTraceMessage[];
+  output?: {
+    reply?: string | null;
+    intent?: string | null;
+    generate_image?: boolean;
+    image_prompt?: string | null;
+    needs_human?: boolean;
+  } | null;
+  error?: string | null;
+  fallback_used?: boolean;
+}
+
+export interface BotImagePromptTrace {
+  trace_id?: string;
+  at?: string | null;
+  provider?: string | null;
+  workflow_type?: string | null;
+  workflow_path?: string | null;
+  requested_provider?: string | null;
+  source_message_id?: string | null;
+  conversation_id?: string | null;
+  prompt_text?: string | null;
+  reference_mode?: string | null;
+  reference_image_count?: number | null;
+  reference_filename?: string | null;
+  fallback_from?: string | null;
+  prompt_id?: string | null;
+  output_url?: string | null;
+  status?: string | null;
+  error?: string | null;
+  reason?: string | null;
+}
+
 export interface BotConversation {
   conversation_id: string;
   state: string;
@@ -75,6 +122,10 @@ export interface BotConversation {
   integration?: {
     backend_client_id?: string | null;
     backend_sale_id?: string | null;
+  } | null;
+  prompt_traces?: {
+    llm?: BotLlmPromptTrace[];
+    image_generation?: BotImagePromptTrace[];
   } | null;
   extracted_data?: {
     client?: {
