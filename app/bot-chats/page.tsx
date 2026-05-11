@@ -446,13 +446,15 @@ export default function BotChatsPage() {
       return;
     }
 
+    const conversationId = selectedConversationId;
+
     let ignore = false;
 
     async function loadConversation() {
       setDetailLoading(true);
 
       try {
-        const result = await getBotConversation(baseUrl, selectedConversationId);
+        const result = await getBotConversation(baseUrl, conversationId);
         if (ignore) return;
         setSelectedConversation(result.conversation);
       } catch (loadError) {
