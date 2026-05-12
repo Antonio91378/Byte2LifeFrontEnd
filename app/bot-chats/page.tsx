@@ -1,17 +1,19 @@
 "use client";
 
+import LocalInviteLauncherCard from "@/components/LocalInviteLauncherCard";
 import { useDialog } from "@/context/DialogContext";
 import {
     createPublicBotInvite,
     deleteBotConversation,
     getBotConversation,
+  getBotTrainingReviewPrompt,
     getBotRuntimeStatus,
     getStoredAiOrchestratorBaseUrl,
     listBotConversations,
     resolveAiOrchestratorAssetUrl,
     saveAiOrchestratorBaseUrl,
     saveBotConversationDeveloperNote,
-    simulateBotConversation,
+  setBotConversationTrainingVerification,
     type BotConversation,
     type BotConversationAttachment,
     type BotConversationBlocker,
@@ -20,6 +22,7 @@ import {
     type BotImagePromptTrace,
     type BotLlmPromptTrace,
     type BotRuntimeStatus,
+  type BotTrainingVerification,
 } from "@/services/aiOrchestrator.service";
 import {
     Bot,
@@ -35,10 +38,8 @@ import {
     MessageSquareText,
     Paperclip,
     Phone,
-    PlayCircle,
     RefreshCcw,
     Search,
-    SendHorizontal,
     Server,
     ShieldCheck,
     Sparkles,
@@ -156,6 +157,39 @@ function buildImageTraceClipboardText(trace: BotImagePromptTrace) {
   return JSON.stringify(trace, null, 2);
 }
 
+function isConversationVerified(
+  trainingVerification?: BotTrainingVerification | null,
+) {
+  return trainingVerification?.verified !== false;
+}
+
+function getTrainingBadgeTone(verified: boolean, selected = false) {
+  if (verified) {
+    return selected
+      ? "border-emerald-200/35 bg-emerald-500/15 text-emerald-50"
+      : "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  return selected
+    ? "border-amber-200/35 bg-amber-500/15 text-amber-50"
+    : "border-amber-200 bg-amber-50 text-amber-700";
+}
+
+function getTrainingBadgeLabel(verified: boolean) {
+  return verified ? "Verificada" : "Pendente de treino";
+}
+
+async function copyTextToClipboard(value: string) {
+  if (
+    !globalThis.navigator?.clipboard ||
+    typeof globalThis.navigator.clipboard.writeText !== "function"
+  ) {
+    throw new Error("Clipboard API indisponivel neste navegador.");
+  }
+
+  await globalThis.navigator.clipboard.writeText(value);
+}
+
 function formatBlockerOwner(value?: string | null) {
   if (!value) return "—";
 
@@ -170,8 +204,32 @@ function formatBlockerOwner(value?: string | null) {
   return labels[value] || value;
 }
 
-function buildTrainingConversationId() {
-  return `dashboard-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+function normalizeBaseUrl(value?: string | null) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
+function resolveInviteToken(url?: string | null, token?: string | null) {
+  const normalizedToken = String(token || "").trim();
+  if (normalizedToken) return normalizedToken;
+
+  const normalizedUrl = String(url || "").trim();
+  const match = /\/allowanonimos\/([^?]+)/.exec(normalizedUrl);
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
+function buildFrontendInviteUrl(inviteToken: string, orchestratorBaseUrl: string) {
+  if (globalThis.window === undefined) return null;
+
+  const url = new URL(
+    `/allowanonimos/${encodeURIComponent(inviteToken)}`,
+    globalThis.window.location.origin,
+  );
+  const normalizedOrchestratorBaseUrl = normalizeBaseUrl(orchestratorBaseUrl);
+  if (normalizedOrchestratorBaseUrl) {
+    url.searchParams.set("orchestrator", normalizedOrchestratorBaseUrl);
+  }
+
+  return url.toString();
 }
 
 function getBlockerTone(blocker?: BotConversationBlocker | null) {
@@ -377,6 +435,8 @@ export default function BotChatsPage() {
   const [stateFilter, setStateFilter] = useState("all");
   const [channelFilter, setChannelFilter] = useState("all");
   const [attachmentTypeFilter, setAttachmentTypeFilter] = useState("all");
+  const [trainingVerificationFilter, setTrainingVerificationFilter] =
+    useState("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [conversations, setConversations] = useState<BotConversationSummary[]>(
     [],
@@ -399,21 +459,47 @@ export default function BotChatsPage() {
   );
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [runtimeLoading, setRuntimeLoading] = useState(true);
-  const [trainingConversationId, setTrainingConversationId] = useState(() =>
-    buildTrainingConversationId(),
-  );
-  const [trainingMessage, setTrainingMessage] = useState("");
-  const [trainingLoading, setTrainingLoading] = useState(false);
   const [inviteLabel, setInviteLabel] = useState("");
   const [inviteHours, setInviteHours] = useState("72");
   const [inviteLoading, setInviteLoading] = useState(false);
-  const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(
-    null,
-  );
+  const [generatedInviteUrl, setGeneratedInviteUrl] = useState<
+    string | null
+  >(null);
+  const [trainingPromptLoading, setTrainingPromptLoading] = useState(false);
+  const [trainingVerificationSavingId, setTrainingVerificationSavingId] =
+    useState<string | null>(null);
   const [developerNoteInput, setDeveloperNoteInput] = useState("");
   const [developerNoteSaving, setDeveloperNoteSaving] = useState(false);
   const [promptInspectorExpanded, setPromptInspectorExpanded] = useState(false);
   const deferredSearch = useDeferredValue(search);
+
+  function syncConversationIntoDashboard(conversation: BotConversation) {
+    setSelectedConversation((current) =>
+      current?.conversation_id === conversation.conversation_id
+        ? conversation
+        : current,
+    );
+
+    setConversations((current) =>
+      current.map((item) =>
+        item.conversation_id === conversation.conversation_id
+          ? {
+              ...item,
+              state: conversation.state || item.state,
+              channel: conversation.channel || item.channel,
+              updated_at: conversation.updated_at || item.updated_at,
+              public_invite:
+                conversation.access?.public_invite || item.public_invite || null,
+              access_mode: conversation.access?.mode || item.access_mode || null,
+              training_verification:
+                conversation.training_verification ||
+                item.training_verification ||
+                null,
+            }
+          : item,
+      ),
+    );
+  }
 
   useEffect(() => {
     setCurrentPage(1);
@@ -423,6 +509,7 @@ export default function BotChatsPage() {
     channelFilter,
     deferredSearch,
     stateFilter,
+    trainingVerificationFilter,
   ]);
 
   useEffect(() => {
@@ -460,6 +547,10 @@ export default function BotChatsPage() {
           channel: channelFilter === "all" ? undefined : channelFilter,
           attachmentType:
             attachmentTypeFilter === "all" ? undefined : attachmentTypeFilter,
+          trainingVerification:
+            trainingVerificationFilter === "all"
+              ? undefined
+              : trainingVerificationFilter,
           page: currentPage,
           limit: PAGE_SIZE,
         });
@@ -503,6 +594,7 @@ export default function BotChatsPage() {
     deferredSearch,
     refreshTick,
     stateFilter,
+    trainingVerificationFilter,
   ]);
 
   useEffect(() => {
@@ -596,7 +688,12 @@ export default function BotChatsPage() {
     selectedConversation?.prompt_traces?.image_generation || [];
   const runtimeIsOnline =
     !runtimeError && runtimeStatus?.heartbeat?.status === "online";
-  const trainingTargetId = selectedConversationId || trainingConversationId;
+  const filterCardClass =
+    "flex min-h-[9.25rem] min-w-0 flex-col rounded-3xl border border-gray-200 bg-gray-50/80 p-4 text-sm text-gray-700";
+  const filterLabelClass =
+    "mb-3 flex min-h-[2.75rem] items-start gap-2 text-xs font-semibold uppercase tracking-[0.18em] leading-relaxed text-gray-500";
+  const filterControlClass =
+    "mt-auto w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 shadow-sm outline-none transition focus:border-brand-purple focus:ring-2 focus:ring-brand-purple/20";
 
   let listContent: React.ReactNode;
   if (listLoading) {
@@ -618,16 +715,15 @@ export default function BotChatsPage() {
         {conversations.map((conversation) => {
           const selected =
             conversation.conversation_id === selectedConversationId;
+          const verified = isConversationVerified(
+            conversation.training_verification,
+          );
+          const trainingBadgeDisabled =
+            trainingVerificationSavingId === conversation.conversation_id;
 
           return (
-            <button
+            <div
               key={conversation.conversation_id}
-              type="button"
-              onClick={() => {
-                startTransition(() => {
-                  setSelectedConversationId(conversation.conversation_id);
-                });
-              }}
               className={`w-full rounded-3xl border px-4 py-4 text-left transition-all duration-300 ${
                 selected
                   ? "border-brand-purple/30 bg-brand-purple text-white shadow-[0_20px_40px_-28px_rgba(46,2,73,0.85)]"
@@ -635,98 +731,131 @@ export default function BotChatsPage() {
               }`}
             >
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-[0.14em] ${selected ? "bg-white/14 text-white" : "bg-brand-purple/8 text-brand-purple"}`}
-                    >
-                      {formatStateLabel(conversation.state)}
-                    </span>
-                    {conversation.has_generated_image && (
-                      <span
-                        className={`rounded-full px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-[0.14em] ${selected ? "bg-brand-orange/20 text-brand-orange" : "bg-brand-orange/12 text-brand-orange"}`}
-                      >
-                        Prévia
-                      </span>
-                    )}
-                  </div>
-
-                  <p
-                    className={`mt-3 truncate text-sm font-semibold ${selected ? "text-white" : "text-gray-900"}`}
+                <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-[0.14em] ${selected ? "bg-white/14 text-white" : "bg-brand-purple/8 text-brand-purple"}`}
                   >
-                    {conversation.client_name || conversation.conversation_id}
-                  </p>
-                  <p
-                    className={`mt-1 line-clamp-2 text-sm ${selected ? "text-white/72" : "text-gray-500"}`}
-                  >
-                    {conversation.order_description ||
-                      conversation.last_message_preview}
-                  </p>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
+                    {formatStateLabel(conversation.state)}
+                  </span>
+                  {conversation.has_generated_image && (
                     <span
-                      className={`rounded-full border px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.14em] ${selected ? "border-white/15 bg-white/10 text-white/85" : getBlockerTone(conversation.blocker)}`}
+                      className={`rounded-full px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-[0.14em] ${selected ? "bg-brand-orange/20 text-brand-orange" : "bg-brand-orange/12 text-brand-orange"}`}
                     >
-                      {conversation.blocker?.label || "Sem bloqueio"}
+                      Prévia
                     </span>
-                    {conversation.public_invite?.enabled && (
-                      <span
-                        className={`rounded-full px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.14em] ${selected ? "bg-brand-orange/18 text-brand-orange" : "bg-brand-orange/12 text-brand-orange"}`}
-                      >
-                        Link público
-                      </span>
-                    )}
-                  </div>
-
-                  {conversation.attachment_types.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {conversation.attachment_types
-                        .slice(0, 3)
-                        .map((attachmentType) => (
-                          <span
-                            key={`${conversation.conversation_id}-${attachmentType}`}
-                            className={`rounded-full px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.14em] ${selected ? "bg-white/10 text-white/80" : "bg-gray-100 text-gray-600"}`}
-                          >
-                            {formatAttachmentTypeLabel(attachmentType)}
-                          </span>
-                        ))}
-                    </div>
                   )}
                 </div>
 
-                <div
-                  className={`text-right text-xs ${selected ? "text-white/72" : "text-gray-500"}`}
+                <button
+                  type="button"
+                  disabled={trainingBadgeDisabled}
+                  onClick={() =>
+                    void handleToggleTrainingVerification(
+                      conversation.conversation_id,
+                      verified,
+                    )
+                  }
+                  className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-[0.14em] transition ${getTrainingBadgeTone(verified, selected)} disabled:cursor-not-allowed disabled:opacity-70`}
                 >
-                  <p>{formatChannelLabel(conversation.channel)}</p>
-                  <p className="mt-1">
-                    {formatDateTime(conversation.updated_at)}
-                  </p>
-                </div>
+                  {trainingBadgeDisabled ? (
+                    <LoaderCircle className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="h-3 w-3" />
+                  )}
+                  {getTrainingBadgeLabel(verified)}
+                </button>
               </div>
 
-              <div
-                className={`mt-4 grid grid-cols-3 gap-2 text-xs ${selected ? "text-white/70" : "text-gray-500"}`}
+              <button
+                type="button"
+                onClick={() => {
+                  startTransition(() => {
+                    setSelectedConversationId(conversation.conversation_id);
+                  });
+                }}
+                className="mt-3 w-full min-w-0 text-left"
               >
-                <div className="rounded-2xl border border-current/10 px-3 py-2">
-                  <p className="font-semibold">Mensagens</p>
-                  <p className="mt-1 text-sm font-bold">
-                    {conversation.message_count}
-                  </p>
+                <p
+                  className={`truncate text-sm font-semibold ${selected ? "text-white" : "text-gray-900"}`}
+                >
+                  {conversation.client_name || conversation.conversation_id}
+                </p>
+                <p
+                  className={`mt-1 line-clamp-2 text-sm ${selected ? "text-white/72" : "text-gray-500"}`}
+                >
+                  {conversation.order_description ||
+                    conversation.last_message_preview}
+                </p>
+
+                <div
+                  className={`mt-3 flex flex-wrap items-center gap-2 text-xs ${selected ? "text-white/72" : "text-gray-500"}`}
+                >
+                  <span
+                    className={`rounded-full border px-2.5 py-1 font-semibold uppercase tracking-[0.14em] ${selected ? "border-white/15 bg-white/10 text-white/85" : "border-gray-200 bg-gray-50 text-gray-600"}`}
+                  >
+                    {formatChannelLabel(conversation.channel)}
+                  </span>
+                  <span
+                    className={`rounded-full border px-2.5 py-1 font-semibold ${selected ? "border-white/15 bg-white/10 text-white/80" : "border-gray-200 bg-gray-50 text-gray-500"}`}
+                  >
+                    {formatDateTime(conversation.updated_at)}
+                  </span>
                 </div>
-                <div className="rounded-2xl border border-current/10 px-3 py-2">
-                  <p className="font-semibold">Anexos</p>
-                  <p className="mt-1 text-sm font-bold">
-                    {conversation.attachment_count}
-                  </p>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span
+                    className={`rounded-full border px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.14em] ${selected ? "border-white/15 bg-white/10 text-white/85" : getBlockerTone(conversation.blocker)}`}
+                  >
+                    {conversation.blocker?.label || "Sem bloqueio"}
+                  </span>
+                  {conversation.public_invite?.enabled && (
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.14em] ${selected ? "bg-brand-orange/18 text-brand-orange" : "bg-brand-orange/12 text-brand-orange"}`}
+                    >
+                      Link público
+                    </span>
+                  )}
                 </div>
-                <div className="rounded-2xl border border-current/10 px-3 py-2">
-                  <p className="font-semibold">Pendências</p>
-                  <p className="mt-1 text-sm font-bold">
-                    {conversation.missing_fields_count}
-                  </p>
+
+                {conversation.attachment_types.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {conversation.attachment_types
+                      .slice(0, 3)
+                      .map((attachmentType) => (
+                        <span
+                          key={`${conversation.conversation_id}-${attachmentType}`}
+                          className={`rounded-full px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.14em] ${selected ? "bg-white/10 text-white/80" : "bg-gray-100 text-gray-600"}`}
+                        >
+                          {formatAttachmentTypeLabel(attachmentType)}
+                        </span>
+                      ))}
+                  </div>
+                )}
+
+                <div
+                  className={`mt-4 grid grid-cols-3 gap-2 text-xs ${selected ? "text-white/70" : "text-gray-500"}`}
+                >
+                  <div className="rounded-2xl border border-current/10 px-3 py-2">
+                    <p className="font-semibold">Mensagens</p>
+                    <p className="mt-1 text-sm font-bold">
+                      {conversation.message_count}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-current/10 px-3 py-2">
+                    <p className="font-semibold">Anexos</p>
+                    <p className="mt-1 text-sm font-bold">
+                      {conversation.attachment_count}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-current/10 px-3 py-2">
+                    <p className="font-semibold">Pendências</p>
+                    <p className="mt-1 text-sm font-bold">
+                      {conversation.missing_fields_count}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
+            </div>
           );
         })}
       </div>
@@ -1459,73 +1588,47 @@ export default function BotChatsPage() {
     );
   }
 
-  async function handleTrainingSend() {
-    const trimmedMessage = trainingMessage.trim();
-    if (!trimmedMessage) {
-      await showAlert(
-        "Mensagem vazia",
-        "Digite a mensagem do cliente para iniciar ou continuar o treinamento.",
-        "warning",
-      );
-      return;
-    }
-
-    const targetConversationId =
-      selectedConversationId || trainingConversationId;
-
-    try {
-      setTrainingLoading(true);
-      const result = await simulateBotConversation(baseUrl, {
-        conversationId: targetConversationId,
-        message: trimmedMessage,
-        senderId: "dashboard-trainer",
-        channel: "manual_dashboard",
-      });
-
-      setSelectedConversation(result.conversation);
-      startTransition(() => {
-        setCurrentPage(1);
-        setSelectedConversationId(result.conversation.conversation_id);
-      });
-      setTrainingMessage("");
-      setTrainingConversationId(buildTrainingConversationId());
-      setRefreshTick((value) => value + 1);
-    } catch (sendError) {
-      await showAlert(
-        "Falha no treino",
-        sendError instanceof Error
-          ? sendError.message
-          : "Não foi possível enviar a mensagem de treino.",
-        "error",
-      );
-    } finally {
-      setTrainingLoading(false);
-    }
-  }
-
   async function handleGenerateInvite() {
+    const pendingTab =
+      globalThis.window === undefined
+        ? null
+        : globalThis.window.open("about:blank", "_blank");
+
     try {
       setInviteLoading(true);
       const result = await createPublicBotInvite(baseUrl, {
-        frontendBaseUrl:
-          typeof window !== "undefined" ? window.location.origin : undefined,
+        orchestratorBaseUrl: baseUrl,
         label: inviteLabel.trim() || undefined,
         expiresInHours: Number(inviteHours) || undefined,
       });
+      const inviteToken = resolveInviteToken(
+        result.invite.url,
+        result.invite.token,
+      );
+      const inviteUrl = inviteToken
+        ? buildFrontendInviteUrl(inviteToken, baseUrl)
+        : null;
 
-      setGeneratedInviteUrl(result.invite.url || null);
+      setGeneratedInviteUrl(inviteUrl);
       setSelectedConversation(result.conversation);
       startTransition(() => {
         setCurrentPage(1);
         setSelectedConversationId(result.conversation.conversation_id);
       });
       setRefreshTick((value) => value + 1);
+
+      if (pendingTab && inviteUrl) {
+        pendingTab.location.href = inviteUrl;
+      } else if (pendingTab) {
+        pendingTab.close();
+      }
     } catch (inviteError) {
+      pendingTab?.close();
       await showAlert(
-        "Falha ao gerar link",
+        "Falha ao abrir conversa publica",
         inviteError instanceof Error
           ? inviteError.message
-          : "Não foi possível gerar o link público.",
+          : "Não foi possivel preparar a conversa publica.",
         "error",
       );
     } finally {
@@ -1537,14 +1640,80 @@ export default function BotChatsPage() {
     if (!generatedInviteUrl) return;
 
     try {
-      await navigator.clipboard.writeText(generatedInviteUrl);
+      await copyTextToClipboard(generatedInviteUrl);
       await showAlert(
         "Link copiado",
-        "O link público foi copiado para a área de transferência.",
+        "O link da conversa foi copiado para a area de transferencia.",
         "success",
       );
     } catch {
-      await showAlert("Não foi possível copiar", generatedInviteUrl, "info");
+      await showAlert(
+        "Nao foi possivel copiar",
+        generatedInviteUrl,
+        "info",
+      );
+    }
+  }
+
+  async function handleCopyTrainingPrompt() {
+    try {
+      setTrainingPromptLoading(true);
+      const result = await getBotTrainingReviewPrompt(baseUrl);
+
+      if (result.total_conversations === 0) {
+        await showAlert(
+          "Nada pendente",
+          "Todas as conversas estao verificadas no momento. Desative o selo de alguma conversa para inclui-la no proximo prompt.",
+          "info",
+        );
+        return;
+      }
+
+      await copyTextToClipboard(result.prompt);
+      await showAlert(
+        "Super prompt copiado",
+        `${result.total_conversations} conversa(s) nao verificada(s) foram copiadas para a area de transferencia em um unico prompt de treinamento.`,
+        "success",
+      );
+    } catch (promptError) {
+      await showAlert(
+        "Falha ao gerar prompt",
+        promptError instanceof Error
+          ? promptError.message
+          : "Nao foi possivel montar o prompt de treinamento.",
+        "error",
+      );
+    } finally {
+      setTrainingPromptLoading(false);
+    }
+  }
+
+  async function handleToggleTrainingVerification(
+    conversationId: string,
+    currentVerified: boolean,
+  ) {
+    try {
+      setTrainingVerificationSavingId(conversationId);
+      const result = await setBotConversationTrainingVerification(
+        baseUrl,
+        conversationId,
+        {
+          verified: !currentVerified,
+        },
+      );
+
+      syncConversationIntoDashboard(result.conversation);
+      setRefreshTick((value) => value + 1);
+    } catch (saveError) {
+      await showAlert(
+        "Falha ao atualizar selo",
+        saveError instanceof Error
+          ? saveError.message
+          : "Nao foi possivel atualizar a verificacao da conversa.",
+        "error",
+      );
+    } finally {
+      setTrainingVerificationSavingId(null);
     }
   }
 
@@ -1554,7 +1723,7 @@ export default function BotChatsPage() {
     const serialized = JSON.stringify(selectedConversation, null, 2);
 
     try {
-      await navigator.clipboard.writeText(serialized);
+      await copyTextToClipboard(serialized);
       await showAlert(
         "JSON copiado",
         "O JSON completo da conversa foi copiado para a área de transferência.",
@@ -1567,7 +1736,7 @@ export default function BotChatsPage() {
 
   async function handleCopyStructuredTrace(label: string, serialized: string) {
     try {
-      await navigator.clipboard.writeText(serialized);
+      await copyTextToClipboard(serialized);
       await showAlert(
         "Trace copiado",
         `O ${label} foi copiado para a área de transferência.`,
@@ -1652,7 +1821,7 @@ export default function BotChatsPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 border-t border-brand-purple/10 bg-white px-4 py-4 sm:px-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+        <div className="space-y-4 border-t border-brand-purple/10 bg-white px-4 py-4 sm:px-6">
           <div className="rounded-3xl border border-gray-200 bg-gray-50/80 p-4">
             <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
               <Server className="h-4 w-4 text-brand-purple" />
@@ -1676,9 +1845,9 @@ export default function BotChatsPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <label className="rounded-3xl border border-gray-200 bg-gray-50/80 p-4 text-sm text-gray-700">
-              <span className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+            <label className={`${filterCardClass} xl:col-span-2`}>
+              <span className={filterLabelClass}>
                 <Search className="h-4 w-4 text-brand-purple" />
                 Buscar
               </span>
@@ -1686,19 +1855,19 @@ export default function BotChatsPage() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Cliente, pedido, ID ou nome de anexo"
-                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 shadow-sm outline-none transition focus:border-brand-purple focus:ring-2 focus:ring-brand-purple/20"
+                className={filterControlClass}
               />
             </label>
 
-            <label className="rounded-3xl border border-gray-200 bg-gray-50/80 p-4 text-sm text-gray-700">
-              <span className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+            <label className={filterCardClass}>
+              <span className={filterLabelClass}>
                 <Filter className="h-4 w-4 text-brand-purple" />
                 Estado
               </span>
               <select
                 value={stateFilter}
                 onChange={(event) => setStateFilter(event.target.value)}
-                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 shadow-sm outline-none transition focus:border-brand-purple focus:ring-2 focus:ring-brand-purple/20"
+                className={filterControlClass}
               >
                 <option value="all">Todos</option>
                 <option value="collecting_data">Coletando dados</option>
@@ -1708,15 +1877,15 @@ export default function BotChatsPage() {
               </select>
             </label>
 
-            <label className="rounded-3xl border border-gray-200 bg-gray-50/80 p-4 text-sm text-gray-700">
-              <span className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+            <label className={filterCardClass}>
+              <span className={filterLabelClass}>
                 <MessageSquareText className="h-4 w-4 text-brand-purple" />
                 Canal
               </span>
               <select
                 value={channelFilter}
                 onChange={(event) => setChannelFilter(event.target.value)}
-                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 shadow-sm outline-none transition focus:border-brand-purple focus:ring-2 focus:ring-brand-purple/20"
+                className={filterControlClass}
               >
                 <option value="all">Todos</option>
                 {availableChannels.map((channel) => (
@@ -1727,8 +1896,8 @@ export default function BotChatsPage() {
               </select>
             </label>
 
-            <label className="rounded-3xl border border-gray-200 bg-gray-50/80 p-4 text-sm text-gray-700">
-              <span className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+            <label className={filterCardClass}>
+              <span className={filterLabelClass}>
                 <Paperclip className="h-4 w-4 text-brand-purple" />
                 Tipo de anexo
               </span>
@@ -1737,7 +1906,7 @@ export default function BotChatsPage() {
                 onChange={(event) =>
                   setAttachmentTypeFilter(event.target.value)
                 }
-                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 shadow-sm outline-none transition focus:border-brand-purple focus:ring-2 focus:ring-brand-purple/20"
+                className={filterControlClass}
               >
                 <option value="all">Todos</option>
                 {availableAttachmentTypes.map((attachmentType) => (
@@ -1745,6 +1914,24 @@ export default function BotChatsPage() {
                     {formatAttachmentTypeLabel(attachmentType)}
                   </option>
                 ))}
+              </select>
+            </label>
+
+            <label className={filterCardClass}>
+              <span className={filterLabelClass}>
+                <ShieldCheck className="h-4 w-4 text-brand-purple" />
+                Selo de verificação
+              </span>
+              <select
+                value={trainingVerificationFilter}
+                onChange={(event) =>
+                  setTrainingVerificationFilter(event.target.value)
+                }
+                className={filterControlClass}
+              >
+                <option value="all">Todos</option>
+                <option value="verified">Verificadas</option>
+                <option value="unverified">Não verificadas</option>
               </select>
             </label>
           </div>
@@ -1839,143 +2026,57 @@ export default function BotChatsPage() {
           )}
         </section>
 
+        <LocalInviteLauncherCard
+          inviteLabel={inviteLabel}
+          inviteHours={inviteHours}
+          inviteLoading={inviteLoading}
+          inviteUrl={generatedInviteUrl}
+          onInviteLabelChange={setInviteLabel}
+          onInviteHoursChange={setInviteHours}
+          onGenerateAndOpen={handleGenerateInvite}
+          onCopyInviteLink={handleCopyInvite}
+        />
+
         <section className="rounded-[2rem] border border-gray-200 bg-white p-5 shadow-[0_24px_60px_-36px_rgba(15,23,42,0.3)]">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
-            <PlayCircle className="h-4 w-4 text-brand-purple" />
-            Treinar bot pelo dashboard
+            <Sparkles className="h-4 w-4 text-brand-purple" />
+            Treinamento assistido
           </div>
+
           <h2 className="mt-2 text-xl font-bold text-gray-900">
-            Inicie ou continue uma conversa como cliente
+            Gerar super prompt de melhoria
           </h2>
+
           <p className="mt-2 text-sm leading-relaxed text-gray-500">
-            Use a conversa selecionada para continuar o contexto atual ou envie
-            uma nova mensagem para abrir um atendimento de treino.
+            Copia um prompt unico com todas as conversas nao verificadas,
+            incluindo historico integral, prompts do LLM, rastros de imagem e
+            comentarios do dev para analisar gaps e melhorar o orquestrador.
           </p>
 
-          <div className="mt-4 rounded-3xl border border-brand-purple/12 bg-brand-purple/[0.03] px-4 py-3 text-sm text-gray-600">
-            <p className="font-semibold text-gray-800">Alvo atual</p>
-            <p className="mt-1 break-all">{trainingTargetId}</p>
+          <div className="mt-4 rounded-[1.5rem] border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800">
+            Use o selo de cada conversa para decidir se ela entra ou nao no
+            proximo pacote de treinamento manual.
           </div>
-
-          <textarea
-            value={trainingMessage}
-            onChange={(event) => setTrainingMessage(event.target.value)}
-            placeholder="Ex.: Oi, preciso de um orçamento para um suporte de parede impresso em 3D."
-            className="mt-4 min-h-32 w-full rounded-[1.5rem] border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 shadow-sm outline-none transition focus:border-brand-purple focus:ring-2 focus:ring-brand-purple/20"
-          />
 
           <div className="mt-4 flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={handleTrainingSend}
-              disabled={trainingLoading}
+              onClick={handleCopyTrainingPrompt}
+              disabled={trainingPromptLoading}
               className="inline-flex items-center gap-2 rounded-2xl bg-brand-purple px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-purple-light disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {trainingLoading ? (
+              {trainingPromptLoading ? (
                 <LoaderCircle className="h-4 w-4 animate-spin" />
               ) : (
-                <SendHorizontal className="h-4 w-4" />
-              )}
-              Enviar como cliente
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedConversation(null);
-                startTransition(() => setSelectedConversationId(null));
-                setTrainingConversationId(buildTrainingConversationId());
-              }}
-              className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 transition hover:border-brand-purple/25 hover:text-brand-purple"
-            >
-              <RefreshCcw className="h-4 w-4" />
-              Nova conversa de treino
-            </button>
-          </div>
-        </section>
-
-        <section className="rounded-[2rem] border border-gray-200 bg-white p-5 shadow-[0_24px_60px_-36px_rgba(15,23,42,0.3)]">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
-            <Link2 className="h-4 w-4 text-brand-orange" />
-            Demo pública allowanonimos
-          </div>
-          <h2 className="mt-2 text-xl font-bold text-gray-900">
-            Gerar link sem autenticação
-          </h2>
-          <p className="mt-2 text-sm leading-relaxed text-gray-500">
-            Crie um link externo para demonstrações. O usuário abre a conversa
-            pública e o dashboard continua acompanhando tudo em tempo real.
-          </p>
-
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label className="text-sm text-gray-700">
-              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
-                Rótulo
-              </span>
-              <input
-                value={inviteLabel}
-                onChange={(event) => setInviteLabel(event.target.value)}
-                placeholder="Demo evento, cliente teste..."
-                className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 shadow-sm outline-none transition focus:border-brand-purple focus:ring-2 focus:ring-brand-purple/20"
-              />
-            </label>
-            <label className="text-sm text-gray-700">
-              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
-                Expira em horas
-              </span>
-              <input
-                type="number"
-                min={1}
-                value={inviteHours}
-                onChange={(event) => setInviteHours(event.target.value)}
-                className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 shadow-sm outline-none transition focus:border-brand-purple focus:ring-2 focus:ring-brand-purple/20"
-              />
-            </label>
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={handleGenerateInvite}
-              disabled={inviteLoading}
-              className="inline-flex items-center gap-2 rounded-2xl bg-brand-orange px-4 py-3 text-sm font-semibold text-brand-purple transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {inviteLoading ? (
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-              ) : (
-                <Link2 className="h-4 w-4" />
-              )}
-              Gerar link público
-            </button>
-
-            {generatedInviteUrl && (
-              <button
-                type="button"
-                onClick={handleCopyInvite}
-                className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 transition hover:border-brand-purple/25 hover:text-brand-purple"
-              >
                 <Copy className="h-4 w-4" />
-                Copiar link
-              </button>
-            )}
+              )}
+              Gerar e copiar super prompt
+            </button>
           </div>
-
-          {generatedInviteUrl && (
-            <div className="mt-4 rounded-[1.5rem] border border-brand-orange/20 bg-brand-orange/10 px-4 py-4 text-sm text-gray-700">
-              <p className="font-semibold text-gray-900">Link gerado</p>
-              <a
-                href={generatedInviteUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-2 block break-all text-brand-purple underline-offset-4 hover:underline"
-              >
-                {generatedInviteUrl}
-              </a>
-            </div>
-          )}
         </section>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+      <div className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)] 2xl:grid-cols-[460px_minmax(0,1fr)]">
         <section className="overflow-hidden rounded-[2rem] border border-gray-200 bg-white shadow-[0_24px_60px_-36px_rgba(15,23,42,0.3)]">
           <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
             <div>
@@ -2040,6 +2141,39 @@ export default function BotChatsPage() {
 
               {selectedConversation && (
                 <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={
+                      trainingVerificationSavingId ===
+                      selectedConversation.conversation_id
+                    }
+                    onClick={() =>
+                      void handleToggleTrainingVerification(
+                        selectedConversation.conversation_id,
+                        isConversationVerified(
+                          selectedConversation.training_verification,
+                        ),
+                      )
+                    }
+                    className={`inline-flex items-center justify-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition ${getTrainingBadgeTone(
+                      isConversationVerified(
+                        selectedConversation.training_verification,
+                      ),
+                    )} disabled:cursor-not-allowed disabled:opacity-70`}
+                  >
+                    {trainingVerificationSavingId ===
+                    selectedConversation.conversation_id ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ShieldCheck className="h-4 w-4" />
+                    )}
+                    {getTrainingBadgeLabel(
+                      isConversationVerified(
+                        selectedConversation.training_verification,
+                      ),
+                    )}
+                  </button>
+
                   <button
                     type="button"
                     onClick={handleCopyConversationJson}

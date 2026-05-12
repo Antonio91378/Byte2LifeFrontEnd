@@ -23,7 +23,7 @@ import {
     WifiOff,
     X,
 } from "lucide-react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 const MAX_PUBLIC_ATTACHMENTS = 3;
@@ -314,8 +314,12 @@ function MakerWorldSuggestionBubble({
 
 export default function PublicInvitePage() {
   const params = useParams<{ inviteToken: string }>();
+  const searchParams = useSearchParams();
   const inviteToken = decodeURIComponent(String(params?.inviteToken || ""));
-  const baseUrl = getDefaultAiOrchestratorBaseUrl();
+  const baseUrl = useMemo(
+    () => searchParams.get("orchestrator") || getDefaultAiOrchestratorBaseUrl(),
+    [searchParams],
+  );
   const [conversation, setConversation] = useState<BotConversation | null>(
     null,
   );

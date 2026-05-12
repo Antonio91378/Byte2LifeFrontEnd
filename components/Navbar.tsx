@@ -17,7 +17,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import LogoutButton from './LogoutButton';
 
 interface NavItem {
@@ -105,6 +105,23 @@ export default function Navbar() {
   const [menuPathname, setMenuPathname] = useState<string | null>(null);
   const isMenuOpen = menuPathname === pathname;
 
+  useEffect(() => {
+    if (!isMenuOpen || !window.matchMedia('(max-width: 639px)').matches) {
+      return undefined;
+    }
+
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const previousBodyOverflow = document.body.style.overflow;
+
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+    };
+  }, [isMenuOpen]);
+
   function closeMenu() {
     setMenuPathname(null);
   }
@@ -159,7 +176,7 @@ export default function Navbar() {
           isMenuOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
         }`}
       >
-        <div className="overflow-hidden border-t border-white/10 bg-[linear-gradient(180deg,rgba(87,10,133,0.24),rgba(46,2,73,0.96))]">
+        <div className="min-h-0 overflow-y-auto overscroll-contain border-t border-white/10 bg-[linear-gradient(180deg,rgba(87,10,133,0.24),rgba(46,2,73,0.96))] max-sm:max-h-[calc(100dvh-73px)]">
           <div className="container mx-auto px-4 py-4 sm:px-6 sm:py-5">
             <div className="mb-4 flex flex-col gap-3 rounded-3xl border border-white/10 bg-white/5 px-4 py-4 text-white/80 shadow-[0_16px_40px_-28px_rgba(0,0,0,0.9)] sm:flex-row sm:items-center sm:justify-between">
               <div>

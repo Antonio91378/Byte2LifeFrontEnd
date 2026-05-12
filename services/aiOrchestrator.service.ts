@@ -15,6 +15,11 @@ export interface BotConversationBlocker {
   reason_codes?: string[];
 }
 
+export interface BotTrainingVerification {
+  verified: boolean;
+  updated_at?: string | null;
+}
+
 export interface BotPublicInvite {
   enabled: boolean;
   label?: string | null;
@@ -127,6 +132,7 @@ export interface BotConversation {
     llm?: BotLlmPromptTrace[];
     image_generation?: BotImagePromptTrace[];
   } | null;
+  training_verification?: BotTrainingVerification | null;
   extracted_data?: {
     client?: {
       name?: string | null;
@@ -164,8 +170,15 @@ export interface BotConversationSummary {
   blocker: BotConversationBlocker;
   access_mode?: string | null;
   public_invite?: BotPublicInvite | null;
+  training_verification?: BotTrainingVerification | null;
   updated_at?: string | null;
   created_at?: string | null;
+}
+
+export interface BotTrainingReviewPromptResponse {
+  total_conversations: number;
+  conversation_ids: string[];
+  prompt: string;
 }
 
 export interface BotConversationListResponse {
@@ -316,6 +329,7 @@ export async function listBotConversations(
     state?: string;
     channel?: string;
     attachmentType?: string;
+    trainingVerification?: string;
     page?: number;
     limit?: number;
   },
@@ -326,6 +340,8 @@ export async function listBotConversations(
   if (filters?.channel) params.set("channel", filters.channel);
   if (filters?.attachmentType)
     params.set("attachment_type", filters.attachmentType);
+  if (filters?.trainingVerification)
+    params.set("training_verification", filters.trainingVerification);
   if (filters?.page) params.set("page", String(filters.page));
   if (filters?.limit) params.set("limit", String(filters.limit));
   const suffix = params.size ? `?${params.toString()}` : "";
@@ -365,6 +381,32 @@ export async function saveBotConversationDeveloperNote(
   );
 }
 
+export async function setBotConversationTrainingVerification(
+  baseUrl: string,
+  conversationId: string,
+  payload: {
+    verified: boolean;
+  },
+) {
+  return request<{ conversation: BotConversation }>(
+    baseUrl,
+    `/conversations/${encodeURIComponent(conversationId)}/training-verification`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        verified: payload.verified,
+      }),
+    },
+  );
+}
+
+export async function getBotTrainingReviewPrompt(baseUrl: string) {
+  return request<BotTrainingReviewPromptResponse>(
+    baseUrl,
+    "/training/review-prompt",
+  );
+}
+
 export async function simulateBotConversation(
   baseUrl: string,
   payload: {
@@ -398,6 +440,7 @@ export async function createPublicBotInvite(
   baseUrl: string,
   payload: {
     frontendBaseUrl?: string;
+    orchestratorBaseUrl?: string;
     label?: string;
     expiresInHours?: number;
     maxMessages?: number;
@@ -410,6 +453,7 @@ export async function createPublicBotInvite(
     method: "POST",
     body: JSON.stringify({
       frontend_base_url: payload.frontendBaseUrl,
+      orchestrator_base_url: payload.orchestratorBaseUrl,
       label: payload.label,
       expires_in_hours: payload.expiresInHours,
       max_messages: payload.maxMessages,
