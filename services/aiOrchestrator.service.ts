@@ -152,6 +152,7 @@ export interface BotConversation {
 
 export interface BotConversationSummary {
   conversation_id: string;
+  display_name: string;
   state: string;
   channel: string;
   sender_id?: string | null;
@@ -518,4 +519,99 @@ export async function deleteBotConversation(
     `/conversations/${encodeURIComponent(conversationId)}`,
     { method: "DELETE" },
   );
+}
+
+// ─── Visual Flow Dashboard types ────────────────────────────────────────────
+
+export interface FlowStageBranch {
+  id: string;
+  label: string;
+  next: string[];
+}
+
+export interface FlowStage {
+  id: string;
+  label: string;
+  layer: 'input' | 'core' | 'action' | 'output';
+  color: string;
+  icon: string;
+  description?: string;
+  skill?: string;
+  requiresLock?: boolean | string;
+  optional?: boolean;
+  events?: string[];
+  next?: string[];
+  branches?: FlowStageBranch[];
+  implementationPath?: string;
+}
+
+export interface FlowDefinition {
+  version: string;
+  stages: FlowStage[];
+  skills: Record<string, unknown>;
+  resourcePolicy: {
+    localConcurrency: number;
+    preferCloud: boolean;
+    localTimeoutMs: number;
+  };
+  featureFlags: Record<string, boolean>;
+  company?: {
+    id: string;
+    name: string;
+    whitelabel?: {
+      theme?: string;
+      primary?: string;
+      accent?: string;
+      secondary?: string;
+    };
+  };
+}
+
+export interface StageEvent {
+  eventName: string;
+  payload: Record<string, unknown>;
+  ts: number;
+}
+
+export interface ResourceStatus {
+  busy: boolean;
+  currentTask: { id: string; skillName: string; acquiredAt: number } | null;
+  queueDepth: number;
+}
+
+// ─── Visual Flow Dashboard functions ─────────────────────────────────────────
+
+export async function getFlowDefinition(baseUrl: string): Promise<FlowDefinition> {
+  return request<FlowDefinition>(baseUrl, '/flow/definition');
+}
+
+export async function getResourceStatus(baseUrl: string): Promise<ResourceStatus> {
+  return request<ResourceStatus>(baseUrl, '/resource/status');
+}
+
+/**
+ * Subscribe to real-time pipeline events for a conversation via SSE.
+ * Returns a cleanup function to close the EventSource.
+ *
+ * The first event received is `{ type: 'trace_replay', events: StageEvent[] }`
+ * containing all past events for that conversation. Subsequent events are
+ * individual StageEvent objects.
+ */
+export function subscribeToFlowEvents(
+  baseUrl: string,
+  conversationId: string,
+  onEvent: (raw: { type?: string; events?: StageEvent[] } & Partial<StageEvent>) => void,
+): () => void {
+  const url = `${normalizeBaseUrl(baseUrl)}/flow/live/${encodeURIComponent(conversationId)}`;
+  const source = new EventSource(url);
+
+  source.onmessage = (e) => {
+    try {
+      onEvent(JSON.parse(e.data));
+    } catch {
+      // Ignore malformed events
+    }
+  };
+
+  return () => source.close();
 }

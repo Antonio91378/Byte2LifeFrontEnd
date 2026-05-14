@@ -1,6 +1,9 @@
 "use client";
 
 import LocalInviteLauncherCard from "@/components/LocalInviteLauncherCard";
+import { EventLog } from "@/components/orchestrator-flow/EventLog";
+import { FlowCanvas } from "@/components/orchestrator-flow/FlowCanvas";
+import { ResourceStatusBadge } from "@/components/orchestrator-flow/ResourceStatus";
 import { useDialog } from "@/context/DialogContext";
 import {
     createPublicBotInvite,
@@ -23,6 +26,7 @@ import {
     type BotLlmPromptTrace,
     type BotRuntimeStatus,
   type BotTrainingVerification,
+  type StageEvent,
 } from "@/services/aiOrchestrator.service";
 import {
     Bot,
@@ -471,6 +475,8 @@ export default function BotChatsPage() {
   const [developerNoteInput, setDeveloperNoteInput] = useState("");
   const [developerNoteSaving, setDeveloperNoteSaving] = useState(false);
   const [promptInspectorExpanded, setPromptInspectorExpanded] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'flow'>('list');
+  const [flowEvents, setFlowEvents] = useState<StageEvent[]>([]);
   const deferredSearch = useDeferredValue(search);
 
   function syncConversationIntoDashboard(conversation: BotConversation) {
@@ -778,7 +784,7 @@ export default function BotChatsPage() {
                 <p
                   className={`truncate text-sm font-semibold ${selected ? "text-white" : "text-gray-900"}`}
                 >
-                  {conversation.client_name || conversation.conversation_id}
+                  {conversation.display_name || conversation.client_name || conversation.conversation_id.slice(0, 20)}
                 </p>
                 <p
                   className={`mt-1 line-clamp-2 text-sm ${selected ? "text-white/72" : "text-gray-500"}`}
@@ -1786,17 +1792,48 @@ export default function BotChatsPage() {
 
   return (
     <div className="space-y-6 py-2">
+      <style>{`
+        @keyframes neon-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+      `}</style>
+
       <div className="overflow-hidden rounded-[2rem] border border-brand-purple/10 bg-white shadow-[0_24px_60px_-32px_rgba(46,2,73,0.35)]">
         <div className="bg-[radial-gradient(circle_at_top_left,rgba(255,153,0,0.18),transparent_35%),linear-gradient(135deg,rgba(46,2,73,0.96),rgba(87,10,133,0.92))] px-6 py-7 text-white sm:px-8">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div className="max-w-3xl space-y-3">
-              <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/15 bg-white/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/80">
-                <Bot className="h-3.5 w-3.5" />
-                Painel de desenvolvimento
-              </span>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/15 bg-white/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/80">
+                  <Bot className="h-3.5 w-3.5" />
+                  Painel de desenvolvimento
+                </span>
+
+                {/* View mode toggle */}
+                <div className="flex rounded-full border border-white/20 bg-white/10 p-0.5 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('list')}
+                    className={`rounded-full px-3 py-1 transition ${viewMode === 'list' ? 'bg-white text-brand-purple shadow' : 'text-white/70 hover:text-white'}`}
+                  >
+                    ≡ Lista
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('flow')}
+                    className={`rounded-full px-3 py-1 transition ${viewMode === 'flow' ? 'bg-white text-brand-purple shadow' : 'text-white/70 hover:text-white'}`}
+                  >
+                    ◈ Flow
+                  </button>
+                </div>
+
+                {viewMode === 'flow' && (
+                  <ResourceStatusBadge baseUrl={baseUrl} />
+                )}
+              </div>
               <div className="space-y-2">
                 <h1 className="text-3xl font-bold sm:text-4xl">
-                  Dashboard de chats do bot
+                  {viewMode === 'flow' ? 'Orchestrator Studio' : 'Dashboard de chats do bot'}
                 </h1>
                 <p className="max-w-2xl text-sm leading-relaxed text-white/75 sm:text-base">
                   Visualize todas as conversas persistidas pelo ai-orchestrator,
@@ -2076,6 +2113,146 @@ export default function BotChatsPage() {
         </section>
       </div>
 
+      {/* ── Flow View (Orchestrator Studio) ────────────────────────────────── */}
+      {viewMode === 'flow' && (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '320px 1fr 280px',
+            gap: 0,
+            height: 'calc(100vh - 280px)',
+            minHeight: 500,
+            background: '#0a0a0f',
+            borderRadius: 24,
+            overflow: 'hidden',
+            border: '1px solid #c026d322',
+          }}
+        >
+          {/* Left: conversation list */}
+          <div style={{ borderRight: '1px solid #c026d322', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid #c026d322', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#c026d3', letterSpacing: '0.08em', fontWeight: 700 }}>◈ CONVERSAS</span>
+              <button
+                type="button"
+                onClick={() => setRefreshTick((v) => v + 1)}
+                style={{ background: 'none', border: '1px solid #ffffff22', color: '#ffffff55', fontSize: 10, borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontFamily: 'monospace' }}
+              >
+                ↺ atualizar
+              </button>
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {listLoading && (
+                <div style={{ padding: 16, fontFamily: 'monospace', fontSize: 11, color: '#ffffff44', textAlign: 'center' }}>Carregando…</div>
+              )}
+              {conversations.map((conv) => {
+                const isSelected = conv.conversation_id === selectedConversationId;
+                const stateColor =
+                  conv.state === 'sale_created' ? '#22c55e' :
+                  conv.state === 'collecting_data' ? '#c026d3' :
+                  conv.state === 'awaiting_team_quote' ? '#f97316' :
+                  conv.state === 'ready_to_create_sale' ? '#22d3ee' :
+                  conv.state === 'human_handoff' ? '#f43f5e' :
+                  '#888888';
+                const stateLabel = STATE_LABELS[conv.state] ?? conv.state;
+                const channelLabel = CHANNEL_LABELS[conv.channel] ?? conv.channel;
+                // Fallback when backend hasn't been restarted yet (display_name undefined)
+                const displayName = conv.display_name || conv.client_name || (() => {
+                  const tsMatch = conv.conversation_id.match(/(\d{13})/);
+                  if (tsMatch) {
+                    const d = new Date(Number(tsMatch[1]));
+                    if (!isNaN(d.getTime())) {
+                      return `${channelLabel} — ${d.toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}`;
+                    }
+                  }
+                  return `${channelLabel} #${conv.conversation_id.slice(-6)}`;
+                })();
+                const relativeTime = (() => {
+                  if (!conv.updated_at) return null;
+                  const ms = Date.now() - new Date(conv.updated_at).getTime();
+                  if (ms < 60000) return 'agora';
+                  if (ms < 3600000) return `${Math.floor(ms / 60000)}min`;
+                  if (ms < 86400000) return `${Math.floor(ms / 3600000)}h`;
+                  return `${Math.floor(ms / 86400000)}d`;
+                })();
+                return (
+                  <button
+                    key={conv.conversation_id}
+                    type="button"
+                    onClick={() => setSelectedConversationId(conv.conversation_id)}
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '10px 14px',
+                      borderBottom: '1px solid #ffffff08',
+                      background: isSelected ? '#c026d314' : 'transparent',
+                      borderLeft: isSelected ? '2px solid #c026d3' : '2px solid transparent',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                    }}
+                  >
+                    {/* Row 1: status dot + name + time */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: stateColor, boxShadow: `0 0 5px ${stateColor}`, flexShrink: 0 }} />
+                      <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#ffffffcc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontWeight: 700 }}>
+                        {displayName}
+                      </span>
+                      {relativeTime && (
+                        <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff33', flexShrink: 0 }}>{relativeTime}</span>
+                      )}
+                    </div>
+                    {/* Row 2: state label + channel badge */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                      <span style={{ fontFamily: 'monospace', fontSize: 8, background: `${stateColor}1a`, color: stateColor, borderRadius: 3, padding: '1px 5px', border: `1px solid ${stateColor}44` }}>
+                        {stateLabel}
+                      </span>
+                      <span style={{ fontFamily: 'monospace', fontSize: 8, background: '#ffffff0a', color: '#ffffff55', borderRadius: 3, padding: '1px 5px', border: '1px solid #ffffff1a' }}>
+                        {channelLabel}
+                      </span>
+                      {conv.has_generated_image && (
+                        <span style={{ fontFamily: 'monospace', fontSize: 8, background: '#f9731614', color: '#f97316', borderRadius: 3, padding: '1px 5px', border: '1px solid #f9731633' }}>
+                          🖼 prévia
+                        </span>
+                      )}
+                    </div>
+                    {/* Row 3: phone (if known) + message count */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {conv.client_phone && (
+                        <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff55', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                          📞 {conv.client_phone}
+                        </span>
+                      )}
+                      <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff33', flexShrink: 0, marginLeft: 'auto' }}>
+                        {conv.message_count} msg{conv.message_count !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    {/* Row 4: last message preview */}
+                    <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff44', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {conv.last_message_preview}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Center: ReactFlow canvas */}
+          <div style={{ position: 'relative', overflow: 'hidden' }}>
+            <FlowCanvas
+              baseUrl={baseUrl}
+              conversationId={selectedConversationId}
+              onEventsChange={setFlowEvents}
+            />
+          </div>
+
+          {/* Right: event log */}
+          <EventLog events={flowEvents} onClear={() => setFlowEvents([])} />
+        </div>
+      )}
+
+      {/* ── List View (default) ─────────────────────────────────────────────── */}
+      {viewMode === 'list' && (
       <div className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)] 2xl:grid-cols-[460px_minmax(0,1fr)]">
         <section className="overflow-hidden rounded-[2rem] border border-gray-200 bg-white shadow-[0_24px_60px_-36px_rgba(15,23,42,0.3)]">
           <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
@@ -2201,6 +2378,7 @@ export default function BotChatsPage() {
           {detailContent}
         </section>
       </div>
+      )}
     </div>
   );
 }
