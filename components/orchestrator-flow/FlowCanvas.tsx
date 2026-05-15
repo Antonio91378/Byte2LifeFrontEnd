@@ -1,5 +1,6 @@
 'use client';
 
+import dagre from '@dagrejs/dagre';
 import {
   Background,
   BackgroundVariant,
@@ -11,22 +12,30 @@ import {
   type NodeMouseHandler,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useResizablePanel } from '../../hooks/useResizablePanel';
 import {
+  getLLMProviders,
   getFlowDefinition,
   subscribeToFlowEvents,
   type FlowDefinition,
   type FlowStage,
+  type LLMProviderConfig,
   type StageEvent,
 } from '../../services/aiOrchestrator.service';
 import { AnimatedFlowEdge } from './CustomEdge';
+import { ImageGenSubFlow } from './ImageGenSubFlow';
+import { LLMExtractionSubFlow } from './LLMExtractionSubFlow';
 import { StageInspector } from './StageInspector';
 import { StageNode, type StageNodeData, type StageStatus } from './StageNode';
 
 const NODE_TYPES = { stageNode: StageNode };
 const EDGE_TYPES = { animatedFlow: AnimatedFlowEdge };
 
-const LAYER_X: Record<string, number> = { input: 0, core: 1, action: 2, output: 3 };
+const NODE_W = 200;
+const NODE_H = 80;
+
 const LAYER_EDGE_COLOR: Record<string, string> = {
   input:  '#22d3ee',
   core:   '#c026d3',
@@ -34,24 +43,27 @@ const LAYER_EDGE_COLOR: Record<string, string> = {
   output: '#ec4899',
 };
 
+// Branch-label → edge color (for decision branches)
+const BRANCH_COLORS: Record<string, string> = {
+  image_generation: '#f97316',
+  makerworld_suggest: '#22d3ee',
+  data_collection:  '#22c55e',
+  human_handoff:    '#ef4444',
+  finalize:         '#ec4899',
+  approved:         '#22c55e',
+  retry:            '#ef4444',
+  max_retries:      '#f97316',
+  download_print:   '#22c55e',
+  customize:        '#f97316',
+  suggest_only:     '#22d3ee',
+};
+
 function buildGraph(def: FlowDefinition): { nodes: Node[]; edges: Edge[] } {
   const stages = def.stages ?? [];
-  const nodes: Node[] = [];
   const edges: Edge[] = [];
-  const layerCounters: Record<string, number> = {};
 
+  // Build raw edges first (needed for dagre)
   for (const stage of stages) {
-    const lx = (LAYER_X[stage.layer] ?? 0) * 260 + 60;
-    const ly = (layerCounters[stage.layer] ?? 0) * 120 + 60;
-    layerCounters[stage.layer] = (layerCounters[stage.layer] ?? 0) + 1;
-
-    nodes.push({
-      id: stage.id,
-      type: 'stageNode',
-      position: { x: lx, y: ly },
-      data: { stage, status: 'idle', lastEventName: undefined, selected: false } satisfies StageNodeData,
-    });
-
     for (const nextId of stage.next ?? []) {
       edges.push({
         id: `${stage.id}→${nextId}`,
@@ -65,6 +77,8 @@ function buildGraph(def: FlowDefinition): { nodes: Node[]; edges: Edge[] } {
     }
 
     for (const branch of stage.branches ?? []) {
+      const isRetry = (branch as { backEdge?: boolean }).backEdge === true;
+      const branchColor = BRANCH_COLORS[branch.id] ?? (isRetry ? '#ef4444' : '#f97316');
       for (const nextId of branch.next ?? []) {
         edges.push({
           id: `${stage.id}→${nextId}:${branch.id}`,
@@ -73,15 +87,79 @@ function buildGraph(def: FlowDefinition): { nodes: Node[]; edges: Edge[] } {
           type: 'animatedFlow',
           label: branch.label,
           animated: false,
-          data: { color: '#f97316' },
-          style: { stroke: '#f9731633', strokeDasharray: '4 2' },
-          labelStyle: { fill: '#f97316', fontSize: 9, fontFamily: 'monospace' },
+          data: { color: branchColor, isRetry },
+          style: {
+            stroke: isRetry ? '#ef444433' : `${branchColor}44`,
+            strokeDasharray: isRetry ? '6 3' : '4 2',
+            strokeWidth: isRetry ? 1 : 1.5,
+          },
+          labelStyle: {
+            fill: branchColor,
+            fontSize: 9,
+            fontFamily: 'monospace',
+          },
         });
       }
     }
   }
 
+  // Run dagre layout
+  const g = new dagre.graphlib.Graph();
+  g.setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir: 'LR', nodesep: 50, ranksep: 90, marginx: 30, marginy: 30 });
+
+  for (const stage of stages) {
+    g.setNode(stage.id, { width: NODE_W, height: NODE_H });
+  }
+  for (const edge of edges) {
+    // Skip back-edges (retry loops) so dagre doesn't create a cycle
+    if ((edge.data as { isRetry?: boolean } | undefined)?.isRetry) continue;
+    g.setEdge(edge.source, edge.target);
+  }
+
+  dagre.layout(g);
+
+  const nodes: Node[] = stages.map((stage) => {
+    const nodeData = g.node(stage.id);
+    return {
+      id: stage.id,
+      type: 'stageNode',
+      position: {
+        x: (nodeData?.x ?? 0) - NODE_W / 2,
+        y: (nodeData?.y ?? 0) - NODE_H / 2,
+      },
+      data: { stage, status: 'idle', lastEventName: undefined, selected: false } satisfies StageNodeData,
+    };
+  });
+
   return { nodes, edges };
+}
+
+function InspectorResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        position: 'absolute',
+        left: 0, top: 0, bottom: 0,
+        width: 6,
+        cursor: 'ew-resize',
+        zIndex: 30,
+        background: hovered ? '#c026d355' : 'transparent',
+        transition: 'background 0.15s',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      {hovered && (
+        <div style={{ width: 2, height: 40, borderRadius: 2, background: '#c026d3', boxShadow: '0 0 8px #c026d3' }} />
+      )}
+    </div>
+  );
 }
 
 interface FlowCanvasProps {
@@ -92,6 +170,7 @@ interface FlowCanvasProps {
 
 export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanvasProps) {
   const [definition, setDefinition] = useState<FlowDefinition | null>(null);
+  const [providers, setProviders] = useState<LLMProviderConfig[]>([]);
   const [stageStatuses, setStageStatuses] = useState<Map<string, StageStatus>>(new Map());
   const [stageLastEvent, setStageLastEvent] = useState<Map<string, string>>(new Map());
   const [events, setEvents] = useState<StageEvent[]>([]);
@@ -100,6 +179,7 @@ export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanv
 
   useEffect(() => {
     getFlowDefinition(baseUrl).then(setDefinition).catch(() => {});
+    getLLMProviders(baseUrl).then(r => setProviders(r.providers)).catch(() => {});
   }, [baseUrl]);
 
   useEffect(() => {
@@ -151,6 +231,7 @@ export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanv
         status: stageStatuses.get(n.id) ?? 'idle',
         lastEventName: stageLastEvent.get(n.id),
         selected: n.id === selectedStageId,
+        hasSubFlow: n.id === 'image_gen' || n.id === 'extraction',
       },
     })),
     [nodes, stageStatuses, stageLastEvent, selectedStageId],
@@ -159,16 +240,33 @@ export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanv
   const liveEdges = useMemo(
     () => edges.map((e) => {
       const sourceActive = stageStatuses.get(e.source) === 'active';
+      const presetColor = (e.data as { color?: string } | undefined)?.color ?? '#c026d3';
       return {
         ...e,
         animated: sourceActive,
-        data: { ...e.data as object, color: sourceActive ? (LAYER_EDGE_COLOR[(definition?.stages ?? []).find(s => s.id === e.source)?.layer ?? ''] ?? '#c026d3') : '#ffffff18' },
+        data: { ...e.data as object, color: sourceActive ? presetColor : '#ffffff18' },
       };
     }),
-    [edges, stageStatuses, definition],
+    [edges, stageStatuses],
   );
 
+  const [imageGenSubFlowOpen, setImageGenSubFlowOpen] = useState(false);
+  const [extractionSubFlowOpen, setExtractionSubFlowOpen] = useState(false);
+  const { width: inspectorWidth, onMouseDown: onInspectorResizeDown } = useResizablePanel(300, 220, 700);
+
   const onNodeClick: NodeMouseHandler = (_event, node) => {
+    if (node.id === 'image_gen') {
+      setImageGenSubFlowOpen(true);
+      setExtractionSubFlowOpen(false);
+      setSelectedStageId(null);
+      return;
+    }
+    if (node.id === 'extraction') {
+      setExtractionSubFlowOpen(true);
+      setImageGenSubFlowOpen(false);
+      setSelectedStageId(null);
+      return;
+    }
     setSelectedStageId((prev) => (prev === node.id ? null : node.id));
   };
 
@@ -185,7 +283,50 @@ export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanv
   }
 
   return (
-    <div style={{ width: '100%', height: '100%', background: '#0a0a0f', position: 'relative', display: 'flex' }}>
+    <div style={{ width: '100%', height: '100%', background: '#0a0a0f', position: 'relative', display: 'flex', overflow: 'hidden' }}>
+
+      {/* Image Gen sub-flow overlay */}
+      <AnimatePresence>
+        {imageGenSubFlowOpen && definition && (
+          <motion.div
+            key="image-gen-subflow"
+            initial={{ x: '100%', opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: '100%', opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+            style={{ position: 'absolute', inset: 0, zIndex: 20, background: '#0a0a0f' }}
+          >
+            <ImageGenSubFlow
+              baseUrl={baseUrl}
+              definition={definition}
+              conversationId={conversationId}
+              onBack={() => setImageGenSubFlowOpen(false)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* LLM Extraction sub-flow overlay */}
+      <AnimatePresence>
+        {extractionSubFlowOpen && definition && (
+          <motion.div
+            key="extraction-subflow"
+            initial={{ x: '100%', opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: '100%', opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+            style={{ position: 'absolute', inset: 0, zIndex: 20, background: '#0a0a0f' }}
+          >
+            <LLMExtractionSubFlow
+              baseUrl={baseUrl}
+              definition={definition}
+              conversationId={conversationId}
+              onBack={() => setExtractionSubFlowOpen(false)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ReactFlow */}
       <div style={{ flex: 1, position: 'relative' }}>
         <ReactFlow
@@ -197,9 +338,11 @@ export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanv
           fitView
           attributionPosition="bottom-left"
           proOptions={{ hideAttribution: true }}
-          nodesDraggable={false}
+          nodesDraggable={true}
           nodesConnectable={false}
           elementsSelectable={true}
+          minZoom={0.1}
+          maxZoom={3}
         >
           <Background variant={BackgroundVariant.Dots} color="#c026d322" gap={24} size={1} />
           <Controls style={{ background: '#1a0033', border: '1px solid #c026d344', color: '#c026d3' }} />
@@ -225,13 +368,23 @@ export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanv
       {/* Stage Inspector — slide in from right when a node is selected */}
       {selectedStage && definition && (
         <div style={{
-          width: 280,
+          width: inspectorWidth,
           flexShrink: 0,
           borderLeft: '1px solid #c026d322',
           overflow: 'hidden',
+          position: 'relative',
           animation: 'slideInRight 0.18s ease-out',
         }}>
-          <StageInspector stage={selectedStage} definition={definition} onClose={() => setSelectedStageId(null)} />
+          {/* Resize handle on the left edge */}
+          <InspectorResizeHandle onMouseDown={onInspectorResizeDown} />
+          <StageInspector
+            stage={selectedStage}
+            definition={definition}
+            providers={providers}
+            baseUrl={baseUrl}
+            onClose={() => setSelectedStageId(null)}
+            onSkillUpdated={() => getFlowDefinition(baseUrl).then(setDefinition).catch(() => {})}
+          />
         </div>
       )}
 

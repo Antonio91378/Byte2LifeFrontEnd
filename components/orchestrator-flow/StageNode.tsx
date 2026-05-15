@@ -11,6 +11,7 @@ import {
   Inbox,
   ListOrdered,
   MessageCircle,
+  Package,
   ScanEye,
   ScanLine,
   Send,
@@ -27,6 +28,7 @@ export interface StageNodeData {
   lastEventName?: string;
   isDecision?: boolean;
   selected?: boolean;
+  hasSubFlow?: boolean;
 }
 
 const LAYER_COLORS: Record<string, { border: string; glow: string; bg: string; text: string }> = {
@@ -49,11 +51,12 @@ const ICON_MAP: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>
   'scan-eye': ScanEye,
   'check-circle-2': CheckCircle2,
   'message-circle': MessageCircle,
+  package: Package,
   send: Send,
 };
 
 export function StageNode({ data }: { data: StageNodeData }) {
-  const { stage, status, lastEventName, selected } = data;
+  const { stage, status, lastEventName, selected, hasSubFlow } = data;
   const colors = LAYER_COLORS[stage.layer] ?? LAYER_COLORS.core;
 
   const isActive = status === 'active';
@@ -126,6 +129,12 @@ export function StageNode({ data }: { data: StageNodeData }) {
       {lastEventName && isActive && (
         <div style={{ fontSize: 9, color: '#ffffff66', marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {lastEventName}
+        </div>
+      )}
+
+      {hasSubFlow && (
+        <div style={{ fontSize: 8, color: `${colors.border}88`, marginTop: 4, letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 3 }}>
+          <span style={{ fontSize: 7 }}>◈</span> ver sub-fluxo
         </div>
       )}
 

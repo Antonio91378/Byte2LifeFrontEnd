@@ -178,7 +178,10 @@ export interface BotConversationSummary {
 
 export interface BotTrainingReviewPromptResponse {
   total_conversations: number;
+  total_pending: number;
   conversation_ids: string[];
+  conversation_id: string | null;
+  conversation_label: string | null;
   prompt: string;
 }
 
@@ -536,6 +539,7 @@ export interface FlowStage {
   color: string;
   icon: string;
   description?: string;
+  docs?: string;
   skill?: string;
   requiresLock?: boolean | string;
   optional?: boolean;
@@ -579,6 +583,34 @@ export interface ResourceStatus {
   queueDepth: number;
 }
 
+export interface LLMProviderConfig {
+  id: string;
+  kind: 'local' | 'cloud';
+  label?: string;
+  baseUrl?: string;
+  envKey?: string;
+  models?: string[];
+  requiresLock?: boolean;
+}
+
+export interface LLMSkillConfig {
+  purpose?: string;
+  provider: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  responseFormat?: string;
+  executionMode?: string;
+  requiresLock?: boolean;
+  requiresVision?: boolean;
+  fallback?: { provider: string; model?: string };
+}
+
+export interface LLMProvidersResponse {
+  providers: LLMProviderConfig[];
+  skills: Record<string, LLMSkillConfig>;
+}
+
 // ─── Visual Flow Dashboard functions ─────────────────────────────────────────
 
 export async function getFlowDefinition(baseUrl: string): Promise<FlowDefinition> {
@@ -587,6 +619,24 @@ export async function getFlowDefinition(baseUrl: string): Promise<FlowDefinition
 
 export async function getResourceStatus(baseUrl: string): Promise<ResourceStatus> {
   return request<ResourceStatus>(baseUrl, '/resource/status');
+}
+
+export async function getLLMProviders(baseUrl: string): Promise<LLMProvidersResponse> {
+  return request<LLMProvidersResponse>(baseUrl, '/flow/providers');
+}
+
+export async function updateSkillProvider(
+  baseUrl: string,
+  skillName: string,
+  update: { provider?: string; model?: string; temperature?: number; maxTokens?: number; fallback?: { provider: string; model?: string } },
+): Promise<void> {
+  const url = `${normalizeBaseUrl(baseUrl)}/flow/skill/${encodeURIComponent(skillName)}`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(update),
+  });
+  if (!res.ok) throw new Error(`Failed to update skill ${skillName}: ${res.status}`);
 }
 
 /**
@@ -614,4 +664,179 @@ export function subscribeToFlowEvents(
   };
 
   return () => source.close();
+}
+
+// ─── Image Generation Workflow types & functions ──────────────────────────────
+
+export interface ImageWorkflowProvider {
+  name: string;
+  label?: string;
+  executionMode: 'cloud' | 'local';
+  requiresLock?: boolean;
+  enabled: boolean;
+  priority: number;
+  workflowPath?: string | null;
+  generationType?: 'text2img' | 'img2img' | 'pulid';
+  description?: string;
+  prePrompt?: string;
+  envKey?: string | null;
+  preferWhen?: string;
+}
+
+export async function getImageWorkflows(baseUrl: string): Promise<{
+  providers: ImageWorkflowProvider[];
+  strategy: string;
+  maxAttempts: number;
+}> {
+  return request(baseUrl, '/flow/image-workflows');
+}
+
+export async function addImageWorkflow(
+  baseUrl: string,
+  provider: Omit<ImageWorkflowProvider, 'priority'> & { priority?: number },
+): Promise<{ ok: boolean; provider: ImageWorkflowProvider }> {
+  return request(baseUrl, '/flow/image-workflows', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(provider),
+  });
+}
+
+export async function updateImageWorkflow(
+  baseUrl: string,
+  name: string,
+  patch: Partial<ImageWorkflowProvider>,
+): Promise<{ ok: boolean; provider: ImageWorkflowProvider }> {
+  return request(baseUrl, `/flow/image-workflows/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteImageWorkflow(
+  baseUrl: string,
+  name: string,
+): Promise<{ ok: boolean }> {
+  return request(baseUrl, `/flow/image-workflows/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function updateImageDispatcher(
+  baseUrl: string,
+  patch: { strategy?: string; maxAttempts?: number },
+): Promise<{ ok: boolean }> {
+  return request(baseUrl, '/flow/image-gen', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+}
+
+export interface ImageRouterConfig {
+  model: string;
+  provider: string;
+  timeoutMs: number;
+}
+
+export async function getImageGenConfig(baseUrl: string): Promise<{
+  providers: ImageWorkflowProvider[];
+  strategy: string;
+  maxAttempts: number;
+  routerConfig: ImageRouterConfig;
+}> {
+  return request(baseUrl, '/flow/image-gen');
+}
+
+export async function updateImageRouterConfig(
+  baseUrl: string,
+  routerConfig: Partial<ImageRouterConfig>,
+): Promise<{ ok: boolean }> {
+  return request(baseUrl, '/flow/image-gen', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ routerConfig }),
+  });
+}
+
+// ─── LLM Extraction config ───────────────────────────────────────────────────
+
+export interface ExtractionSkillConfig {
+  purpose?: string;
+  provider: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  responseFormat?: string;
+  executionMode?: string;
+  requiresLock?: boolean;
+  fallback?: { provider: string; model?: string };
+}
+
+export interface LLMConfigResponse {
+  skills: { extraction: ExtractionSkillConfig };
+  providers: Record<string, LLMProviderConfig>;
+}
+
+export async function getLLMConfig(baseUrl: string): Promise<LLMConfigResponse> {
+  return request<LLMConfigResponse>(baseUrl, '/flow/llm-config');
+}
+
+export interface ProviderHealthResult {
+  ok: boolean;
+  reason: string | null;
+}
+
+export async function getProviderHealth(
+  baseUrl: string,
+): Promise<{ providers: Record<string, ProviderHealthResult> }> {
+  return request(baseUrl, '/flow/provider-health');
+}
+
+export async function updateExtractionConfig(
+  baseUrl: string,
+  patch: Partial<ExtractionSkillConfig>,
+): Promise<{ ok: boolean; extraction: ExtractionSkillConfig }> {
+  return request(baseUrl, '/flow/llm-config/extraction', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function getProviderModels(
+  baseUrl: string,
+  providerId: string,
+  opts?: { visionOnly?: boolean },
+): Promise<{ models: string[] }> {
+  const suffix = opts?.visionOnly ? '?vision=true' : '';
+  return request(baseUrl, `/flow/provider-models/${encodeURIComponent(providerId)}${suffix}`);
+}
+
+// ─── Vision Descriptor config ─────────────────────────────────────────────────
+
+export interface VisionDescriptorSkillConfig {
+  enabled: boolean;
+  provider: string;
+  model?: string;
+  timeoutMs?: number;
+  requiresLock?: boolean;
+  fallback?: { provider: string; model?: string };
+  notes?: string;
+}
+
+export async function getVisionDescriptorConfig(baseUrl: string): Promise<VisionDescriptorSkillConfig> {
+  return request<VisionDescriptorSkillConfig>(baseUrl, '/flow/vision-descriptor');
+}
+
+export async function updateVisionDescriptorConfig(
+  baseUrl: string,
+  patch: Partial<VisionDescriptorSkillConfig>,
+): Promise<{ ok: boolean; skill: VisionDescriptorSkillConfig }> {
+  return request(baseUrl, '/flow/vision-descriptor', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
 }

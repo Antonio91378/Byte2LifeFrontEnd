@@ -470,13 +470,27 @@ export default function BotChatsPage() {
     string | null
   >(null);
   const [trainingPromptLoading, setTrainingPromptLoading] = useState(false);
+  const [lastPromptMeta, setLastPromptMeta] = useState<{
+    conversationId: string;
+    conversationLabel: string;
+    totalPending: number;
+    timestamp: string;
+  } | null>(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('superPromptMeta') : null;
+      return stored ? JSON.parse(stored) : null;
+    } catch { return null; }
+  });
   const [trainingVerificationSavingId, setTrainingVerificationSavingId] =
     useState<string | null>(null);
   const [developerNoteInput, setDeveloperNoteInput] = useState("");
   const [developerNoteSaving, setDeveloperNoteSaving] = useState(false);
   const [promptInspectorExpanded, setPromptInspectorExpanded] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'flow'>('list');
+  const [flowFullscreen, setFlowFullscreen] = useState(false);
   const [flowEvents, setFlowEvents] = useState<StageEvent[]>([]);
+  const [watchedInviteUrl, setWatchedInviteUrl] = useState<string | null>(null);
+  const [creatingMonitoredChat, setCreatingMonitoredChat] = useState(false);
   const deferredSearch = useDeferredValue(search);
 
   function syncConversationIntoDashboard(conversation: BotConversation) {
@@ -506,6 +520,15 @@ export default function BotChatsPage() {
       ),
     );
   }
+
+  // Suppress body scroll while flow overlay is open
+  useEffect(() => {
+    if (viewMode === 'flow') {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = prev; };
+    }
+  }, [viewMode]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -1666,7 +1689,7 @@ export default function BotChatsPage() {
       setTrainingPromptLoading(true);
       const result = await getBotTrainingReviewPrompt(baseUrl);
 
-      if (result.total_conversations === 0) {
+      if ((result.total_pending ?? result.total_conversations) === 0) {
         await showAlert(
           "Nada pendente",
           "Todas as conversas estao verificadas no momento. Desative o selo de alguma conversa para inclui-la no proximo prompt.",
@@ -1676,9 +1699,20 @@ export default function BotChatsPage() {
       }
 
       await copyTextToClipboard(result.prompt);
+
+      const meta = {
+        conversationId: result.conversation_id ?? '',
+        conversationLabel: result.conversation_label ?? result.conversation_id ?? '',
+        totalPending: result.total_pending ?? result.total_conversations,
+        timestamp: new Date().toISOString(),
+      };
+      setLastPromptMeta(meta);
+      try { localStorage.setItem('superPromptMeta', JSON.stringify(meta)); } catch { /* ignore */ }
+
+      const remaining = (result.total_pending ?? 1) - 1;
       await showAlert(
         "Super prompt copiado",
-        `${result.total_conversations} conversa(s) nao verificada(s) foram copiadas para a area de transferencia em um unico prompt de treinamento.`,
+        `Conversa incluida: ${meta.conversationLabel}${remaining > 0 ? ` · ${remaining} pendente(s) apos esta` : ' · ultima pendente'}.`,
         "success",
       );
     } catch (promptError) {
@@ -2085,9 +2119,7 @@ export default function BotChatsPage() {
           </h2>
 
           <p className="mt-2 text-sm leading-relaxed text-gray-500">
-            Copia um prompt unico com todas as conversas nao verificadas,
-            incluindo historico integral, prompts do LLM, rastros de imagem e
-            comentarios do dev para analisar gaps e melhorar o orquestrador.
+            Copia o super prompt da conversa nao verificada mais antiga — uma por vez. Apos aplicar as melhorias, marque a conversa como verificada antes de gerar o proximo.
           </p>
 
           <div className="mt-4 rounded-[1.5rem] border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800">
@@ -2096,19 +2128,40 @@ export default function BotChatsPage() {
           </div>
 
           <div className="mt-4 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={handleCopyTrainingPrompt}
-              disabled={trainingPromptLoading}
-              className="inline-flex items-center gap-2 rounded-2xl bg-brand-purple px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-purple-light disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {trainingPromptLoading ? (
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-              ) : (
-                <Copy className="h-4 w-4" />
-              )}
-              Gerar e copiar super prompt
-            </button>
+            <div className="relative group">
+              <button
+                type="button"
+                onClick={handleCopyTrainingPrompt}
+                disabled={trainingPromptLoading}
+                className="inline-flex items-center gap-2 rounded-2xl bg-brand-purple px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-purple-light disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {trainingPromptLoading ? (
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+                Gerar e copiar super prompt
+              </button>
+
+              {/* Hover tooltip */}
+              <div className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-80 rounded-xl border border-gray-700 bg-gray-900 p-3 text-xs text-gray-200 opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100">
+                {lastPromptMeta ? (
+                  <>
+                    <p className="mb-1 font-semibold text-white">Ultima conversa gerada</p>
+                    <p className="mb-1 break-all font-mono text-gray-300">{lastPromptMeta.conversationLabel}</p>
+                    <p className="mb-2 text-gray-400">
+                      as {new Date(lastPromptMeta.timestamp).toLocaleTimeString('pt-BR', { hour12: false })}
+                      {' · '}{lastPromptMeta.totalPending} pendente(s) na epoca
+                    </p>
+                    <div className="border-t border-gray-700 pt-2 text-yellow-400">
+                      ⚠️ Ja verificou essa conversa? Marque-a como verificada antes de gerar a proxima.
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-gray-300">Gera o super prompt da conversa nao verificada mais antiga (uma por vez).</p>
+                )}
+              </div>
+            </div>
           </div>
         </section>
       </div>
@@ -2117,21 +2170,37 @@ export default function BotChatsPage() {
       {viewMode === 'flow' && (
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: '320px 1fr 280px',
-            gap: 0,
-            height: 'calc(100vh - 280px)',
-            minHeight: 500,
+            position: 'fixed',
+            inset: 0,
+            zIndex: 50,
+            display: 'flex',
+            flexDirection: 'column',
             background: '#0a0a0f',
-            borderRadius: 24,
             overflow: 'hidden',
-            border: '1px solid #c026d322',
           }}
         >
+          {/* Studio top bar */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', borderBottom: '1px solid #c026d322', flexShrink: 0, background: '#0a0a1a' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#c026d3', letterSpacing: '0.12em', fontWeight: 700 }}>◈ ORCHESTRATOR STUDIO</span>
+              <ResourceStatusBadge baseUrl={baseUrl} />
+            </div>
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              title="Voltar para lista"
+              style={{ fontFamily: 'monospace', fontSize: 11, background: 'none', border: '1px solid #ffffff22', color: '#ffffff44', borderRadius: 6, padding: '3px 10px', cursor: 'pointer' }}
+            >
+              ✕ Fechar
+            </button>
+          </div>
+
+          {/* 3-column body */}
+          <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '300px 1fr 280px', overflow: 'hidden', minHeight: 0 }}>
           {/* Left: conversation list */}
           <div style={{ borderRight: '1px solid #c026d322', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '12px 16px', borderBottom: '1px solid #c026d322', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-              <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#c026d3', letterSpacing: '0.08em', fontWeight: 700 }}>◈ CONVERSAS</span>
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid #c026d322', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#c026d388', letterSpacing: '0.08em', fontWeight: 700 }}>CONVERSAS</span>
               <button
                 type="button"
                 onClick={() => setRefreshTick((v) => v + 1)}
@@ -2140,7 +2209,74 @@ export default function BotChatsPage() {
                 ↺ atualizar
               </button>
             </div>
-            <div style={{ overflowY: 'auto', flex: 1 }}>
+
+            {/* Nova conversa monitorada */}
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid #c026d322', flexShrink: 0 }}>
+              <button
+                type="button"
+                disabled={creatingMonitoredChat}
+                onClick={async () => {
+                  setCreatingMonitoredChat(true);
+                  try {
+                    const result = await createPublicBotInvite(baseUrl, {
+                      frontendBaseUrl: window.location.origin,
+                      orchestratorBaseUrl: baseUrl,
+                      label: 'Monitorada via Flow Studio',
+                      maxMessages: 50,
+                    });
+                    const convId = result.conversation.conversation_id;
+                    setSelectedConversationId(convId);
+                    setWatchedInviteUrl(result.invite.url ?? null);
+                    setRefreshTick((v) => v + 1);
+                  } catch {
+                    /* ignore */
+                  } finally {
+                    setCreatingMonitoredChat(false);
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  fontFamily: 'monospace',
+                  fontSize: 10,
+                  background: creatingMonitoredChat ? '#c026d308' : '#c026d314',
+                  color: creatingMonitoredChat ? '#c026d366' : '#c026d3cc',
+                  border: '1px solid #c026d333',
+                  borderRadius: 6,
+                  padding: '6px 0',
+                  cursor: creatingMonitoredChat ? 'not-allowed' : 'pointer',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                {creatingMonitoredChat ? '◌ criando…' : '+ Nova conversa monitorada'}
+              </button>
+              {watchedInviteUrl && (
+                <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+                  <a
+                    href={watchedInviteUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ fontFamily: 'monospace', fontSize: 9, color: '#22d3ee', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none', border: '1px solid #22d3ee33', borderRadius: 4, padding: '2px 6px' }}
+                  >
+                    ↗ {watchedInviteUrl}
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => { void navigator.clipboard.writeText(watchedInviteUrl); }}
+                    style={{ fontFamily: 'monospace', fontSize: 9, background: 'none', color: '#22d3ee88', border: '1px solid #22d3ee33', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', flexShrink: 0 }}
+                  >
+                    ⧉
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWatchedInviteUrl(null)}
+                    style={{ fontFamily: 'monospace', fontSize: 9, background: 'none', color: '#ffffff33', border: '1px solid #ffffff22', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', flexShrink: 0 }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
               {listLoading && (
                 <div style={{ padding: 16, fontFamily: 'monospace', fontSize: 11, color: '#ffffff44', textAlign: 'center' }}>Carregando…</div>
               )}
@@ -2247,7 +2383,10 @@ export default function BotChatsPage() {
           </div>
 
           {/* Right: event log */}
-          <EventLog events={flowEvents} onClear={() => setFlowEvents([])} />
+          <div style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <EventLog events={flowEvents} onClear={() => setFlowEvents([])} />
+          </div>
+          </div>
         </div>
       )}
 
