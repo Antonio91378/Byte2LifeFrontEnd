@@ -46,7 +46,25 @@ function formatTs(ts: number): string {
 
 function summarize(name: string, p: Record<string, unknown>): string | null {
   if (p.stageId)          return String(p.stageId);
-  if (p.reason && name === 'image.gen_blocked') return `bloqueado: ${String(p.reason)}`;
+  if (name === 'image.gen_blocked' && p.reason) {
+    const reasonLabel: Record<string, string> = {
+      requires_reference_no_photo: 'sem foto de referência',
+      person_likeness_no_data: 'pessoa real — sem foto nem estilo',
+      unknown_character_needs_reference: 'personagem de nicho — aguardando referência',
+    };
+    const label = reasonLabel[String(p.reason)] ?? String(p.reason);
+    return `bloqueado: ${label}`;
+  }
+  if (name === 'image.dispatcher_selected' && p.provider) {
+    const reasoning = p.reasoning ? ` — ${String(p.reasoning).slice(0, 55)}` : '';
+    return `→ ${p.provider}${reasoning}`;
+  }
+  if (name === 'image.gen_started' && p.prompt) {
+    return String(p.prompt).slice(0, 80);
+  }
+  if (name === 'image.gen_completed' && p.provider) {
+    return `✓ ${p.provider}`;
+  }
   if (p.reason)           return String(p.reason).slice(0, 72);
   if (p.error)            return String(p.error).slice(0, 72);
   if (p.intent)           return `intent: ${p.intent}`;
@@ -94,6 +112,7 @@ export function EventLog({ events, onClear }: EventLogProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [copied, setCopied] = useState(false);
+  const [zoom, setZoom] = useState(1);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -164,6 +183,23 @@ export function EventLog({ events, onClear }: EventLogProps) {
 
         <div style={{ flex: 1 }} />
 
+        {/* zoom controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+          <button
+            onClick={() => setZoom((z) => Math.max(0.6, +(z - 0.1).toFixed(1)))}
+            title="Diminuir zoom"
+            style={{ background: '#ffffff09', border: '1px solid #ffffff18', color: '#ffffff44', fontFamily: 'monospace', fontSize: 10, width: 18, height: 18, borderRadius: 3, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+          >−</button>
+          <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff22', minWidth: 26, textAlign: 'center' }}>
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)))}
+            title="Aumentar zoom"
+            style={{ background: '#ffffff09', border: '1px solid #ffffff18', color: '#ffffff44', fontFamily: 'monospace', fontSize: 10, width: 18, height: 18, borderRadius: 3, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+          >+</button>
+        </div>
+
         {/* copy button */}
         {events.length > 0 && (
           <button
@@ -199,6 +235,7 @@ export function EventLog({ events, onClear }: EventLogProps) {
 
       {/* ── Event list ── */}
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '4px 0' }}>
+      <div style={{ zoom }}>
 
         {events.length === 0 && (
           <div style={{
@@ -285,6 +322,42 @@ export function EventLog({ events, onClear }: EventLogProps) {
                   borderTop: `1px solid ${isError ? '#ef444422' : isWarn ? '#f9731622' : '#ffffff0d'}`,
                 }}>
 
+                  {/* Dispatcher selection card */}
+                  {evt.eventName === 'image.dispatcher_selected' && !!payload.provider && (
+                    <div style={{
+                      background: '#1a0800',
+                      border: '1px solid #f9731444',
+                      borderRadius: 7,
+                      padding: '9px 11px',
+                      marginBottom: 10,
+                    }}>
+                      <div style={{ fontFamily: 'monospace', fontSize: 9, fontWeight: 700, color: '#f97316', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
+                        → Workflow selecionado
+                      </div>
+                      <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#f97316', fontWeight: 700, marginBottom: 4 }}>
+                        {String(payload.provider)}
+                      </div>
+                      {!!payload.reasoning && (
+                        <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff55', lineHeight: 1.65, marginBottom: !!payload.prompt ? 6 : 0 }}>
+                          <span style={{ color: '#f9731666' }}>Reasoning: </span>
+                          {String(payload.reasoning)}
+                        </div>
+                      )}
+                      {!!payload.prompt && (
+                        <>
+                          <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#f9731644', marginBottom: 3 }}>Prompt enviado:</div>
+                          <div style={{
+                            fontFamily: 'monospace', fontSize: 8, color: '#f97316aa', lineHeight: 1.6,
+                            wordBreak: 'break-word', background: '#0a0500', borderRadius: 5,
+                            padding: '5px 8px', border: '1px solid #f9731622', maxHeight: 120, overflow: 'auto',
+                          }}>
+                            {String(payload.prompt)}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
                   {/* Fallback callout card */}
                   {(isError || isWarn) && !!(payload.reason ?? payload.detail ?? payload.fallback ?? payload.fallbackProvider) && (
                     <div style={{
@@ -346,6 +419,7 @@ export function EventLog({ events, onClear }: EventLogProps) {
         })}
 
         <div ref={bottomRef} />
+      </div>{/* end zoom wrapper */}
       </div>
     </div>
   );

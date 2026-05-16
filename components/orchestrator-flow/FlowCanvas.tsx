@@ -26,6 +26,7 @@ import {
 } from '../../services/aiOrchestrator.service';
 import { AnimatedFlowEdge } from './CustomEdge';
 import { ImageGenSubFlow } from './ImageGenSubFlow';
+import { ImageJudgeSubFlow } from './ImageJudgeSubFlow';
 import { LLMExtractionSubFlow } from './LLMExtractionSubFlow';
 import { StageInspector } from './StageInspector';
 import { StageNode, type StageNodeData, type StageStatus } from './StageNode';
@@ -35,6 +36,7 @@ const EDGE_TYPES = { animatedFlow: AnimatedFlowEdge };
 
 const NODE_W = 200;
 const NODE_H = 80;
+
 
 const LAYER_EDGE_COLOR: Record<string, string> = {
   input:  '#22d3ee',
@@ -176,6 +178,7 @@ export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanv
   const [events, setEvents] = useState<StageEvent[]>([]);
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
+  const eventsRef = useRef<StageEvent[]>([]);
 
   useEffect(() => {
     getFlowDefinition(baseUrl).then(setDefinition).catch(() => {});
@@ -187,6 +190,7 @@ export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanv
     cleanupRef.current = null;
     setStageStatuses(new Map());
     setStageLastEvent(new Map());
+    eventsRef.current = [];
     setEvents([]);
 
     if (!conversationId) return;
@@ -198,8 +202,10 @@ export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanv
         for (const evt of raw.events) applyEventToStatus(evt, replayedStatuses, replayedLast);
         setStageStatuses(new Map(replayedStatuses));
         setStageLastEvent(new Map(replayedLast));
-        setEvents([...(raw.events as StageEvent[])]);
-        onEventsChange?.([...(raw.events as StageEvent[])]);
+        const replayedEvents = [...(raw.events as StageEvent[])];
+        eventsRef.current = replayedEvents;
+        setEvents(replayedEvents);
+        onEventsChange?.(replayedEvents);
         return;
       }
       const entry = raw as StageEvent;
@@ -210,11 +216,10 @@ export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanv
         if (sid) m.set(sid, entry.eventName);
         return m;
       });
-      setEvents((prev) => {
-        const updated = [...prev, entry];
-        onEventsChange?.(updated);
-        return updated;
-      });
+      const updated = [...eventsRef.current, entry];
+      eventsRef.current = updated;
+      setEvents(updated);
+      onEventsChange?.(updated);
     });
 
     cleanupRef.current = cleanup;
@@ -223,19 +228,53 @@ export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanv
 
   const { nodes, edges } = useMemo(() => definition ? buildGraph(definition) : { nodes: [], edges: [] }, [definition]);
 
-  const liveNodes = useMemo(
-    () => nodes.map((n) => ({
-      ...n,
-      data: {
-        ...n.data,
-        status: stageStatuses.get(n.id) ?? 'idle',
-        lastEventName: stageLastEvent.get(n.id),
-        selected: n.id === selectedStageId,
-        hasSubFlow: n.id === 'image_gen' || n.id === 'extraction',
-      },
-    })),
-    [nodes, stageStatuses, stageLastEvent, selectedStageId],
-  );
+  // Real-time tick: re-runs liveNodes every second while any stage is active.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const hasActive = [...stageStatuses.values()].some(s => s === 'active');
+    if (!hasActive) return;
+    const id = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [stageStatuses]);
+
+  // Compute per-stage durations by scanning the events array for stage.started/completed/failed pairs.
+  // For active stages (no endTs yet) we use Date.now() as an approximate elapsed value.
+  const liveNodes = useMemo(() => {
+    // Build a timing map from events
+    const timings = new Map<string, { startTs: number; endTs?: number }>();
+    for (const evt of events) {
+      const sid = evt.payload?.stageId as string | undefined;
+      if (!sid) continue;
+      if (evt.eventName === 'stage.started') {
+        timings.set(sid, { startTs: evt.ts });
+      } else if (evt.eventName === 'stage.completed' || evt.eventName === 'stage.failed') {
+        const ex = timings.get(sid);
+        if (ex && ex.endTs === undefined) timings.set(sid, { ...ex, endTs: evt.ts });
+      }
+    }
+
+    const now = Date.now();
+    return nodes.map((n) => {
+      const t = timings.get(n.id);
+      const status = stageStatuses.get(n.id) ?? 'idle';
+      const durationMs = t ? (t.endTs ?? (status === 'active' ? now : undefined)) !== undefined
+        ? (t.endTs ?? now) - t.startTs
+        : undefined : undefined;
+      const timeoutMs = (n.data as unknown as StageNodeData).stage?.timeoutMs;
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          status,
+          lastEventName: stageLastEvent.get(n.id),
+          selected: n.id === selectedStageId,
+          hasSubFlow: n.id === 'image_gen' || n.id === 'extraction' || n.id === 'image_judge',
+          durationMs,
+          timeoutMs,
+        },
+      };
+    });
+  }, [nodes, stageStatuses, stageLastEvent, selectedStageId, events, definition, tick]);
 
   const liveEdges = useMemo(
     () => edges.map((e) => {
@@ -252,18 +291,31 @@ export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanv
 
   const [imageGenSubFlowOpen, setImageGenSubFlowOpen] = useState(false);
   const [extractionSubFlowOpen, setExtractionSubFlowOpen] = useState(false);
+  const [imageJudgeSubFlowOpen, setImageJudgeSubFlowOpen] = useState(false);
   const { width: inspectorWidth, onMouseDown: onInspectorResizeDown } = useResizablePanel(300, 220, 700);
+
+  function closeAllSubFlows() {
+    setImageGenSubFlowOpen(false);
+    setExtractionSubFlowOpen(false);
+    setImageJudgeSubFlowOpen(false);
+  }
 
   const onNodeClick: NodeMouseHandler = (_event, node) => {
     if (node.id === 'image_gen') {
+      closeAllSubFlows();
       setImageGenSubFlowOpen(true);
-      setExtractionSubFlowOpen(false);
       setSelectedStageId(null);
       return;
     }
     if (node.id === 'extraction') {
+      closeAllSubFlows();
       setExtractionSubFlowOpen(true);
-      setImageGenSubFlowOpen(false);
+      setSelectedStageId(null);
+      return;
+    }
+    if (node.id === 'image_judge') {
+      closeAllSubFlows();
+      setImageJudgeSubFlowOpen(true);
       setSelectedStageId(null);
       return;
     }
@@ -327,6 +379,27 @@ export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanv
         )}
       </AnimatePresence>
 
+      {/* AI Judge sub-flow overlay */}
+      <AnimatePresence>
+        {imageJudgeSubFlowOpen && definition && (
+          <motion.div
+            key="image-judge-subflow"
+            initial={{ x: '100%', opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: '100%', opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+            style={{ position: 'absolute', inset: 0, zIndex: 20, background: '#0a0a0f' }}
+          >
+            <ImageJudgeSubFlow
+              baseUrl={baseUrl}
+              definition={definition}
+              conversationId={conversationId}
+              onBack={() => setImageJudgeSubFlowOpen(false)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ReactFlow */}
       <div style={{ flex: 1, position: 'relative' }}>
         <ReactFlow
@@ -384,6 +457,15 @@ export function FlowCanvas({ baseUrl, conversationId, onEventsChange }: FlowCanv
             baseUrl={baseUrl}
             onClose={() => setSelectedStageId(null)}
             onSkillUpdated={() => getFlowDefinition(baseUrl).then(setDefinition).catch(() => {})}
+            onStageTimeoutUpdated={(stageId, timeoutMs) => {
+              setDefinition((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  stages: prev.stages.map((s) => s.id === stageId ? { ...s, timeoutMs } : s),
+                };
+              });
+            }}
           />
         </div>
       )}

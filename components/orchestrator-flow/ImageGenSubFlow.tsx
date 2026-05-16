@@ -21,14 +21,19 @@ import { ModelSelector } from './ModelSelector';
 import {
   addImageWorkflow,
   deleteImageWorkflow,
+  getCustomWorkflows,
   getImageGenConfig,
   getImageWorkflows,
   getVisionDescriptorConfig,
+  scanCustomWorkflows,
   subscribeToFlowEvents,
+  updateCustomWorkflow,
   updateImageDispatcher,
   updateImageRouterConfig,
   updateImageWorkflow,
   updateVisionDescriptorConfig,
+  type CustomWorkflowsState,
+  type DiscoveredWorkflow,
   type FlowDefinition,
   type ImageRouterConfig,
   type ImageWorkflowProvider,
@@ -56,6 +61,8 @@ interface DispatcherNodeData extends Record<string, unknown> {
   maxAttempts: number;
   onOpenPanel: () => void;
   status?: NodeStatus;
+  durationMs?: number;
+  limitMs?: number;
 }
 
 interface LLMRouterNodeData extends Record<string, unknown> {
@@ -65,6 +72,14 @@ interface LLMRouterNodeData extends Record<string, unknown> {
   visionModel: string;
   onOpenPanel: () => void;
   status?: NodeStatus;
+  durationMs?: number;
+  limitMs?: number;
+}
+
+interface ExecInfo {
+  prompt: string;
+  reasoning: string;
+  ts: number;
 }
 
 interface WorkflowNodeData extends Record<string, unknown> {
@@ -73,6 +88,109 @@ interface WorkflowNodeData extends Record<string, unknown> {
   onEdit: (name: string) => void;
   status?: NodeStatus;
   isActiveProvider?: boolean;
+  lastExecution?: ExecInfo;
+  durationMs?: number;
+  limitMs?: number;
+}
+
+interface NodeTime {
+  startTs: number;
+  endTs?: number;
+}
+
+// ─── Timing helpers ───────────────────────────────────────────────────────────
+
+function fmtSec(ms: number) { return (ms / 1000).toFixed(1); }
+
+function getTimingColor(ms: number, limitMs?: number): string {
+  if (!limitMs) return '#22d3ee';
+  const r = ms / limitMs;
+  if (r >= 0.9) return '#ef4444';
+  if (r >= 0.6) return '#f97316';
+  if (r >= 0.3) return '#fbbf24';
+  return '#22c55e';
+}
+
+/** Compact timing badge — shown inside node when status is completed/failed */
+function TimingBadge({ durationMs, limitMs, accentColor }: { durationMs: number; limitMs?: number; accentColor?: string }) {
+  const color = accentColor ?? getTimingColor(durationMs, limitMs);
+  return (
+    <div style={{
+      fontFamily: 'monospace',
+      fontSize: 8,
+      fontWeight: 700,
+      color,
+      background: `${color}15`,
+      border: `1px solid ${color}33`,
+      borderRadius: 4,
+      padding: '2px 6px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 3,
+      marginTop: 4,
+    }}>
+      ⏱ {fmtSec(durationMs)}s
+    </div>
+  );
+}
+
+/** Full timing tooltip rendered inside a positioned parent (parent must have position:relative, overflow:visible) */
+function TimingTooltip({
+  label, durationMs, limitMs, color, isActive = false,
+}: {
+  label: string;
+  durationMs: number;
+  limitMs?: number;
+  color: string;
+  isActive?: boolean;
+}) {
+  const tColor = isActive ? color : getTimingColor(durationMs, limitMs);
+  const pct = limitMs ? Math.min((durationMs / limitMs) * 100, 100) : null;
+  const isTimeout = !isActive && limitMs !== undefined && durationMs >= limitMs * 0.85;
+  return (
+    <div style={{
+      position: 'absolute',
+      bottom: 'calc(100% + 12px)',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      background: '#060010',
+      border: `1.5px solid ${tColor}88`,
+      borderRadius: 9,
+      padding: '10px 14px',
+      zIndex: 9999,
+      pointerEvents: 'none',
+      whiteSpace: 'nowrap',
+      boxShadow: `0 6px 28px ${tColor}33`,
+      minWidth: 155,
+    }}>
+      <div style={{ fontFamily: 'monospace', fontSize: 8, color: tColor, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ fontSize: 11 }}>{isTimeout ? '⏰' : isActive ? '⏳' : '⏱'}</span>{label}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 3 }}>
+        <span style={{ fontFamily: 'monospace', fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: '-0.03em', lineHeight: 1 }}>{fmtSec(durationMs)}</span>
+        <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#fff8', fontWeight: 700 }}>s</span>
+        {isActive && <span style={{ fontFamily: 'monospace', fontSize: 8, color: tColor, marginLeft: 2 }}>e contando…</span>}
+      </div>
+      {pct !== null && !isActive && (
+        <>
+          <div style={{ marginTop: 4, marginBottom: 3 }}>
+            <div style={{ background: '#fff1', borderRadius: 3, height: 5, width: '100%', overflow: 'hidden' }}>
+              <div style={{ width: `${pct}%`, height: '100%', background: tColor, borderRadius: 3, boxShadow: `0 0 6px ${tColor}` }} />
+            </div>
+          </div>
+          <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#fff3', display: 'flex', justifyContent: 'space-between' }}>
+            <span>limite: <span style={{ color: '#fff5' }}>{(limitMs! / 1000).toFixed(0)}s</span></span>
+            <span style={{ color: tColor }}>{pct.toFixed(0)}% usado</span>
+          </div>
+        </>
+      )}
+      {isTimeout && (
+        <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#ef4444cc', marginTop: 6, borderTop: '1px solid #ef444422', paddingTop: 5, lineHeight: 1.6 }}>
+          ⚠ Provável timeout.<br />Considere trocar o LLM.
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Label styles ─────────────────────────────────────────────────────────────
@@ -103,16 +221,19 @@ const inputStyle: React.CSSProperties = {
 // ─── WorkflowProviderNode (custom ReactFlow node) ─────────────────────────────
 
 function WorkflowProviderNode({ data }: NodeProps) {
-  const { provider, onToggle, onEdit, status = 'idle', isActiveProvider = false } = data as WorkflowNodeData;
+  const { provider, onToggle, onEdit, status = 'idle', isActiveProvider = false, lastExecution, durationMs, limitMs = 90_000 } = data as WorkflowNodeData;
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [timingDismissed, setTimingDismissed] = useState(false);
 
   const isEnabled = provider.enabled !== false;
   const isCloud = provider.executionMode === 'cloud';
   const accentColor = isEnabled ? (isCloud ? '#22d3ee' : '#f97316') : '#666666';
-  const isAnimated = status === 'active' || isActiveProvider;
-  const glowShadow = isActiveProvider
-    ? `0 0 22px ${accentColor}`
-    : status === 'active'
-      ? `0 0 14px ${accentColor}99`
+  // Pulse only while actively generating; steady glow once selected/completed
+  const isAnimated = status === 'active';
+  const glowShadow = isActiveProvider && status === 'completed'
+    ? `0 0 14px ${accentColor}88`
+    : isActiveProvider || status === 'active'
+      ? `0 0 22px ${accentColor}`
       : 'none';
 
   const genTypeLabel =
@@ -141,18 +262,92 @@ function WorkflowProviderNode({ data }: NodeProps) {
         maxWidth: 200,
         fontFamily: 'monospace',
         opacity: isEnabled ? 1 : 0.45,
-        transition: 'opacity 0.2s, border-color 0.2s, box-shadow 0.2s',
+        transition: 'opacity 0.2s, border-color 0.2s, box-shadow 0.3s',
         cursor: 'pointer',
         boxShadow: glowShadow,
-        animation: isAnimated ? 'nodeGlow 1.4s ease-in-out infinite alternate' : undefined,
+        animation: isAnimated
+          ? `${isCloud ? 'nodeGlowCyan' : 'nodeGlowOrange'} 1.1s ease-in-out infinite alternate`
+          : undefined,
+        position: 'relative',
+        overflow: 'visible',
       }}
       onMouseEnter={(e) => {
+        setShowTooltip(true);
         if (!isAnimated) (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 12px ${accentColor}66`;
       }}
       onMouseLeave={(e) => {
+        setShowTooltip(false);
         if (!isAnimated) (e.currentTarget as HTMLDivElement).style.boxShadow = glowShadow;
       }}
     >
+      {/* Status badge — always visible when active/completed */}
+      {(status === 'active' || (isActiveProvider && status === 'completed')) && (
+        <div style={{
+          position: 'absolute',
+          top: -10,
+          right: -4,
+          background: status === 'active' ? accentColor : '#22c55e',
+          color: '#000000',
+          fontFamily: 'monospace',
+          fontSize: 7,
+          fontWeight: 800,
+          letterSpacing: '0.05em',
+          padding: '1px 5px',
+          borderRadius: 4,
+          zIndex: 10,
+          pointerEvents: 'none',
+          boxShadow: `0 0 8px ${status === 'active' ? accentColor : '#22c55e'}`,
+        }}>
+          {status === 'active' ? '● GERANDO' : '✓ SELECIONADO'}
+        </div>
+      )}
+
+      {/* Tooltip — shown on hover: execution info only */}
+      {showTooltip && lastExecution && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 'calc(100% + 14px)',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 290,
+            background: '#06000e',
+            border: `1.5px solid ${accentColor}99`,
+            borderRadius: 9,
+            padding: '11px 13px',
+            zIndex: 9999,
+            boxShadow: `0 6px 32px ${accentColor}44`,
+            pointerEvents: 'none',
+          }}
+        >
+          {/* ── Execution info section ── */}
+          {lastExecution && (
+            <>
+              <div style={{ fontFamily: 'monospace', fontSize: 8, color: accentColor, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ fontSize: 10 }}>◈</span>
+                Última execução · {new Date(lastExecution.ts).toLocaleTimeString('pt-BR', { hour12: false })}
+              </div>
+              {lastExecution.reasoning && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontFamily: 'monospace', fontSize: 7.5, color: '#c026d3', marginBottom: 3, letterSpacing: '0.04em' }}>REASONING</div>
+                  <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff77', lineHeight: 1.6, borderLeft: '2px solid #c026d344', paddingLeft: 6 }}>
+                    {lastExecution.reasoning.slice(0, 160)}{lastExecution.reasoning.length > 160 ? '…' : ''}
+                  </div>
+                </div>
+              )}
+              <div style={{ fontFamily: 'monospace', fontSize: 7.5, color: accentColor, marginBottom: 4, letterSpacing: '0.04em' }}>PROMPT ENVIADO</div>
+              <div style={{
+                fontFamily: 'monospace', fontSize: 7.5, color: `${accentColor}cc`, lineHeight: 1.65,
+                wordBreak: 'break-word', maxHeight: 130, overflowY: 'auto',
+                background: '#100500', borderRadius: 5, padding: '6px 9px',
+                border: `1px solid ${accentColor}22`,
+              }}>
+                {lastExecution.prompt.slice(0, 400)}{lastExecution.prompt.length > 400 ? '…' : ''}
+              </div>
+            </>
+          )}
+        </div>
+      )}
       <Handle
         type="target"
         position={Position.Left}
@@ -288,6 +483,37 @@ function WorkflowProviderNode({ data }: NodeProps) {
         </div>
       )}
 
+      {/* Compact badge — only in dismissed mode */}
+      {durationMs !== undefined && (status === 'completed' || status === 'failed') && timingDismissed && (
+        <TimingBadge durationMs={durationMs} limitMs={limitMs} accentColor={status === 'failed' ? '#ef4444' : undefined} />
+      )}
+      {/* Inline timing panel — default visible, × to dismiss */}
+      {durationMs !== undefined && status !== 'idle' && !timingDismissed && (
+        <div style={{ marginTop: 6, padding: '5px 7px', background: `${accentColor}0d`, border: `1px solid ${accentColor}22`, borderRadius: 6, position: 'relative' }}>
+          <button onClick={(e) => { e.stopPropagation(); setTimingDismissed(true); }} style={{ position: 'absolute', top: 1, right: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#ffffff33', fontSize: 12, padding: 0, lineHeight: 1 }} title="Ocultar">×</button>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginBottom: 4 }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 8, color: getTimingColor(durationMs, limitMs) }}>⏱</span>
+            <span style={{ fontFamily: 'monospace', fontSize: 18, fontWeight: 800, color: '#fff', lineHeight: 1 }}>{fmtSec(durationMs)}</span>
+            <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff55' }}>s</span>
+            {status === 'active' && <span style={{ fontFamily: 'monospace', fontSize: 7, color: accentColor, marginLeft: 2 }}>contando…</span>}
+          </div>
+          {status !== 'active' && (
+            <>
+              <div style={{ background: '#ffffff11', borderRadius: 2, height: 3, width: '100%', overflow: 'hidden', marginBottom: 2 }}>
+                <div style={{ width: `${Math.min((durationMs / limitMs) * 100, 100)}%`, height: '100%', background: getTimingColor(durationMs, limitMs), borderRadius: 2 }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', fontSize: 7.5, color: '#ffffff2a' }}>
+                <span>lim: {(limitMs / 1000).toFixed(0)}s</span>
+                <span style={{ color: getTimingColor(durationMs, limitMs) }}>{Math.min((durationMs / limitMs) * 100, 100).toFixed(0)}%</span>
+              </div>
+            </>
+          )}
+          {status === 'failed' && durationMs >= limitMs * 0.85 && (
+            <div style={{ fontFamily: 'monospace', fontSize: 7.5, color: '#ef4444aa', marginTop: 4 }}>⚠ provável timeout</div>
+          )}
+        </div>
+      )}
+
       {/* Edit hint */}
       <div
         style={{
@@ -308,7 +534,9 @@ function WorkflowProviderNode({ data }: NodeProps) {
 // ─── DispatcherNode (custom ReactFlow node) ───────────────────────────────────
 
 function DispatcherNode({ data }: NodeProps) {
-  const { strategy, maxAttempts, onOpenPanel, status = 'idle' } = data as DispatcherNodeData;
+  const { strategy, maxAttempts, onOpenPanel, status = 'idle', durationMs, limitMs = 20_000 } = data as DispatcherNodeData;
+  const [hovered, setHovered] = useState(true);
+  const [timingDismissed, setTimingDismissed] = useState(false);
   const borderColor = status === 'active' ? '#c026d3' : status === 'completed' ? '#22c55eaa' : '#c026d3aa';
 
   return (
@@ -318,7 +546,7 @@ function DispatcherNode({ data }: NodeProps) {
         onOpenPanel();
       }}
       style={{
-        background: '#1a0028',
+        background: status === 'active' ? '#2a003a' : '#1a0028',
         border: `1.5px solid ${borderColor}`,
         borderRadius: 10,
         padding: '10px 14px',
@@ -326,14 +554,40 @@ function DispatcherNode({ data }: NodeProps) {
         fontFamily: 'monospace',
         cursor: 'pointer',
         transition: 'box-shadow 0.2s',
+        boxShadow: status === 'active' ? `0 0 16px ${borderColor}` : status === 'completed' ? `0 0 6px ${borderColor}44` : 'none',
+        animation: status === 'active' ? 'nodeGlowPurple 1.1s ease-in-out infinite alternate' : undefined,
+        position: 'relative',
+        overflow: 'visible',
       }}
       onMouseEnter={(e) => {
+        setHovered(true);
         (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 14px ${borderColor}88`;
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLDivElement).style.boxShadow = status === 'active' ? `0 0 16px ${borderColor}` : 'none';
+        setHovered(false);
+        (e.currentTarget as HTMLDivElement).style.boxShadow = status === 'active' ? `0 0 16px ${borderColor}` : status === 'completed' ? `0 0 6px ${borderColor}44` : 'none';
       }}
     >
+      {/* Timing tooltip — hover-only after inline panel is dismissed */}
+      {hovered && durationMs !== undefined && status !== 'idle' && timingDismissed && (
+        <TimingTooltip
+          label="Dispatcher"
+          durationMs={durationMs}
+          limitMs={limitMs}
+          color="#c026d3"
+          isActive={status === 'active'}
+        />
+      )}
+      {status !== 'idle' && (
+        <div style={{
+          position: 'absolute', top: -9, right: -3,
+          background: status === 'active' ? '#c026d3' : status === 'completed' ? '#22c55e' : '#ef4444',
+          color: '#000', fontFamily: 'monospace', fontSize: 7, fontWeight: 800,
+          padding: '1px 4px', borderRadius: 3, zIndex: 10, pointerEvents: 'none',
+        }}>
+          {status === 'active' ? '●' : status === 'completed' ? '✓' : '✗'}
+        </div>
+      )}
       <Handle
         type="target"
         position={Position.Left}
@@ -394,7 +648,34 @@ function DispatcherNode({ data }: NodeProps) {
         >
           max {maxAttempts}
         </span>
+        {/* Compact badge shown only in dismissed mode */}
+        {durationMs !== undefined && (status === 'completed' || status === 'failed') && timingDismissed && (
+          <TimingBadge durationMs={durationMs} limitMs={limitMs} />
+        )}
       </div>
+      {/* Inline timing panel — default visible, × to dismiss */}
+      {durationMs !== undefined && status !== 'idle' && !timingDismissed && (
+        <div style={{ marginTop: 7, padding: '5px 7px', background: '#c026d30d', border: '1px solid #c026d322', borderRadius: 6, position: 'relative' }}>
+          <button onClick={(e) => { e.stopPropagation(); setTimingDismissed(true); }} style={{ position: 'absolute', top: 1, right: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#ffffff33', fontSize: 12, padding: 0, lineHeight: 1 }} title="Ocultar">×</button>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginBottom: 4 }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 8, color: getTimingColor(durationMs, limitMs) }}>⏱</span>
+            <span style={{ fontFamily: 'monospace', fontSize: 18, fontWeight: 800, color: '#fff', lineHeight: 1 }}>{fmtSec(durationMs)}</span>
+            <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff55' }}>s</span>
+            {status === 'active' && <span style={{ fontFamily: 'monospace', fontSize: 7, color: '#c026d3', marginLeft: 2 }}>contando…</span>}
+          </div>
+          {status !== 'active' && (
+            <>
+              <div style={{ background: '#ffffff11', borderRadius: 2, height: 3, width: '100%', overflow: 'hidden', marginBottom: 2 }}>
+                <div style={{ width: `${Math.min((durationMs / limitMs) * 100, 100)}%`, height: '100%', background: getTimingColor(durationMs, limitMs), borderRadius: 2 }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', fontSize: 7.5, color: '#ffffff2a' }}>
+                <span>lim: {(limitMs / 1000).toFixed(0)}s</span>
+                <span style={{ color: getTimingColor(durationMs, limitMs) }}>{Math.min((durationMs / limitMs) * 100, 100).toFixed(0)}%</span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -402,7 +683,9 @@ function DispatcherNode({ data }: NodeProps) {
 // ─── LLMRouterNode (custom ReactFlow node) ───────────────────────────────────
 
 function LLMRouterNode({ data }: NodeProps) {
-  const { model, provider, visionEnabled, visionModel, onOpenPanel, status = 'idle' } = data as LLMRouterNodeData;
+  const { model, provider, visionEnabled, visionModel, onOpenPanel, status = 'idle', durationMs, limitMs = 20_000 } = data as LLMRouterNodeData;
+  const [hovered, setHovered] = useState(true);
+  const [timingDismissed, setTimingDismissed] = useState(false);
   const isEnabled = !!model;
   const isActive = status === 'active';
   const isCompleted = status === 'completed';
@@ -420,16 +703,40 @@ function LLMRouterNode({ data }: NodeProps) {
         fontFamily: 'monospace',
         cursor: 'pointer',
         transition: 'box-shadow 0.2s',
-        boxShadow: isActive ? `0 0 16px ${color}` : 'none',
-        animation: isActive ? 'nodeGlow 1.4s ease-in-out infinite alternate' : undefined,
+        boxShadow: isActive ? `0 0 16px ${color}` : isCompleted ? `0 0 6px ${color}44` : 'none',
+        animation: isActive ? 'nodeGlowCyan 1.1s ease-in-out infinite alternate' : undefined,
+        position: 'relative',
+        overflow: 'visible',
       }}
       onMouseEnter={(e) => {
+        setHovered(true);
         if (!isActive) (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 12px ${color}66`;
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLDivElement).style.boxShadow = isActive ? `0 0 16px ${color}` : 'none';
+        setHovered(false);
+        (e.currentTarget as HTMLDivElement).style.boxShadow = isActive ? `0 0 16px ${color}` : isCompleted ? `0 0 6px ${color}44` : 'none';
       }}
     >
+      {/* Timing tooltip — hover-only after inline panel dismissed */}
+      {hovered && durationMs !== undefined && status !== 'idle' && timingDismissed && (
+        <TimingTooltip
+          label="LLM Router"
+          durationMs={durationMs}
+          limitMs={limitMs}
+          color="#22d3ee"
+          isActive={isActive}
+        />
+      )}
+      {(isActive || isCompleted) && (
+        <div style={{
+          position: 'absolute', top: -9, right: -3,
+          background: isActive ? '#22d3ee' : '#22c55e',
+          color: '#000', fontFamily: 'monospace', fontSize: 7, fontWeight: 800,
+          padding: '1px 4px', borderRadius: 3, zIndex: 10, pointerEvents: 'none',
+        }}>
+          {isActive ? '●' : '✓'}
+        </div>
+      )}
       <Handle type="target" position={Position.Left} style={{ background: color, borderColor: color }} />
       <Handle type="source" position={Position.Right} style={{ background: color, borderColor: color }} />
 
@@ -463,6 +770,33 @@ function LLMRouterNode({ data }: NodeProps) {
           <span style={{ fontStyle: 'italic' }}>vision: off</span>
         )}
       </div>
+      {/* Compact badge — only in dismissed mode */}
+      {durationMs !== undefined && (isCompleted || status === 'failed') && timingDismissed && (
+        <TimingBadge durationMs={durationMs} limitMs={limitMs} accentColor={status === 'failed' ? '#ef4444' : '#22d3ee'} />
+      )}
+      {/* Inline timing panel — default visible, × to dismiss */}
+      {durationMs !== undefined && status !== 'idle' && !timingDismissed && (
+        <div style={{ marginTop: 7, padding: '5px 7px', background: '#22d3ee0d', border: '1px solid #22d3ee22', borderRadius: 6, position: 'relative' }}>
+          <button onClick={(e) => { e.stopPropagation(); setTimingDismissed(true); }} style={{ position: 'absolute', top: 1, right: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#ffffff33', fontSize: 12, padding: 0, lineHeight: 1 }} title="Ocultar">×</button>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginBottom: 4 }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 8, color: getTimingColor(durationMs, limitMs) }}>⏱</span>
+            <span style={{ fontFamily: 'monospace', fontSize: 18, fontWeight: 800, color: '#fff', lineHeight: 1 }}>{fmtSec(durationMs)}</span>
+            <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff55' }}>s</span>
+            {isActive && <span style={{ fontFamily: 'monospace', fontSize: 7, color: '#22d3ee', marginLeft: 2 }}>contando…</span>}
+          </div>
+          {!isActive && (
+            <>
+              <div style={{ background: '#ffffff11', borderRadius: 2, height: 3, width: '100%', overflow: 'hidden', marginBottom: 2 }}>
+                <div style={{ width: `${Math.min((durationMs / limitMs) * 100, 100)}%`, height: '100%', background: getTimingColor(durationMs, limitMs), borderRadius: 2 }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', fontSize: 7.5, color: '#ffffff2a' }}>
+                <span>lim: {(limitMs / 1000).toFixed(0)}s</span>
+                <span style={{ color: getTimingColor(durationMs, limitMs) }}>{Math.min((durationMs / limitMs) * 100, 100).toFixed(0)}%</span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -745,7 +1079,7 @@ function buildNodes(
 
 const DEFAULT_ROUTER_CONFIG: ImageRouterConfig = { model: '', provider: 'ollama', timeoutMs: 12000 };
 
-export function ImageGenSubFlow({ baseUrl, onBack, conversationId }: ImageGenSubFlowProps) {
+export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }: ImageGenSubFlowProps) {
   const [providers, setProviders] = useState<ImageWorkflowProvider[]>([]);
   const [strategy, setStrategy] = useState('priority_list');
   const [maxAttempts, setMaxAttempts] = useState(3);
@@ -771,6 +1105,14 @@ export function ImageGenSubFlow({ baseUrl, onBack, conversationId }: ImageGenSub
     description: '',
   });
 
+  // ─── Custom Workflow Scan state ───────────────────────────────────────────
+  const [scanPanelOpen, setScanPanelOpen] = useState(false);
+  const [customWf, setCustomWf] = useState<CustomWorkflowsState>({ folder: null, discovered: {} });
+  const [scanFolder, setScanFolder] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [savingWf, setSavingWf] = useState<string | null>(null);
+
   // ─── Panel resize ─────────────────────────────────────────────────────────
 
   const { width: panelWidth, onMouseDown: onResizeMouseDown } = useResizablePanel(320, 260, 860);
@@ -792,8 +1134,24 @@ export function ImageGenSubFlow({ baseUrl, onBack, conversationId }: ImageGenSub
   // ─── SSE animation state ───────────────────────────────────────────────────
 
   const [nodeStatuses, setNodeStatuses] = useState<Map<string, NodeStatus>>(new Map());
+  const [tick, setTick] = useState(0);
   const [activeProviderId, setActiveProviderId] = useState<string | null>(null);
+  const [execInfoMap, setExecInfoMap] = useState<Map<string, ExecInfo>>(new Map());
+  const [nodeTimes, setNodeTimes] = useState<Map<string, NodeTime>>(new Map());
+  const activeProviderRef = useRef<string | null>(null);
+  const pendingPromptRef = useRef<string | null>(null);
   const sseCleanupRef = useRef<(() => void) | null>(null);
+
+  // Real-time tick: re-runs liveNodes every second while any node is active.
+  useEffect(() => {
+    const hasActive = [...nodeStatuses.values()].some(s => s === 'active');
+    if (!hasActive) return;
+    const id = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [nodeStatuses]);
+
+  // Keep ref in sync with state so applyImageEvent can access it without closure issues
+  useEffect(() => { activeProviderRef.current = activeProviderId; }, [activeProviderId]);
 
   // ─── Populate edit form when a provider is selected ───────────────────────
 
@@ -837,9 +1195,93 @@ export function ImageGenSubFlow({ baseUrl, onBack, conversationId }: ImageGenSub
         setVisionForm(vc);
       })
       .catch(() => {});
+
+    getCustomWorkflows(baseUrl)
+      .then((s) => {
+        setCustomWf(s);
+        setScanFolder(s.folder ?? '');
+      })
+      .catch(() => {});
   }, [baseUrl]);
 
+  async function handleScan() {
+    setScanning(true);
+    setScanError(null);
+    try {
+      const result = await scanCustomWorkflows(baseUrl, scanFolder || undefined);
+      setCustomWf({ folder: result.folder, discovered: result.discovered });
+    } catch (e: unknown) {
+      setScanError(e instanceof Error ? e.message : 'Erro ao escanear');
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  async function handleToggleCustomWf(name: string, entry: DiscoveredWorkflow) {
+    setSavingWf(name);
+    try {
+      const result = await updateCustomWorkflow(baseUrl, name, { enabled: !entry.enabled });
+      setCustomWf((prev) => ({
+        ...prev,
+        discovered: { ...prev.discovered, [name]: result.workflow },
+      }));
+      // Refresh providers list so the new custom_* provider appears in the canvas
+      const { providers: p } = await getImageWorkflows(baseUrl);
+      setProviders(p);
+    } catch {
+      /* silently fail */
+    } finally {
+      setSavingWf(null);
+    }
+  }
+
+  async function handleSetCustomWfType(name: string, generationType: 'txt2img' | 'img2img') {
+    setSavingWf(name);
+    try {
+      const result = await updateCustomWorkflow(baseUrl, name, { generationType });
+      setCustomWf((prev) => ({
+        ...prev,
+        discovered: { ...prev.discovered, [name]: result.workflow },
+      }));
+    } catch {
+      /* silently fail */
+    } finally {
+      setSavingWf(null);
+    }
+  }
+
   // ─── SSE animation subscription ───────────────────────────────────────────
+
+  function applyTimeEvent(
+    eventName: string,
+    payload: Record<string, unknown> | undefined,
+    ts: number,
+    times: Map<string, NodeTime>,
+  ) {
+    const end = (id: string) => { const t = times.get(id); if (t && !t.endTs) times.set(id, { ...t, endTs: ts }); };
+    if (eventName === 'stage.started' && payload?.stageId === 'image_gen') {
+      times.set('entry', { startTs: ts });
+    } else if (eventName === 'image.gen_started') {
+      // Routing phase starts (dispatcher + LLM router)
+      times.set('dispatcher', { startTs: ts });
+      times.set('llmRouter', { startTs: ts });
+    } else if (eventName === 'image.dispatcher_selected') {
+      // Routing done → provider generation starts
+      end('dispatcher');
+      end('llmRouter');
+      const prov = payload?.provider as string | undefined;
+      if (prov) times.set(`provider_${prov}`, { startTs: ts });
+    } else if (eventName === 'image.gen_completed') {
+      const prov = payload?.provider as string | undefined;
+      if (prov) end(`provider_${prov}`);
+    } else if (eventName === 'stage.completed' && payload?.stageId === 'image_gen') {
+      end('entry');
+    } else if (eventName === 'stage.failed' && payload?.stageId === 'image_gen') {
+      end('entry');
+      end('dispatcher');
+      end('llmRouter');
+    }
+  }
 
   function applyImageEvent(
     eventName: string,
@@ -856,11 +1298,20 @@ export function ImageGenSubFlow({ baseUrl, onBack, conversationId }: ImageGenSub
     } else if (eventName === 'image.dispatcher_selected') {
       m.set('dispatcher', 'completed'); m.set('llmRouter', 'completed');
       const sel = payload?.provider as string | undefined;
+      if (sel) m.set(`provider_${sel}`, 'active');
       return sel ? `provider_${sel}` : null;
+    } else if (eventName === 'image.gen_completed') {
+      const prov = payload?.provider as string | undefined;
+      if (prov) m.set(`provider_${prov}`, 'completed');
+      m.set('entry', 'completed');
     } else if (eventName === 'stage.completed' && payload?.stageId === 'image_gen') {
       m.set('entry', 'completed'); m.set('dispatcher', 'completed'); m.set('llmRouter', 'completed');
+      const activeProv = activeProviderRef.current;
+      if (activeProv) m.set(activeProv, 'completed');
     } else if (eventName === 'stage.failed' && payload?.stageId === 'image_gen') {
       m.set('entry', 'failed'); m.set('dispatcher', 'failed'); m.set('llmRouter', 'failed');
+      const activeProv = activeProviderRef.current;
+      if (activeProv) m.set(activeProv, 'failed');
     }
     return undefined;
   }
@@ -870,6 +1321,9 @@ export function ImageGenSubFlow({ baseUrl, onBack, conversationId }: ImageGenSub
     sseCleanupRef.current = null;
     setNodeStatuses(new Map());
     setActiveProviderId(null);
+    setExecInfoMap(new Map());
+    setNodeTimes(new Map());
+    pendingPromptRef.current = null;
 
     if (!conversationId) return;
 
@@ -877,29 +1331,69 @@ export function ImageGenSubFlow({ baseUrl, onBack, conversationId }: ImageGenSub
       // Replay: restore full state from past events
       if ('type' in raw && raw.type === 'trace_replay') {
         const replayedStatuses = new Map<string, NodeStatus>();
+        const replayedTimes = new Map<string, NodeTime>();
         let replayedActive: string | null = null;
+        const replayedExecMap = new Map<string, ExecInfo>();
+        let replayedPendingPrompt = '';
         for (const evt of ((raw.events ?? []) as StageEvent[])) {
+          if (evt.eventName === 'image.gen_started' && evt.payload?.prompt) {
+            replayedPendingPrompt = evt.payload.prompt as string;
+          }
+          if (evt.eventName === 'image.dispatcher_selected' && evt.payload?.provider) {
+            const prov = evt.payload.provider as string;
+            const prompt = (evt.payload.prompt as string | undefined) ?? replayedPendingPrompt;
+            replayedExecMap.set(`provider_${prov}`, {
+              prompt,
+              reasoning: (evt.payload.reasoning as string) ?? '',
+              ts: evt.ts,
+            });
+            replayedPendingPrompt = '';
+          }
+          applyTimeEvent(evt.eventName, evt.payload, evt.ts, replayedTimes);
           const newActive = applyImageEvent(evt.eventName, evt.payload, replayedStatuses);
           if (newActive !== undefined) replayedActive = newActive;
-          else if (evt.eventName === 'stage.completed' && evt.payload?.stageId === 'image_gen' && replayedActive) {
-            replayedStatuses.set(replayedActive, 'completed');
-          }
         }
         setNodeStatuses(new Map(replayedStatuses));
         setActiveProviderId(replayedActive);
+        setExecInfoMap(replayedExecMap);
+        setNodeTimes(new Map(replayedTimes));
         return;
       }
 
-      const { eventName, payload } = raw as StageEvent;
-      let newActiveProvider: string | null | undefined;
+      const { eventName, payload, ts } = raw as StageEvent;
 
+      // Track pending prompt (gen_started fires before dispatcher_selected)
+      if (eventName === 'image.gen_started' && payload?.prompt) {
+        pendingPromptRef.current = payload.prompt as string;
+      }
+
+      // Track which provider was selected and what prompt was sent
+      if (eventName === 'image.dispatcher_selected' && payload?.provider) {
+        const prov = payload.provider as string;
+        const prompt = (payload.prompt as string | undefined) ?? pendingPromptRef.current ?? '';
+        pendingPromptRef.current = null;
+        setExecInfoMap((prev) => {
+          const next = new Map(prev);
+          next.set(`provider_${prov}`, {
+            prompt,
+            reasoning: (payload.reasoning as string) ?? '',
+            ts: ts ?? Date.now(),
+          });
+          return next;
+        });
+      }
+
+      // Track timing
+      setNodeTimes((prev) => {
+        const t = new Map(prev);
+        applyTimeEvent(eventName, payload, ts ?? Date.now(), t);
+        return t;
+      });
+
+      let newActiveProvider: string | null | undefined;
       setNodeStatuses((prev) => {
         const m = new Map(prev);
         newActiveProvider = applyImageEvent(eventName, payload, m);
-        if (eventName === 'stage.completed' && payload?.stageId === 'image_gen') {
-          // mark active provider as completed inside the functional update
-          setActiveProviderId((id) => { if (id) m.set(id, 'completed'); return id; });
-        }
         return m;
       });
 
@@ -1063,18 +1557,78 @@ export function ImageGenSubFlow({ baseUrl, onBack, conversationId }: ImageGenSub
     [providers, strategy, maxAttempts, routerConfig, visionConfig],
   );
 
-  const liveNodes = useMemo(
-    () =>
-      baseNodes.map((n) => ({
+  const liveNodes = useMemo(() => {
+    const now = Date.now();
+    const localTimeoutMs = definition?.resourcePolicy?.localTimeoutMs ?? 90_000;
+    const routerLimitMs = routerConfig?.timeoutMs ?? 20_000;
+    return baseNodes.map((n) => {
+      const status = nodeStatuses.get(n.id) ?? 'idle';
+      const isActiveProvider = n.id === activeProviderId;
+      const t = nodeTimes.get(n.id);
+      const durationMs = t
+        ? t.endTs !== undefined
+          ? t.endTs - t.startTs
+          : status === 'active' ? now - t.startTs : undefined
+        : undefined;
+      // Assign the real configured limit per node type
+      const limitMs = (n.id === 'dispatcher' || n.id === 'llmRouter')
+        ? routerLimitMs
+        : n.id.startsWith('provider_')
+          ? localTimeoutMs
+          : undefined;
+      const base = {
         ...n,
         data: {
           ...n.data,
-          status: nodeStatuses.get(n.id) ?? 'idle',
-          isActiveProvider: n.id === activeProviderId,
+          status,
+          isActiveProvider,
+          durationMs,
+          limitMs,
+          ...(execInfoMap.has(n.id) ? { lastExecution: execInfoMap.get(n.id) } : {}),
         },
-      })),
-    [baseNodes, nodeStatuses, activeProviderId],
-  );
+      };
+      // Inject animated style into default 'entry' node
+      if (n.id === 'entry') {
+        base.style = {
+          ...n.style,
+          border: status === 'completed'
+            ? '1.5px solid #22c55ecc'
+            : status === 'failed'
+              ? '1.5px solid #ef4444cc'
+              : '1.5px solid #f97316',
+          boxShadow: status === 'active' ? '0 0 18px #f97316' : 'none',
+          animation: status === 'active' ? 'nodeGlowOrange 1.1s ease-in-out infinite alternate' : undefined,
+        };
+      }
+      return base;
+    });
+  }, [baseNodes, nodeStatuses, activeProviderId, execInfoMap, nodeTimes, definition, routerConfig, tick]);
+
+  // ─── Highlight execution path on edges ────────────────────────────────────
+
+  const liveEdges = useMemo(() => {
+    const dispatcherDone = (nodeStatuses.get('dispatcher') ?? 'idle') !== 'idle';
+    const llmRouterDone  = (nodeStatuses.get('llmRouter')  ?? 'idle') !== 'idle';
+    const selectedProv   = activeProviderId; // e.g. "provider_Image_Z_Image_Turbo"
+
+    return edges.map((e) => {
+      if (e.id === 'entry→dispatcher' && dispatcherDone) {
+        return { ...e, animated: true, style: { ...e.style, stroke: '#f97316dd', strokeWidth: 2.5 } };
+      }
+      if (e.id === 'dispatcher→llmRouter' && llmRouterDone) {
+        return { ...e, animated: true, style: { ...e.style, stroke: '#c026d3dd', strokeWidth: 2.5 } };
+      }
+      if (selectedProv && e.target === selectedProv) {
+        const isCloud = e.style?.stroke?.toString().includes('22d3ee');
+        return {
+          ...e,
+          animated: true,
+          style: { ...e.style, stroke: isCloud ? '#22d3eedd' : '#f97316dd', strokeWidth: 3 },
+        };
+      }
+      return e;
+    });
+  }, [edges, nodeStatuses, activeProviderId]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
@@ -1134,6 +1688,25 @@ export function ImageGenSubFlow({ baseUrl, onBack, conversationId }: ImageGenSub
           ◈ IMAGE GENERATION
         </span>
 
+        {/* Scan Pasta button */}
+        <button
+          onClick={() => setScanPanelOpen((v) => !v)}
+          style={{
+            background: scanPanelOpen ? '#22d3ee22' : 'transparent',
+            border: `1px solid ${scanPanelOpen ? '#22d3ee66' : '#22d3ee33'}`,
+            color: scanPanelOpen ? '#22d3ee' : '#22d3ee88',
+            fontFamily: 'monospace',
+            fontSize: 11,
+            padding: '4px 12px',
+            borderRadius: 6,
+            cursor: 'pointer',
+            flexShrink: 0,
+            transition: 'background 0.15s, color 0.15s',
+          }}
+        >
+          📂 Scan Pasta
+        </button>
+
         {/* Add button */}
         <button
           onClick={() => setAddingNew(true)}
@@ -1152,6 +1725,174 @@ export function ImageGenSubFlow({ baseUrl, onBack, conversationId }: ImageGenSub
           + Adicionar workflow
         </button>
       </div>
+
+      {/* Scan Pasta panel */}
+      <AnimatePresence>
+        {scanPanelOpen && (
+          <motion.div
+            key="scan-panel"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{
+              overflow: 'hidden',
+              flexShrink: 0,
+              background: '#00111a',
+              borderBottom: '1px solid #22d3ee22',
+            }}
+          >
+            <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* Folder input + scan button */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ ...labelStyle, color: '#22d3ee88' }}>Pasta de workflows do ComfyUI</label>
+                  <input
+                    style={{ ...inputStyle, borderColor: '#22d3ee33', background: '#001522' }}
+                    value={scanFolder}
+                    onChange={(e) => setScanFolder(e.target.value)}
+                    placeholder="D:\ComfyUI\user\default\workflows"
+                  />
+                </div>
+                <div style={{ paddingTop: 20 }}>
+                  <button
+                    onClick={handleScan}
+                    disabled={scanning}
+                    style={{
+                      background: scanning ? '#001522' : '#22d3ee22',
+                      border: `1px solid ${scanning ? '#22d3ee22' : '#22d3ee55'}`,
+                      color: scanning ? '#22d3ee55' : '#22d3ee',
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: '7px 14px',
+                      borderRadius: 6,
+                      cursor: scanning ? 'not-allowed' : 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {scanning ? '⟳ Escaneando…' : '⟳ Escanear'}
+                  </button>
+                </div>
+              </div>
+
+              {scanError && (
+                <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#ef4444', background: '#1a0000', border: '1px solid #ef444433', borderRadius: 6, padding: '6px 10px' }}>
+                  {scanError}
+                </div>
+              )}
+
+              {/* Discovered workflows list */}
+              {Object.keys(customWf.discovered).length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ fontFamily: 'monospace', fontSize: 9, color: '#22d3ee66', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                    {Object.keys(customWf.discovered).length} workflow(s) encontrado(s)
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
+                    {Object.entries(customWf.discovered).map(([name, entry]) => {
+                      const isApi = entry.format === 'api';
+                      const isSaving = savingWf === name;
+                      return (
+                        <div
+                          key={name}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            background: entry.enabled ? '#001a10' : '#0a0a0a',
+                            border: `1px solid ${entry.enabled ? '#22c55e33' : '#ffffff11'}`,
+                            borderRadius: 6,
+                            padding: '7px 10px',
+                            opacity: isSaving ? 0.6 : 1,
+                            transition: 'opacity 0.15s',
+                          }}
+                        >
+                          {/* Format badge */}
+                          <span
+                            title={isApi ? 'Formato API — pronto para execução' : `Formato ${entry.format} — não executável diretamente`}
+                            style={{
+                              fontSize: 8,
+                              fontFamily: 'monospace',
+                              background: isApi ? '#22c55e22' : '#f9731622',
+                              color: isApi ? '#22c55e' : '#f97316',
+                              border: `1px solid ${isApi ? '#22c55e44' : '#f9731644'}`,
+                              borderRadius: 4,
+                              padding: '1px 5px',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {isApi ? '✓ API' : `⚠ ${entry.format ?? 'UI'}`}
+                          </span>
+
+                          {/* Name */}
+                          <span style={{ fontFamily: 'monospace', fontSize: 10, color: entry.enabled ? '#22c55e' : '#ffffff88', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {name}
+                          </span>
+
+                          {/* Gen type selector — only for API format */}
+                          {isApi && (
+                            <select
+                              value={entry.generationType ?? 'txt2img'}
+                              onChange={(e) => handleSetCustomWfType(name, e.target.value as 'txt2img' | 'img2img')}
+                              disabled={isSaving}
+                              style={{
+                                background: '#001a10',
+                                color: '#22c55eaa',
+                                border: '1px solid #22c55e22',
+                                borderRadius: 4,
+                                fontFamily: 'monospace',
+                                fontSize: 9,
+                                padding: '2px 4px',
+                                cursor: isSaving ? 'not-allowed' : 'pointer',
+                                flexShrink: 0,
+                              }}
+                            >
+                              <option value="txt2img">txt→img</option>
+                              <option value="img2img">img→img</option>
+                            </select>
+                          )}
+
+                          {/* Toggle enable */}
+                          <button
+                            onClick={() => { if (!isSaving && isApi) handleToggleCustomWf(name, entry); }}
+                            disabled={isSaving || !isApi}
+                            title={!isApi ? 'Só workflows no formato API podem ser ativados' : entry.enabled ? 'Desativar' : 'Ativar'}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              cursor: isSaving || !isApi ? 'not-allowed' : 'pointer',
+                              padding: 0,
+                              display: 'flex',
+                              alignItems: 'center',
+                              opacity: !isApi ? 0.35 : 1,
+                              flexShrink: 0,
+                            }}
+                          >
+                            {entry.enabled
+                              ? <ToggleRight size={18} style={{ color: '#22c55e' }} />
+                              : <ToggleLeft size={18} style={{ color: '#555555' }} />}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {Object.values(customWf.discovered).some((e) => e.format !== 'api') && (
+                    <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#f9731688', lineHeight: 1.5 }}>
+                      ⚠ Workflows com formato UI precisam ser exportados em formato API pelo ComfyUI (Save → Export API).
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {Object.keys(customWf.discovered).length === 0 && !scanning && customWf.folder && (
+                <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#ffffff33', fontStyle: 'italic' }}>
+                  Nenhum workflow encontrado. Clique em Escanear para atualizar.
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Main area */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
@@ -1175,7 +1916,7 @@ export function ImageGenSubFlow({ baseUrl, onBack, conversationId }: ImageGenSub
             <>
               <ReactFlow
                 nodes={liveNodes}
-                edges={edges}
+                edges={liveEdges}
                 nodeTypes={NODE_TYPES}
                 edgeTypes={EDGE_TYPES}
                 fitView
@@ -1201,9 +1942,21 @@ export function ImageGenSubFlow({ baseUrl, onBack, conversationId }: ImageGenSub
                 />
               </ReactFlow>
               <style>{`
+                @keyframes nodeGlowOrange {
+                  from { filter: brightness(1.05) drop-shadow(0 0 5px #f97316aa); }
+                  to   { filter: brightness(1.25) drop-shadow(0 0 20px #f97316ff); }
+                }
+                @keyframes nodeGlowCyan {
+                  from { filter: brightness(1.05) drop-shadow(0 0 5px #22d3eeaa); }
+                  to   { filter: brightness(1.25) drop-shadow(0 0 20px #22d3eeff); }
+                }
+                @keyframes nodeGlowPurple {
+                  from { filter: brightness(1.05) drop-shadow(0 0 5px #c026d3aa); }
+                  to   { filter: brightness(1.25) drop-shadow(0 0 20px #c026d3ff); }
+                }
                 @keyframes nodeGlow {
-                  from { filter: brightness(1); }
-                  to   { filter: brightness(1.3); }
+                  from { filter: brightness(1.05) drop-shadow(0 0 5px #f97316aa); }
+                  to   { filter: brightness(1.25) drop-shadow(0 0 20px #f97316ff); }
                 }
               `}</style>
             </>

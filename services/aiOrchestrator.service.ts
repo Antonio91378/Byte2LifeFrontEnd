@@ -547,6 +547,8 @@ export interface FlowStage {
   next?: string[];
   branches?: FlowStageBranch[];
   implementationPath?: string;
+  /** Per-stage timeout in ms. Overrides global resourcePolicy.localTimeoutMs for this stage. */
+  timeoutMs?: number;
 }
 
 export interface FlowDefinition {
@@ -556,7 +558,10 @@ export interface FlowDefinition {
   resourcePolicy: {
     localConcurrency: number;
     preferCloud: boolean;
+    cloudFallbackEnabled?: boolean;
     localTimeoutMs: number;
+    /** Timeout for the job queue (queue stage). Defaults to 180000ms if absent. */
+    queueTimeoutMs?: number;
   };
   featureFlags: Record<string, boolean>;
   company?: {
@@ -619,6 +624,28 @@ export async function getFlowDefinition(baseUrl: string): Promise<FlowDefinition
 
 export async function getResourceStatus(baseUrl: string): Promise<ResourceStatus> {
   return request<ResourceStatus>(baseUrl, '/resource/status');
+}
+
+export async function updateResourcePolicy(
+  baseUrl: string,
+  patch: { localTimeoutMs?: number; queueTimeoutMs?: number },
+): Promise<{ ok: boolean; resourcePolicy: FlowDefinition['resourcePolicy'] }> {
+  return request(baseUrl, '/flow/resource-policy', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function updateStageTimeout(
+  baseUrl: string,
+  stageId: string,
+  timeoutMs: number,
+): Promise<{ ok: boolean; stage: FlowStage }> {
+  return request(baseUrl, `/flow/stage/${encodeURIComponent(stageId)}/timeout`, {
+    method: 'PUT',
+    body: JSON.stringify({ timeoutMs }),
+  });
 }
 
 export async function getLLMProviders(baseUrl: string): Promise<LLMProvidersResponse> {
@@ -771,7 +798,9 @@ export interface ExtractionSkillConfig {
   responseFormat?: string;
   executionMode?: string;
   requiresLock?: boolean;
-  fallback?: { provider: string; model?: string };
+  /** Primary LLM HTTP abort timeout in ms. Stage total = timeoutMs + fallback.timeoutMs. */
+  timeoutMs?: number;
+  fallback?: { provider: string; model?: string; timeoutMs?: number };
 }
 
 export interface LLMConfigResponse {
@@ -788,9 +817,30 @@ export interface ProviderHealthResult {
   reason: string | null;
 }
 
+export interface ImageProviderHealthResult {
+  ok: boolean;
+  enabled: boolean;
+  reason: string | null;
+  label: string;
+}
+
+export interface RouterHealthResult {
+  model: string | null;
+  source: 'env' | 'flow_json' | 'none';
+  ok: boolean;
+  reason: string | null;
+}
+
+export interface FullProviderHealth {
+  providers: Record<string, ProviderHealthResult>;
+  imageProviders: Record<string, ImageProviderHealthResult>;
+  router: RouterHealthResult;
+  skills?: Record<string, SkillHealthStatus>;
+}
+
 export async function getProviderHealth(
   baseUrl: string,
-): Promise<{ providers: Record<string, ProviderHealthResult> }> {
+): Promise<FullProviderHealth> {
   return request(baseUrl, '/flow/provider-health');
 }
 
@@ -835,6 +885,89 @@ export async function updateVisionDescriptorConfig(
   patch: Partial<VisionDescriptorSkillConfig>,
 ): Promise<{ ok: boolean; skill: VisionDescriptorSkillConfig }> {
   return request(baseUrl, '/flow/vision-descriptor', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+}
+
+// ─── Image Judge config ───────────────────────────────────────────────────────
+
+export interface ImageJudgeSkillConfig {
+  purpose?: string;
+  provider?: string;
+  model?: string;
+  temperature?: number;
+  executionMode?: string;
+  requiresLock?: boolean;
+  requiresVision?: boolean;
+  fallback?: { provider: string; model?: string };
+  enabledEnvFlag?: string;
+}
+
+export interface SkillHealthStatus {
+  ok: boolean;
+  label: string;
+  model: string | null;
+  source: 'flow_json' | 'env' | 'none';
+  reason: string | null;
+}
+
+export async function getImageJudgeConfig(baseUrl: string): Promise<ImageJudgeSkillConfig> {
+  return request<ImageJudgeSkillConfig>(baseUrl, '/flow/image-judge');
+}
+
+export async function updateImageJudgeConfig(
+  baseUrl: string,
+  patch: Partial<ImageJudgeSkillConfig>,
+): Promise<{ ok: boolean; skill: ImageJudgeSkillConfig }> {
+  return request(baseUrl, '/flow/image-judge', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+}
+
+// ─── Custom Workflows Registry ────────────────────────────────────────────────
+
+export interface DiscoveredWorkflow {
+  filename: string;
+  label: string;
+  enabled: boolean;
+  priority: number;
+  generationType: 'txt2img' | 'img2img';
+  /** "api" = executável · "ui" = UI format clássico · "ui_subgraph" = template com subgraph */
+  format: 'api' | 'ui' | 'ui_subgraph' | 'unknown';
+  promptNodeId: string | null;
+  lastScanned?: string;
+}
+
+export interface CustomWorkflowsState {
+  folder: string | null;
+  discovered: Record<string, DiscoveredWorkflow>;
+}
+
+export async function getCustomWorkflows(baseUrl: string): Promise<CustomWorkflowsState> {
+  return request<CustomWorkflowsState>(baseUrl, '/flow/custom-workflows');
+}
+
+export async function scanCustomWorkflows(
+  baseUrl: string,
+  folder?: string,
+): Promise<{ ok: boolean; folder: string; discovered: Record<string, DiscoveredWorkflow>; count: number }> {
+  return request(baseUrl, '/flow/custom-workflows/scan', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(folder ? { folder } : {}),
+  });
+}
+
+export async function updateCustomWorkflow(
+  baseUrl: string,
+  name: string,
+  patch: Partial<Pick<DiscoveredWorkflow, 'label' | 'enabled' | 'priority' | 'generationType' | 'promptNodeId'>>,
+): Promise<{ ok: boolean; workflow: DiscoveredWorkflow }> {
+  return request(baseUrl, `/flow/custom-workflows/${encodeURIComponent(name)}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(patch),

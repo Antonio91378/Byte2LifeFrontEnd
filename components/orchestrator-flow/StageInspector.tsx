@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import type { FlowDefinition, FlowStage, LLMProviderConfig, LLMSkillConfig } from '../../services/aiOrchestrator.service';
-import { updateSkillProvider } from '../../services/aiOrchestrator.service';
+import { updateSkillProvider, updateStageTimeout } from '../../services/aiOrchestrator.service';
 import { ModelSelector } from './ModelSelector';
 
 const ICON_MAP: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement> & { size?: number }>> = {
@@ -153,9 +153,10 @@ interface StageInspectorProps {
   baseUrl?: string;
   onClose: () => void;
   onSkillUpdated?: (skillName: string, config: LLMSkillConfig) => void;
+  onStageTimeoutUpdated?: (stageId: string, timeoutMs: number) => void;
 }
 
-export function StageInspector({ stage, definition, providers, baseUrl, onClose, onSkillUpdated }: StageInspectorProps) {
+export function StageInspector({ stage, definition, providers, baseUrl, onClose, onSkillUpdated, onStageTimeoutUpdated }: StageInspectorProps) {
   const colors = LAYER_COLORS[stage.layer] ?? LAYER_COLORS.core;
   const Icon = ICON_MAP[stage.icon] ?? Inbox;
 
@@ -167,6 +168,9 @@ export function StageInspector({ stage, definition, providers, baseUrl, onClose,
   const [saving, setSaving] = useState(false);
   const [descExpanded, setDescExpanded] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [editingTimeout, setEditingTimeout] = useState(false);
+  const [timeoutInput, setTimeoutInput] = useState<number | string>('');
+  const [savingTimeout, setSavingTimeout] = useState(false);
 
   // Compute predecessor stages (stages that have this stage in their `next`)
   const predecessors = (definition.stages ?? []).filter(
@@ -203,6 +207,22 @@ export function StageInspector({ stage, definition, providers, baseUrl, onClose,
       // show inline error
     } finally {
       setSaving(false);
+    }
+  }
+
+  const hasTimeout = !!stage.requiresLock || stage.id === 'queue';
+
+  async function handleSaveTimeout() {
+    if (!baseUrl) return;
+    const ms = Number(timeoutInput);
+    if (isNaN(ms) || ms < 1000) return;
+    setSavingTimeout(true);
+    try {
+      await updateStageTimeout(baseUrl, stage.id, ms);
+      onStageTimeoutUpdated?.(stage.id, ms);
+      setEditingTimeout(false);
+    } catch { /* ignore */ } finally {
+      setSavingTimeout(false);
     }
   }
 
@@ -348,6 +368,72 @@ export function StageInspector({ stage, definition, providers, baseUrl, onClose,
                   <div style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff55' }}>→ {branch.next?.join(', ')}</div>
                 </div>
               ))}
+            </div>
+          </Section>
+        )}
+
+        {/* Per-stage Timeout */}
+        {hasTimeout && (
+          <Section title="Timeout" color="#f97316">
+            <div style={{ padding: '8px 10px', border: '1px solid #f9731644', borderRadius: 6, background: '#f9731611' }}>
+              {!editingTimeout ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 800, color: '#ffffff' }}>
+                    {stage.timeoutMs ? (stage.timeoutMs / 1000).toFixed(0) : '—'}
+                  </span>
+                  <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#ffffff55' }}>s</span>
+                  {stage.timeoutMs && (
+                    <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#f9731688', marginLeft: 2 }}>
+                      {stage.id === 'queue' ? 'fila de mensagens' : 'GPU lock'}
+                    </span>
+                  )}
+                  {baseUrl && (
+                    <button
+                      type="button"
+                      onClick={() => { setTimeoutInput(stage.timeoutMs ?? 90000); setEditingTimeout(true); }}
+                      style={{ marginLeft: 'auto', background: 'none', border: '1px solid #f9731644', borderRadius: 4, color: '#f9731688', cursor: 'pointer', padding: '1px 6px', display: 'flex', alignItems: 'center', gap: 3, fontFamily: 'monospace', fontSize: 9 }}
+                    >
+                      <Pencil size={8} /> editar
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div>
+                    <label style={{ fontFamily: 'monospace', fontSize: 8, color: '#f97316aa', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>
+                      Timeout em milissegundos
+                    </label>
+                    <input
+                      type="number"
+                      min={1000}
+                      step={1000}
+                      value={timeoutInput}
+                      onChange={e => setTimeoutInput(Number(e.target.value))}
+                      style={{ fontFamily: 'monospace', fontSize: 11, background: '#1a0a00', color: '#ffffff', border: '1px solid #f9731444', borderRadius: 4, padding: '5px 8px', width: '100%', boxSizing: 'border-box', outline: 'none' }}
+                    />
+                    <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff33', marginTop: 4 }}>
+                      ≈ {Number(timeoutInput) ? (Number(timeoutInput) / 1000).toFixed(0) : '?'}s · mín: 1s
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={handleSaveTimeout}
+                      disabled={savingTimeout}
+                      style={{ fontFamily: 'monospace', fontSize: 9, background: savingTimeout ? '#f9731633' : '#f9731622', color: '#f97316', border: '1px solid #f9731655', borderRadius: 4, padding: '4px 10px', cursor: savingTimeout ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                    >
+                      <Save size={8} /> {savingTimeout ? 'Salvando…' : 'Salvar'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingTimeout(false)}
+                      style={{ fontFamily: 'monospace', fontSize: 9, background: 'none', color: '#ffffff44', border: '1px solid #ffffff22', borderRadius: 4, padding: '4px 10px', cursor: 'pointer' }}
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </Section>
         )}

@@ -13,7 +13,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { AnimatePresence, motion } from 'framer-motion';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useResizablePanel } from '../../hooks/useResizablePanel';
 import {
   getLLMConfig,
@@ -49,6 +49,71 @@ interface LLMNodeData extends Record<string, unknown> {
   status?: NodeStatus;
   health?: ProviderHealthResult | null;
   onEdit: (role: 'primary' | 'fallback') => void;
+  durationMs?: number;
+  limitMs?: number;
+}
+
+interface LLMNodeTime { startTs: number; endTs?: number; }
+
+// ─── Timing helpers ───────────────────────────────────────────────────────────
+
+function fmtSec(ms: number) { return (ms / 1000).toFixed(1); }
+
+function getTimingColor(ms: number, limitMs?: number): string {
+  if (!limitMs) return '#22d3ee';
+  const r = ms / limitMs;
+  if (r >= 0.9) return '#ef4444';
+  if (r >= 0.6) return '#f97316';
+  if (r >= 0.3) return '#fbbf24';
+  return '#22c55e';
+}
+
+function LLMTimingTooltip({ durationMs, limitMs, isActive, isFailed }: { durationMs: number; limitMs: number; isActive: boolean; isFailed: boolean }) {
+  const tColor = isActive ? '#c026d3' : getTimingColor(durationMs, limitMs);
+  const pct = Math.min((durationMs / limitMs) * 100, 100);
+  const isTimeout = isFailed && durationMs >= limitMs * 0.85;
+  return (
+    <div style={{
+      position: 'absolute',
+      bottom: 'calc(100% + 12px)',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      background: '#060010',
+      border: `1.5px solid ${tColor}88`,
+      borderRadius: 9,
+      padding: '10px 14px',
+      zIndex: 9999,
+      pointerEvents: 'none',
+      whiteSpace: 'nowrap',
+      boxShadow: `0 6px 28px ${tColor}33`,
+      minWidth: 158,
+    }}>
+      <div style={{ fontFamily: 'monospace', fontSize: 8, color: tColor, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ fontSize: 11 }}>{isTimeout ? '⏰' : isActive ? '⏳' : isFailed ? '✗' : '⏱'}</span>LLM Extraction
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 3 }}>
+        <span style={{ fontFamily: 'monospace', fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: '-0.03em', lineHeight: 1 }}>{fmtSec(durationMs)}</span>
+        <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#fff8', fontWeight: 700 }}>s</span>
+        {isActive && <span style={{ fontFamily: 'monospace', fontSize: 8, color: tColor, marginLeft: 2 }}>e contando…</span>}
+      </div>
+      {!isActive && (
+        <>
+          <div style={{ background: '#fff1', borderRadius: 3, height: 4, width: '100%', overflow: 'hidden', marginBottom: 3 }}>
+            <div style={{ width: `${pct.toFixed(0)}%`, height: '100%', background: tColor, borderRadius: 3 }} />
+          </div>
+          <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#fff3', display: 'flex', justifyContent: 'space-between' }}>
+            <span>limite: <span style={{ color: '#fff5' }}>{(limitMs / 1000).toFixed(0)}s</span></span>
+            <span style={{ color: tColor }}>{pct.toFixed(0)}% usado</span>
+          </div>
+        </>
+      )}
+      {isTimeout && (
+        <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#ef4444cc', marginTop: 6, borderTop: '1px solid #ef444422', paddingTop: 5, lineHeight: 1.6 }}>
+          ⚠ Provável timeout.<br />Considere trocar o LLM.
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -167,7 +232,9 @@ function ResizeHandle({ onMouseDown, color }: { onMouseDown: (e: React.MouseEven
 // ─── LLMExtractionNode ────────────────────────────────────────────────────────
 
 function LLMExtractionNode({ data }: NodeProps) {
-  const { role, provider, model, temperature, maxTokens, executionMode, status = 'idle', health, onEdit } = data as LLMNodeData;
+  const { role, provider, model, temperature, maxTokens, executionMode, status = 'idle', health, onEdit, durationMs, limitMs = 90_000 } = data as LLMNodeData;
+  const [hovered, setHovered] = useState(true);
+  const [timingDismissed, setTimingDismissed] = useState(false);
 
   const isPrimary = role === 'primary';
   const isActive = status === 'active';
@@ -186,6 +253,7 @@ function LLMExtractionNode({ data }: NodeProps) {
           : '#c026d366';
 
   const bg = isFailed ? '#220000' : isActive ? '#1a0028' : '#0d000f';
+  const hasTiming = durationMs !== undefined && status !== 'idle';
 
   return (
     <div
@@ -201,14 +269,22 @@ function LLMExtractionNode({ data }: NodeProps) {
         transition: 'box-shadow 0.2s',
         boxShadow: isActive ? `0 0 18px ${color}` : isFailed ? `0 0 12px #ef444466` : 'none',
         animation: isActive ? 'llmNodePulse 1.4s ease-in-out infinite alternate' : undefined,
+        position: 'relative',
+        overflow: 'visible',
       }}
       onMouseEnter={(e) => {
+        setHovered(true);
         if (!isActive) (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 12px ${color}66`;
       }}
       onMouseLeave={(e) => {
+        setHovered(false);
         (e.currentTarget as HTMLDivElement).style.boxShadow = isActive ? `0 0 18px ${color}` : isFailed ? `0 0 12px #ef444466` : 'none';
       }}
     >
+      {/* Timing tooltip — shown on hover when inline panel is dismissed */}
+      {hovered && hasTiming && timingDismissed && !isActive && (
+        <LLMTimingTooltip durationMs={durationMs!} limitMs={limitMs} isActive={isActive} isFailed={isFailed} />
+      )}
       <Handle type="target" position={Position.Left} style={{ background: color, borderColor: color }} />
       <Handle type="source" position={Position.Right} style={{ background: color, borderColor: color }} />
 
@@ -272,6 +348,51 @@ function LLMExtractionNode({ data }: NodeProps) {
           )}
         </div>
       )}
+
+      {/* Compact badge — only shown when dismissed (hover mode) */}
+      {hasTiming && timingDismissed && (
+        <div style={{
+          marginTop: 6,
+          fontFamily: 'monospace',
+          fontSize: 8,
+          fontWeight: 700,
+          color: isFailed ? '#ef4444' : getTimingColor(durationMs!, limitMs),
+          background: isFailed ? '#ef444415' : `${getTimingColor(durationMs!, limitMs)}15`,
+          border: `1px solid ${isFailed ? '#ef444433' : `${getTimingColor(durationMs!, limitMs)}33`}`,
+          borderRadius: 4,
+          padding: '2px 6px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 3,
+        }}>
+          ⏱ {fmtSec(durationMs!)}s
+        </div>
+      )}
+      {/* Inline timing panel — default visible, × to dismiss */}
+      {hasTiming && !timingDismissed && (() => {
+        const tColor = isFailed ? '#ef4444' : getTimingColor(durationMs!, limitMs);
+        const pct = Math.min((durationMs! / limitMs) * 100, 100);
+        const isTimeout = isFailed && durationMs! >= limitMs * 0.85;
+        return (
+          <div style={{ marginTop: 7, padding: '5px 7px', background: `${tColor}0d`, border: `1px solid ${tColor}22`, borderRadius: 6, position: 'relative' }}>
+            <button onClick={(e) => { e.stopPropagation(); setTimingDismissed(true); }} style={{ position: 'absolute', top: 1, right: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#ffffff33', fontSize: 12, padding: 0, lineHeight: 1 }} title="Ocultar">×</button>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginBottom: 4 }}>
+              <span style={{ fontFamily: 'monospace', fontSize: 8, color: tColor }}>{isActive ? '⏳' : '⏱'}</span>
+              <span style={{ fontFamily: 'monospace', fontSize: 18, fontWeight: 800, color: '#fff', lineHeight: 1 }}>{fmtSec(durationMs!)}</span>
+              <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff55' }}>s</span>
+              {isActive && <span style={{ fontFamily: 'monospace', fontSize: 7, color: tColor, marginLeft: 2 }}>contando…</span>}
+            </div>
+            <div style={{ background: '#ffffff11', borderRadius: 2, height: 3, width: '100%', overflow: 'hidden', marginBottom: 2 }}>
+              <div style={{ width: `${pct}%`, height: '100%', background: tColor, borderRadius: 2 }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', fontSize: 7.5, color: '#ffffff2a' }}>
+              <span>lim: {(limitMs / 1000).toFixed(0)}s</span>
+              <span style={{ color: tColor }}>{pct.toFixed(0)}%</span>
+            </div>
+            {isTimeout && <div style={{ fontFamily: 'monospace', fontSize: 7.5, color: '#ef4444aa', marginTop: 4 }}>⚠ provável timeout</div>}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -395,7 +516,7 @@ function buildGraph(
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function LLMExtractionSubFlow({ baseUrl, onBack, conversationId }: LLMExtractionSubFlowProps) {
+export function LLMExtractionSubFlow({ baseUrl, definition, onBack, conversationId }: LLMExtractionSubFlowProps) {
   const [extraction, setExtraction] = useState<ExtractionSkillConfig | null>(null);
   const [availableProviders, setAvailableProviders] = useState<Record<string, LLMProviderConfig>>({});
   const [loading, setLoading] = useState(true);
@@ -406,10 +527,12 @@ export function LLMExtractionSubFlow({ baseUrl, onBack, conversationId }: LLMExt
   const [healthLoading, setHealthLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [nodeStatuses, setNodeStatuses] = useState<Map<string, NodeStatus>>(new Map());
+  const [nodeTimes, setNodeTimes] = useState<Map<string, LLMNodeTime>>(new Map());
+  const [tick, setTick] = useState(0);
   const sseCleanupRef = useRef<(() => void) | null>(null);
 
-  const [primaryForm, setPrimaryForm] = useState({ provider: 'ollama', model: '', temperature: 0.1, maxTokens: 4096, executionMode: 'local' });
-  const [fallbackForm, setFallbackForm] = useState({ provider: 'ollama', model: '' });
+  const [primaryForm, setPrimaryForm] = useState({ provider: 'ollama', model: '', temperature: 0.1, maxTokens: 4096, executionMode: 'local', timeoutMs: 60000 });
+  const [fallbackForm, setFallbackForm] = useState({ provider: 'ollama', model: '', timeoutMs: 30000 });
 
   // ─── Load ─────────────────────────────────────────────────────────────────
 
@@ -426,10 +549,12 @@ export function LLMExtractionSubFlow({ baseUrl, onBack, conversationId }: LLMExt
           temperature: ext.temperature ?? 0.1,
           maxTokens: ext.maxTokens ?? 4096,
           executionMode: ext.executionMode ?? 'local',
+          timeoutMs: ext.timeoutMs ?? 60000,
         });
         setFallbackForm({
           provider: ext.fallback?.provider ?? 'ollama',
           model: ext.fallback?.model ?? '',
+          timeoutMs: ext.fallback?.timeoutMs ?? 30000,
         });
       })
       .catch(() => {})
@@ -449,30 +574,67 @@ export function LLMExtractionSubFlow({ baseUrl, onBack, conversationId }: LLMExt
     sseCleanupRef.current?.();
     sseCleanupRef.current = null;
     setNodeStatuses(new Map());
+    setNodeTimes(new Map());
 
     if (!conversationId) return;
 
-    const cleanup = subscribeToFlowEvents(baseUrl, conversationId, (raw) => {
-      if ('type' in raw && raw.type === 'trace_replay') return;
-      const { eventName, payload } = raw as StageEvent;
+    function applyStatus(eventName: string, payload: Record<string, unknown> | undefined, m: Map<string, NodeStatus>) {
+      if (eventName === 'stage.started' && payload?.stageId === 'extraction') {
+        m.set('primary', 'active');
+      } else if (eventName === 'llm.called') {
+        m.set('primary', 'active');
+      } else if (eventName === 'llm.parsed') {
+        m.set('primary', 'completed');
+      } else if (eventName === 'llm.parse_failed') {
+        m.set('primary', 'failed');
+        m.set('fallback', 'active');
+      } else if (eventName === 'stage.completed' && payload?.stageId === 'extraction') {
+        m.set('primary', 'completed');
+      } else if (eventName === 'stage.failed' && payload?.stageId === 'extraction') {
+        m.set('primary', 'failed');
+      }
+    }
 
+    function applyTime(eventName: string, payload: Record<string, unknown> | undefined, ts: number, t: Map<string, LLMNodeTime>) {
+      const end = (id: string) => { const x = t.get(id); if (x && !x.endTs) t.set(id, { ...x, endTs: ts }); };
+      if (eventName === 'stage.started' && payload?.stageId === 'extraction') {
+        t.set('primary', { startTs: ts });
+      } else if (eventName === 'llm.parsed') {
+        end('primary');
+      } else if (eventName === 'llm.parse_failed') {
+        end('primary');
+        t.set('fallback', { startTs: ts });
+      } else if (eventName === 'stage.completed' && payload?.stageId === 'extraction') {
+        end('primary');
+        end('fallback');
+      } else if (eventName === 'stage.failed' && payload?.stageId === 'extraction') {
+        end('primary');
+        end('fallback');
+      }
+    }
+
+    const cleanup = subscribeToFlowEvents(baseUrl, conversationId, (raw) => {
+      if ('type' in raw && raw.type === 'trace_replay') {
+        const replayedStatuses = new Map<string, NodeStatus>();
+        const replayedTimes = new Map<string, LLMNodeTime>();
+        for (const evt of ((raw.events ?? []) as StageEvent[])) {
+          applyStatus(evt.eventName, evt.payload, replayedStatuses);
+          applyTime(evt.eventName, evt.payload, evt.ts, replayedTimes);
+        }
+        setNodeStatuses(new Map(replayedStatuses));
+        setNodeTimes(new Map(replayedTimes));
+        return;
+      }
+
+      const { eventName, payload, ts } = raw as StageEvent;
+      setNodeTimes((prev) => {
+        const t = new Map(prev);
+        applyTime(eventName, payload, ts ?? Date.now(), t);
+        return t;
+      });
       setNodeStatuses((prev) => {
         const m = new Map(prev);
-        if (eventName === 'stage.started' && payload?.stageId === 'extraction') {
-          m.set('primary', 'active');
-        } else if (eventName === 'llm.called') {
-          // could refine with payload.skill if available
-          m.set('primary', 'active');
-        } else if (eventName === 'llm.parsed') {
-          m.set('primary', 'completed');
-        } else if (eventName === 'llm.parse_failed') {
-          m.set('primary', 'failed');
-          m.set('fallback', 'active');
-        } else if (eventName === 'stage.completed' && payload?.stageId === 'extraction') {
-          m.set('primary', 'completed');
-        } else if (eventName === 'stage.failed' && payload?.stageId === 'extraction') {
-          m.set('primary', 'failed');
-        }
+        applyStatus(eventName, payload, m);
         return m;
       });
     });
@@ -497,11 +659,13 @@ export function LLMExtractionSubFlow({ baseUrl, onBack, conversationId }: LLMExt
             temperature: primaryForm.temperature,
             maxTokens: primaryForm.maxTokens,
             executionMode: primaryForm.executionMode,
+            timeoutMs: primaryForm.timeoutMs,
           }
         : {
             fallback: {
               provider: fallbackForm.provider,
               model: fallbackForm.model || undefined,
+              timeoutMs: fallbackForm.timeoutMs,
             },
           };
 
@@ -513,9 +677,33 @@ export function LLMExtractionSubFlow({ baseUrl, onBack, conversationId }: LLMExt
     }
   }
 
+  // Real-time tick: re-runs nodes useMemo every second while any node is active.
+  useEffect(() => {
+    const hasActive = [...nodeStatuses.values()].some(s => s === 'active');
+    if (!hasActive) return;
+    const id = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [nodeStatuses]);
+
   // ─── Graph ────────────────────────────────────────────────────────────────
 
-  const { nodes, edges } = buildGraph(extraction, openEdit, nodeStatuses, providerHealth);
+  const { nodes: baseNodes, edges } = buildGraph(extraction, openEdit, nodeStatuses, providerHealth);
+  const nodes = useMemo(() => {
+    const now = Date.now();
+    const primaryLimitMs = extraction?.timeoutMs ?? 60_000;
+    const fallbackLimitMs = extraction?.fallback?.timeoutMs ?? 30_000;
+    return baseNodes.map((n) => {
+      const t = nodeTimes.get(n.id);
+      const status = (n.data as LLMNodeData).status ?? 'idle';
+      const durationMs = t
+        ? t.endTs !== undefined
+          ? t.endTs - t.startTs
+          : status === 'active' ? now - t.startTs : undefined
+        : undefined;
+      const limitMs = n.id === 'fallback' ? fallbackLimitMs : primaryLimitMs;
+      return { ...n, data: { ...n.data, durationMs, limitMs } };
+    });
+  }, [baseNodes, nodeTimes, extraction, tick]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
@@ -887,6 +1075,18 @@ export function LLMExtractionSubFlow({ baseUrl, onBack, conversationId }: LLMExt
                             <option value="cloud">cloud (sem lock)</option>
                           </select>
                         </div>
+                        <div>
+                          <label style={labelStyle}>Timeout primário (ms)</label>
+                          <input
+                            type="number" step={1000}
+                            style={inputStyle}
+                            value={primaryForm.timeoutMs}
+                            onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setPrimaryForm((f) => ({ ...f, timeoutMs: v })); }}
+                          />
+                          <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#f9731666', marginTop: 3 }}>
+                            Timeout exclusivo do LLM primário. Stage total = primário + fallback ({((primaryForm.timeoutMs + fallbackForm.timeoutMs) / 1000).toFixed(0)}s).
+                          </div>
+                        </div>
                       </div>
                     </>
                   ) : (
@@ -956,6 +1156,13 @@ export function LLMExtractionSubFlow({ baseUrl, onBack, conversationId }: LLMExt
                             o fallback é acionado em situações difíceis onde o primário já falhou.
                             Deixe em branco para desativar o fallback completamente.
                           </FieldDoc>
+                          <FieldDoc name="timeoutMs" type="int ms" color="#ef4444">
+                            <strong style={{ color: '#f97316' }}>Orçamento de tempo exclusivo do fallback.</strong>{' '}
+                            O ResourceManager mantém o lock da GPU por <code style={{ color: '#22d3ee' }}>primário + fallback</code> ms no total,
+                            então ambos têm seu próprio tempo garantido — o fallback não herda o tempo residual do primário.
+                            <br />Defina um valor suficiente para o modelo escolhido responder
+                            (ex: 30s para modelos leves, 60s para modelos grandes).
+                          </FieldDoc>
                         </div>
 
                         {/* Form fields */}
@@ -975,6 +1182,18 @@ export function LLMExtractionSubFlow({ baseUrl, onBack, conversationId }: LLMExt
                               onChange={(m) => setFallbackForm((f) => ({ ...f, model: m }))}
                               color="#ef4444"
                             />
+                          </div>
+                          <div>
+                            <label style={{ ...labelStyle, color: '#ef4444aa' }}>Timeout fallback (ms)</label>
+                            <input
+                              type="number" step={1000}
+                              style={{ ...inputStyle, borderColor: '#ef444433' }}
+                              value={fallbackForm.timeoutMs}
+                              onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setFallbackForm((f) => ({ ...f, timeoutMs: v })); }}
+                            />
+                            <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#ef444466', marginTop: 3 }}>
+                              Tempo exclusivo do fallback. Stage total = primário ({(primaryForm.timeoutMs / 1000).toFixed(0)}s) + fallback = {((primaryForm.timeoutMs + fallbackForm.timeoutMs) / 1000).toFixed(0)}s.
+                            </div>
                           </div>
                         </div>
                       </div>

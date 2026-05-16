@@ -3,6 +3,7 @@
 import LocalInviteLauncherCard from "@/components/LocalInviteLauncherCard";
 import { EventLog } from "@/components/orchestrator-flow/EventLog";
 import { FlowCanvas } from "@/components/orchestrator-flow/FlowCanvas";
+import { HealthBadge, HealthCheckModal } from "@/components/orchestrator-flow/HealthCheckModal";
 import { ResourceStatusBadge } from "@/components/orchestrator-flow/ResourceStatus";
 import { useDialog } from "@/context/DialogContext";
 import {
@@ -52,9 +53,28 @@ import {
     WifiOff,
 } from "lucide-react";
 import { startTransition, useDeferredValue, useEffect, useState } from "react";
+import { useResizablePanel } from "@/hooks/useResizablePanel";
 
 interface EnrichedAttachment extends BotConversationAttachment {
   absoluteUrl: string | null;
+}
+
+function LogResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, zIndex: 30,
+        cursor: 'ew-resize', background: hovered ? '#c026d344' : 'transparent',
+        transition: 'background 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      {hovered && <div style={{ width: 2, height: 40, borderRadius: 2, background: '#c026d3', boxShadow: '0 0 8px #c026d3' }} />}
+    </div>
+  );
 }
 
 const PAGE_SIZE = 12;
@@ -487,10 +507,12 @@ export default function BotChatsPage() {
   const [developerNoteSaving, setDeveloperNoteSaving] = useState(false);
   const [promptInspectorExpanded, setPromptInspectorExpanded] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'flow'>('list');
+  const [showHealthModal, setShowHealthModal] = useState(false);
   const [flowFullscreen, setFlowFullscreen] = useState(false);
   const [flowEvents, setFlowEvents] = useState<StageEvent[]>([]);
   const [watchedInviteUrl, setWatchedInviteUrl] = useState<string | null>(null);
   const [creatingMonitoredChat, setCreatingMonitoredChat] = useState(false);
+  const { width: logPanelWidth, onMouseDown: onLogResizeMouseDown } = useResizablePanel(280, 180, 640);
   const deferredSearch = useDeferredValue(search);
 
   function syncConversationIntoDashboard(conversation: BotConversation) {
@@ -2184,6 +2206,7 @@ export default function BotChatsPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#c026d3', letterSpacing: '0.12em', fontWeight: 700 }}>◈ ORCHESTRATOR STUDIO</span>
               <ResourceStatusBadge baseUrl={baseUrl} />
+              <HealthBadge baseUrl={baseUrl} onClick={() => setShowHealthModal(true)} />
             </div>
             <button
               type="button"
@@ -2195,8 +2218,12 @@ export default function BotChatsPage() {
             </button>
           </div>
 
+          {showHealthModal && (
+            <HealthCheckModal baseUrl={baseUrl} onClose={() => setShowHealthModal(false)} />
+          )}
+
           {/* 3-column body */}
-          <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '300px 1fr 280px', overflow: 'hidden', minHeight: 0 }}>
+          <div style={{ flex: 1, display: 'grid', gridTemplateColumns: `300px 1fr ${logPanelWidth}px`, overflow: 'hidden', minHeight: 0 }}>
           {/* Left: conversation list */}
           <div style={{ borderRight: '1px solid #c026d322', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '10px 14px', borderBottom: '1px solid #c026d322', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
@@ -2382,8 +2409,9 @@ export default function BotChatsPage() {
             />
           </div>
 
-          {/* Right: event log */}
-          <div style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {/* Right: event log (resizable) */}
+          <div style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
+            <LogResizeHandle onMouseDown={onLogResizeMouseDown} />
             <EventLog events={flowEvents} onClear={() => setFlowEvents([])} />
           </div>
           </div>
