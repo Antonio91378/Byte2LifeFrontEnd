@@ -1,45 +1,44 @@
-'use client';
+"use client";
 
 import {
-  Background,
-  BackgroundVariant,
-  Controls,
-  Handle,
-  Position,
-  ReactFlow,
-  type Edge,
-  type Node,
-  type NodeProps,
-} from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
-import { AnimatePresence, motion } from 'framer-motion';
-import { ToggleLeft, ToggleRight } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { useRef } from 'react';
-import { useResizablePanel } from '../../hooks/useResizablePanel';
-import { ModelSelector } from './ModelSelector';
+    Background,
+    BackgroundVariant,
+    Controls,
+    Handle,
+    Position,
+    ReactFlow,
+    type Edge,
+    type Node,
+    type NodeProps,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import { AnimatePresence, motion } from "framer-motion";
+import { ToggleLeft, ToggleRight } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useResizablePanel } from "../../hooks/useResizablePanel";
 import {
-  addImageWorkflow,
-  deleteImageWorkflow,
-  getCustomWorkflows,
-  getImageGenConfig,
-  getImageWorkflows,
-  getVisionDescriptorConfig,
-  scanCustomWorkflows,
-  subscribeToFlowEvents,
-  updateCustomWorkflow,
-  updateImageDispatcher,
-  updateImageRouterConfig,
-  updateImageWorkflow,
-  updateVisionDescriptorConfig,
-  type CustomWorkflowsState,
-  type DiscoveredWorkflow,
-  type FlowDefinition,
-  type ImageRouterConfig,
-  type ImageWorkflowProvider,
-  type StageEvent,
-  type VisionDescriptorSkillConfig,
-} from '../../services/aiOrchestrator.service';
+    addImageWorkflow,
+    deleteImageWorkflow,
+    getCustomWorkflows,
+    getImageGenConfig,
+    getImageWorkflows,
+    getVisionDescriptorConfig,
+    scanCustomWorkflows,
+    subscribeToFlowEvents,
+    updateCustomWorkflow,
+    updateImageDispatcher,
+    updateImageRouterConfig,
+    updateImageWorkflow,
+    updateVisionDescriptorConfig,
+    type CustomWorkflowsState,
+    type DiscoveredWorkflow,
+    type FlowDefinition,
+    type ImageRouterConfig,
+    type ImageWorkflowProvider,
+    type StageEvent,
+    type VisionDescriptorSkillConfig,
+} from "../../services/aiOrchestrator.service";
+import { ModelSelector } from "./ModelSelector";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -50,7 +49,7 @@ export interface ImageGenSubFlowProps {
   conversationId?: string | null;
 }
 
-type NodeStatus = 'idle' | 'active' | 'completed' | 'failed';
+type NodeStatus = "idle" | "active" | "completed" | "failed";
 
 interface AddNodeData extends Record<string, unknown> {
   onAdd: () => void;
@@ -101,35 +100,47 @@ interface NodeTime {
 
 // ─── Timing helpers ───────────────────────────────────────────────────────────
 
-function fmtSec(ms: number) { return (ms / 1000).toFixed(1); }
+function fmtSec(ms: number) {
+  return (ms / 1000).toFixed(1);
+}
 
 function getTimingColor(ms: number, limitMs?: number): string {
-  if (!limitMs) return '#22d3ee';
+  if (!limitMs) return "#22d3ee";
   const r = ms / limitMs;
-  if (r >= 0.9) return '#ef4444';
-  if (r >= 0.6) return '#f97316';
-  if (r >= 0.3) return '#fbbf24';
-  return '#22c55e';
+  if (r >= 0.9) return "#ef4444";
+  if (r >= 0.6) return "#f97316";
+  if (r >= 0.3) return "#fbbf24";
+  return "#22c55e";
 }
 
 /** Compact timing badge — shown inside node when status is completed/failed */
-function TimingBadge({ durationMs, limitMs, accentColor }: { durationMs: number; limitMs?: number; accentColor?: string }) {
+function TimingBadge({
+  durationMs,
+  limitMs,
+  accentColor,
+}: {
+  durationMs: number;
+  limitMs?: number;
+  accentColor?: string;
+}) {
   const color = accentColor ?? getTimingColor(durationMs, limitMs);
   return (
-    <div style={{
-      fontFamily: 'monospace',
-      fontSize: 8,
-      fontWeight: 700,
-      color,
-      background: `${color}15`,
-      border: `1px solid ${color}33`,
-      borderRadius: 4,
-      padding: '2px 6px',
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 3,
-      marginTop: 4,
-    }}>
+    <div
+      style={{
+        fontFamily: "monospace",
+        fontSize: 8,
+        fontWeight: 700,
+        color,
+        background: `${color}15`,
+        border: `1px solid ${color}33`,
+        borderRadius: 4,
+        padding: "2px 6px",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 3,
+        marginTop: 4,
+      }}
+    >
       ⏱ {fmtSec(durationMs)}s
     </div>
   );
@@ -137,7 +148,11 @@ function TimingBadge({ durationMs, limitMs, accentColor }: { durationMs: number;
 
 /** Full timing tooltip rendered inside a positioned parent (parent must have position:relative, overflow:visible) */
 function TimingTooltip({
-  label, durationMs, limitMs, color, isActive = false,
+  label,
+  durationMs,
+  limitMs,
+  color,
+  isActive = false,
 }: {
   label: string;
   durationMs: number;
@@ -147,47 +162,145 @@ function TimingTooltip({
 }) {
   const tColor = isActive ? color : getTimingColor(durationMs, limitMs);
   const pct = limitMs ? Math.min((durationMs / limitMs) * 100, 100) : null;
-  const isTimeout = !isActive && limitMs !== undefined && durationMs >= limitMs * 0.85;
+  const isTimeout =
+    !isActive && limitMs !== undefined && durationMs >= limitMs * 0.85;
   return (
-    <div style={{
-      position: 'absolute',
-      bottom: 'calc(100% + 12px)',
-      left: '50%',
-      transform: 'translateX(-50%)',
-      background: '#060010',
-      border: `1.5px solid ${tColor}88`,
-      borderRadius: 9,
-      padding: '10px 14px',
-      zIndex: 9999,
-      pointerEvents: 'none',
-      whiteSpace: 'nowrap',
-      boxShadow: `0 6px 28px ${tColor}33`,
-      minWidth: 155,
-    }}>
-      <div style={{ fontFamily: 'monospace', fontSize: 8, color: tColor, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
-        <span style={{ fontSize: 11 }}>{isTimeout ? '⏰' : isActive ? '⏳' : '⏱'}</span>{label}
+    <div
+      style={{
+        position: "absolute",
+        bottom: "calc(100% + 12px)",
+        left: "50%",
+        transform: "translateX(-50%)",
+        background: "#060010",
+        border: `1.5px solid ${tColor}88`,
+        borderRadius: 9,
+        padding: "10px 14px",
+        zIndex: 9999,
+        pointerEvents: "none",
+        whiteSpace: "nowrap",
+        boxShadow: `0 6px 28px ${tColor}33`,
+        minWidth: 155,
+      }}
+    >
+      <div
+        style={{
+          fontFamily: "monospace",
+          fontSize: 8,
+          color: tColor,
+          fontWeight: 700,
+          letterSpacing: "0.07em",
+          textTransform: "uppercase",
+          marginBottom: 6,
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+        }}
+      >
+        <span style={{ fontSize: 11 }}>
+          {isTimeout ? "⏰" : isActive ? "⏳" : "⏱"}
+        </span>
+        {label}
       </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 3 }}>
-        <span style={{ fontFamily: 'monospace', fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: '-0.03em', lineHeight: 1 }}>{fmtSec(durationMs)}</span>
-        <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#fff8', fontWeight: 700 }}>s</span>
-        {isActive && <span style={{ fontFamily: 'monospace', fontSize: 8, color: tColor, marginLeft: 2 }}>e contando…</span>}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          gap: 4,
+          marginBottom: 3,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: "monospace",
+            fontSize: 22,
+            fontWeight: 800,
+            color: "#fff",
+            letterSpacing: "-0.03em",
+            lineHeight: 1,
+          }}
+        >
+          {fmtSec(durationMs)}
+        </span>
+        <span
+          style={{
+            fontFamily: "monospace",
+            fontSize: 11,
+            color: "#fff8",
+            fontWeight: 700,
+          }}
+        >
+          s
+        </span>
+        {isActive && (
+          <span
+            style={{
+              fontFamily: "monospace",
+              fontSize: 8,
+              color: tColor,
+              marginLeft: 2,
+            }}
+          >
+            e contando…
+          </span>
+        )}
       </div>
       {pct !== null && !isActive && (
         <>
           <div style={{ marginTop: 4, marginBottom: 3 }}>
-            <div style={{ background: '#fff1', borderRadius: 3, height: 5, width: '100%', overflow: 'hidden' }}>
-              <div style={{ width: `${pct}%`, height: '100%', background: tColor, borderRadius: 3, boxShadow: `0 0 6px ${tColor}` }} />
+            <div
+              style={{
+                background: "#fff1",
+                borderRadius: 3,
+                height: 5,
+                width: "100%",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  width: `${pct}%`,
+                  height: "100%",
+                  background: tColor,
+                  borderRadius: 3,
+                  boxShadow: `0 0 6px ${tColor}`,
+                }}
+              />
             </div>
           </div>
-          <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#fff3', display: 'flex', justifyContent: 'space-between' }}>
-            <span>limite: <span style={{ color: '#fff5' }}>{(limitMs! / 1000).toFixed(0)}s</span></span>
+          <div
+            style={{
+              fontFamily: "monospace",
+              fontSize: 8,
+              color: "#fff3",
+              display: "flex",
+              justifyContent: "space-between",
+            }}
+          >
+            <span>
+              limite:{" "}
+              <span style={{ color: "#fff5" }}>
+                {(limitMs! / 1000).toFixed(0)}s
+              </span>
+            </span>
             <span style={{ color: tColor }}>{pct.toFixed(0)}% usado</span>
           </div>
         </>
       )}
       {isTimeout && (
-        <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#ef4444cc', marginTop: 6, borderTop: '1px solid #ef444422', paddingTop: 5, lineHeight: 1.6 }}>
-          ⚠ Provável timeout.<br />Considere trocar o LLM.
+        <div
+          style={{
+            fontFamily: "monospace",
+            fontSize: 8,
+            color: "#ef4444cc",
+            marginTop: 6,
+            borderTop: "1px solid #ef444422",
+            paddingTop: 5,
+            lineHeight: 1.6,
+          }}
+        >
+          ⚠ Provável timeout.
+          <br />
+          Considere trocar o LLM.
         </div>
       )}
     </div>
@@ -197,52 +310,62 @@ function TimingTooltip({
 // ─── Label styles ─────────────────────────────────────────────────────────────
 
 const labelStyle: React.CSSProperties = {
-  fontFamily: 'monospace',
+  fontFamily: "monospace",
   fontSize: 9,
-  color: '#f97316aa',
-  letterSpacing: '0.08em',
-  textTransform: 'uppercase',
+  color: "#f97316aa",
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
   marginBottom: 4,
-  display: 'block',
+  display: "block",
 };
 
 const inputStyle: React.CSSProperties = {
-  background: '#1a0a00',
-  color: '#ffffff',
-  border: '1px solid #f9731444',
+  background: "#1a0a00",
+  color: "#ffffff",
+  border: "1px solid #f9731444",
   borderRadius: 6,
-  fontFamily: 'monospace',
+  fontFamily: "monospace",
   fontSize: 10,
-  padding: '6px 10px',
-  width: '100%',
-  boxSizing: 'border-box',
-  outline: 'none',
+  padding: "6px 10px",
+  width: "100%",
+  boxSizing: "border-box",
+  outline: "none",
 };
 
 // ─── WorkflowProviderNode (custom ReactFlow node) ─────────────────────────────
 
 function WorkflowProviderNode({ data }: NodeProps) {
-  const { provider, onToggle, onEdit, status = 'idle', isActiveProvider = false, lastExecution, durationMs, limitMs = 90_000 } = data as WorkflowNodeData;
+  const {
+    provider,
+    onToggle,
+    onEdit,
+    status = "idle",
+    isActiveProvider = false,
+    lastExecution,
+    durationMs,
+    limitMs = 90_000,
+  } = data as WorkflowNodeData;
   const [showTooltip, setShowTooltip] = useState(false);
   const [timingDismissed, setTimingDismissed] = useState(false);
 
   const isEnabled = provider.enabled !== false;
-  const isCloud = provider.executionMode === 'cloud';
-  const accentColor = isEnabled ? (isCloud ? '#22d3ee' : '#f97316') : '#666666';
+  const isCloud = provider.executionMode === "cloud";
+  const accentColor = isEnabled ? (isCloud ? "#22d3ee" : "#f97316") : "#666666";
   // Pulse only while actively generating; steady glow once selected/completed
-  const isAnimated = status === 'active';
-  const glowShadow = isActiveProvider && status === 'completed'
-    ? `0 0 14px ${accentColor}88`
-    : isActiveProvider || status === 'active'
-      ? `0 0 22px ${accentColor}`
-      : 'none';
+  const isAnimated = status === "active";
+  const glowShadow =
+    isActiveProvider && status === "completed"
+      ? `0 0 14px ${accentColor}88`
+      : isActiveProvider || status === "active"
+        ? `0 0 22px ${accentColor}`
+        : "none";
 
   const genTypeLabel =
-    provider.generationType === 'img2img'
-      ? 'img→img'
-      : provider.generationType === 'pulid'
-        ? 'PuLID'
-        : 'txt→img';
+    provider.generationType === "img2img"
+      ? "img→img"
+      : provider.generationType === "pulid"
+        ? "PuLID"
+        : "txt→img";
 
   const descSnippet = provider.description
     ? provider.description.slice(0, 70)
@@ -255,51 +378,57 @@ function WorkflowProviderNode({ data }: NodeProps) {
         onEdit(provider.name);
       }}
       style={{
-        background: isEnabled ? (isCloud ? '#001a22' : '#1a0a00') : '#111111',
-        border: `1.5px solid ${isEnabled ? accentColor : '#333333'}`,
+        background: isEnabled ? (isCloud ? "#001a22" : "#1a0a00") : "#111111",
+        border: `1.5px solid ${isEnabled ? accentColor : "#333333"}`,
         borderRadius: 10,
-        padding: '10px 12px',
+        padding: "10px 12px",
         minWidth: 160,
         maxWidth: 200,
-        fontFamily: 'monospace',
+        fontFamily: "monospace",
         opacity: isEnabled ? 1 : 0.45,
-        transition: 'opacity 0.2s, border-color 0.2s, box-shadow 0.3s',
-        cursor: 'pointer',
+        transition: "opacity 0.2s, border-color 0.2s, box-shadow 0.3s",
+        cursor: "pointer",
         boxShadow: glowShadow,
         animation: isAnimated
-          ? `${isCloud ? 'nodeGlowCyan' : 'nodeGlowOrange'} 1.1s ease-in-out infinite alternate`
+          ? `${isCloud ? "nodeGlowCyan" : "nodeGlowOrange"} 1.1s ease-in-out infinite alternate`
           : undefined,
-        position: 'relative',
-        overflow: 'visible',
+        position: "relative",
+        overflow: "visible",
       }}
       onMouseEnter={(e) => {
         setShowTooltip(true);
-        if (!isAnimated) (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 12px ${accentColor}66`;
+        if (!isAnimated)
+          (e.currentTarget as HTMLDivElement).style.boxShadow =
+            `0 0 12px ${accentColor}66`;
       }}
       onMouseLeave={(e) => {
         setShowTooltip(false);
-        if (!isAnimated) (e.currentTarget as HTMLDivElement).style.boxShadow = glowShadow;
+        if (!isAnimated)
+          (e.currentTarget as HTMLDivElement).style.boxShadow = glowShadow;
       }}
     >
       {/* Status badge — always visible when active/completed */}
-      {(status === 'active' || (isActiveProvider && status === 'completed')) && (
-        <div style={{
-          position: 'absolute',
-          top: -10,
-          right: -4,
-          background: status === 'active' ? accentColor : '#22c55e',
-          color: '#000000',
-          fontFamily: 'monospace',
-          fontSize: 7,
-          fontWeight: 800,
-          letterSpacing: '0.05em',
-          padding: '1px 5px',
-          borderRadius: 4,
-          zIndex: 10,
-          pointerEvents: 'none',
-          boxShadow: `0 0 8px ${status === 'active' ? accentColor : '#22c55e'}`,
-        }}>
-          {status === 'active' ? '● GERANDO' : '✓ SELECIONADO'}
+      {(status === "active" ||
+        (isActiveProvider && status === "completed")) && (
+        <div
+          style={{
+            position: "absolute",
+            top: -10,
+            right: -4,
+            background: status === "active" ? accentColor : "#22c55e",
+            color: "#000000",
+            fontFamily: "monospace",
+            fontSize: 7,
+            fontWeight: 800,
+            letterSpacing: "0.05em",
+            padding: "1px 5px",
+            borderRadius: 4,
+            zIndex: 10,
+            pointerEvents: "none",
+            boxShadow: `0 0 8px ${status === "active" ? accentColor : "#22c55e"}`,
+          }}
+        >
+          {status === "active" ? "● GERANDO" : "✓ SELECIONADO"}
         </div>
       )}
 
@@ -307,43 +436,99 @@ function WorkflowProviderNode({ data }: NodeProps) {
       {showTooltip && lastExecution && (
         <div
           style={{
-            position: 'absolute',
-            bottom: 'calc(100% + 14px)',
-            left: '50%',
-            transform: 'translateX(-50%)',
+            position: "absolute",
+            bottom: "calc(100% + 14px)",
+            left: "50%",
+            transform: "translateX(-50%)",
             width: 290,
-            background: '#06000e',
+            background: "#06000e",
             border: `1.5px solid ${accentColor}99`,
             borderRadius: 9,
-            padding: '11px 13px',
+            padding: "11px 13px",
             zIndex: 9999,
             boxShadow: `0 6px 32px ${accentColor}44`,
-            pointerEvents: 'none',
+            pointerEvents: "none",
           }}
         >
           {/* ── Execution info section ── */}
           {lastExecution && (
             <>
-              <div style={{ fontFamily: 'monospace', fontSize: 8, color: accentColor, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <div
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: 8,
+                  color: accentColor,
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  marginBottom: 7,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                }}
+              >
                 <span style={{ fontSize: 10 }}>◈</span>
-                Última execução · {new Date(lastExecution.ts).toLocaleTimeString('pt-BR', { hour12: false })}
+                Última execução ·{" "}
+                {new Date(lastExecution.ts).toLocaleTimeString("pt-BR", {
+                  hour12: false,
+                })}
               </div>
               {lastExecution.reasoning && (
                 <div style={{ marginBottom: 8 }}>
-                  <div style={{ fontFamily: 'monospace', fontSize: 7.5, color: '#c026d3', marginBottom: 3, letterSpacing: '0.04em' }}>REASONING</div>
-                  <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff77', lineHeight: 1.6, borderLeft: '2px solid #c026d344', paddingLeft: 6 }}>
-                    {lastExecution.reasoning.slice(0, 160)}{lastExecution.reasoning.length > 160 ? '…' : ''}
+                  <div
+                    style={{
+                      fontFamily: "monospace",
+                      fontSize: 7.5,
+                      color: "#c026d3",
+                      marginBottom: 3,
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    REASONING
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "monospace",
+                      fontSize: 8,
+                      color: "#ffffff77",
+                      lineHeight: 1.6,
+                      borderLeft: "2px solid #c026d344",
+                      paddingLeft: 6,
+                    }}
+                  >
+                    {lastExecution.reasoning.slice(0, 160)}
+                    {lastExecution.reasoning.length > 160 ? "…" : ""}
                   </div>
                 </div>
               )}
-              <div style={{ fontFamily: 'monospace', fontSize: 7.5, color: accentColor, marginBottom: 4, letterSpacing: '0.04em' }}>PROMPT ENVIADO</div>
-              <div style={{
-                fontFamily: 'monospace', fontSize: 7.5, color: `${accentColor}cc`, lineHeight: 1.65,
-                wordBreak: 'break-word', maxHeight: 130, overflowY: 'auto',
-                background: '#100500', borderRadius: 5, padding: '6px 9px',
-                border: `1px solid ${accentColor}22`,
-              }}>
-                {lastExecution.prompt.slice(0, 400)}{lastExecution.prompt.length > 400 ? '…' : ''}
+              <div
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: 7.5,
+                  color: accentColor,
+                  marginBottom: 4,
+                  letterSpacing: "0.04em",
+                }}
+              >
+                PROMPT ENVIADO
+              </div>
+              <div
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: 7.5,
+                  color: `${accentColor}cc`,
+                  lineHeight: 1.65,
+                  wordBreak: "break-word",
+                  maxHeight: 130,
+                  overflowY: "auto",
+                  background: "#100500",
+                  borderRadius: 5,
+                  padding: "6px 9px",
+                  border: `1px solid ${accentColor}22`,
+                }}
+              >
+                {lastExecution.prompt.slice(0, 400)}
+                {lastExecution.prompt.length > 400 ? "…" : ""}
               </div>
             </>
           )}
@@ -356,14 +541,21 @@ function WorkflowProviderNode({ data }: NodeProps) {
       />
 
       {/* Top row: label + toggle */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 6,
+        }}
+      >
         <span
           style={{
-            color: isEnabled ? accentColor : '#777777',
+            color: isEnabled ? accentColor : "#777777",
             fontSize: 11,
             fontWeight: 700,
-            letterSpacing: '0.03em',
-            wordBreak: 'break-word',
+            letterSpacing: "0.03em",
+            wordBreak: "break-word",
             flex: 1,
             marginRight: 6,
           }}
@@ -376,46 +568,53 @@ function WorkflowProviderNode({ data }: NodeProps) {
             onToggle(provider.name, !isEnabled);
           }}
           style={{
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
             padding: 0,
             flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
+            display: "flex",
+            alignItems: "center",
           }}
-          title={isEnabled ? 'Desativar' : 'Ativar'}
+          title={isEnabled ? "Desativar" : "Ativar"}
         >
           {isEnabled ? (
-            <ToggleRight size={18} style={{ color: '#22c55e' }} />
+            <ToggleRight size={18} style={{ color: "#22c55e" }} />
           ) : (
-            <ToggleLeft size={18} style={{ color: '#555555' }} />
+            <ToggleLeft size={18} style={{ color: "#555555" }} />
           )}
         </button>
       </div>
 
       {/* Badge row */}
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: descSnippet || provider.envKey ? 6 : 0 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 4,
+          flexWrap: "wrap",
+          marginBottom: descSnippet || provider.envKey ? 6 : 0,
+        }}
+      >
         <span
           style={{
             fontSize: 9,
             background: `${accentColor}22`,
             color: accentColor,
             borderRadius: 4,
-            padding: '1px 5px',
+            padding: "1px 5px",
             border: `1px solid ${accentColor}44`,
           }}
         >
-          {isCloud ? '☁️ cloud' : '🖥 local'}
+          {isCloud ? "☁️ cloud" : "🖥 local"}
         </span>
         <span
           style={{
             fontSize: 9,
-            background: '#ffffff11',
-            color: '#ffffff88',
+            background: "#ffffff11",
+            color: "#ffffff88",
             borderRadius: 4,
-            padding: '1px 5px',
-            border: '1px solid #ffffff22',
+            padding: "1px 5px",
+            border: "1px solid #ffffff22",
           }}
         >
           {genTypeLabel}
@@ -427,38 +626,45 @@ function WorkflowProviderNode({ data }: NodeProps) {
         <div
           style={{
             fontSize: 9,
-            color: '#ffffff44',
+            color: "#ffffff44",
             lineHeight: 1.4,
             marginBottom: provider.envKey ? 4 : 0,
-            wordBreak: 'break-word',
+            wordBreak: "break-word",
           }}
         >
           {descSnippet}
-          {provider.description && provider.description.length > 70 ? '…' : ''}
+          {provider.description && provider.description.length > 70 ? "…" : ""}
         </div>
       )}
 
       {/* Env key + status dot */}
       {provider.envKey && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            marginTop: 2,
+          }}
+        >
           <span
             style={{
               width: 6,
               height: 6,
-              borderRadius: '50%',
-              background: isEnabled ? '#22c55e' : '#555555',
+              borderRadius: "50%",
+              background: isEnabled ? "#22c55e" : "#555555",
               flexShrink: 0,
-              display: 'inline-block',
+              display: "inline-block",
             }}
           />
           <span
             style={{
               fontSize: 8,
-              color: '#ffffff33',
-              fontFamily: 'monospace',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+              color: "#ffffff33",
+              fontFamily: "monospace",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
             }}
           >
             {provider.envKey}
@@ -473,11 +679,11 @@ function WorkflowProviderNode({ data }: NodeProps) {
             marginTop: 5,
             fontSize: 8,
             color: `${accentColor}88`,
-            fontFamily: 'monospace',
-            letterSpacing: '0.04em',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
+            fontFamily: "monospace",
+            letterSpacing: "0.04em",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
         >
           ✎ pré-prompt ativo
@@ -485,32 +691,146 @@ function WorkflowProviderNode({ data }: NodeProps) {
       )}
 
       {/* Compact badge — only in dismissed mode */}
-      {durationMs !== undefined && (status === 'completed' || status === 'failed') && timingDismissed && (
-        <TimingBadge durationMs={durationMs} limitMs={limitMs} accentColor={status === 'failed' ? '#ef4444' : undefined} />
-      )}
+      {durationMs !== undefined &&
+        (status === "completed" || status === "failed") &&
+        timingDismissed && (
+          <TimingBadge
+            durationMs={durationMs}
+            limitMs={limitMs}
+            accentColor={status === "failed" ? "#ef4444" : undefined}
+          />
+        )}
       {/* Inline timing panel — default visible, × to dismiss */}
-      {durationMs !== undefined && status !== 'idle' && !timingDismissed && (
-        <div style={{ marginTop: 6, padding: '5px 7px', background: `${accentColor}0d`, border: `1px solid ${accentColor}22`, borderRadius: 6, position: 'relative' }}>
-          <button onClick={(e) => { e.stopPropagation(); setTimingDismissed(true); }} style={{ position: 'absolute', top: 1, right: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#ffffff33', fontSize: 12, padding: 0, lineHeight: 1 }} title="Ocultar">×</button>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginBottom: 4 }}>
-            <span style={{ fontFamily: 'monospace', fontSize: 8, color: getTimingColor(durationMs, limitMs) }}>⏱</span>
-            <span style={{ fontFamily: 'monospace', fontSize: 18, fontWeight: 800, color: '#fff', lineHeight: 1 }}>{fmtSec(durationMs)}</span>
-            <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff55' }}>s</span>
-            {status === 'active' && <span style={{ fontFamily: 'monospace', fontSize: 7, color: accentColor, marginLeft: 2 }}>contando…</span>}
+      {durationMs !== undefined && status !== "idle" && !timingDismissed && (
+        <div
+          style={{
+            marginTop: 6,
+            padding: "5px 7px",
+            background: `${accentColor}0d`,
+            border: `1px solid ${accentColor}22`,
+            borderRadius: 6,
+            position: "relative",
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setTimingDismissed(true);
+            }}
+            style={{
+              position: "absolute",
+              top: 1,
+              right: 3,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: "#ffffff33",
+              fontSize: 12,
+              padding: 0,
+              lineHeight: 1,
+            }}
+            title="Ocultar"
+          >
+            ×
+          </button>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 3,
+              marginBottom: 4,
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "monospace",
+                fontSize: 8,
+                color: getTimingColor(durationMs, limitMs),
+              }}
+            >
+              ⏱
+            </span>
+            <span
+              style={{
+                fontFamily: "monospace",
+                fontSize: 18,
+                fontWeight: 800,
+                color: "#fff",
+                lineHeight: 1,
+              }}
+            >
+              {fmtSec(durationMs)}
+            </span>
+            <span
+              style={{
+                fontFamily: "monospace",
+                fontSize: 9,
+                color: "#ffffff55",
+              }}
+            >
+              s
+            </span>
+            {status === "active" && (
+              <span
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: 7,
+                  color: accentColor,
+                  marginLeft: 2,
+                }}
+              >
+                contando…
+              </span>
+            )}
           </div>
-          {status !== 'active' && (
+          {status !== "active" && (
             <>
-              <div style={{ background: '#ffffff11', borderRadius: 2, height: 3, width: '100%', overflow: 'hidden', marginBottom: 2 }}>
-                <div style={{ width: `${Math.min((durationMs / limitMs) * 100, 100)}%`, height: '100%', background: getTimingColor(durationMs, limitMs), borderRadius: 2 }} />
+              <div
+                style={{
+                  background: "#ffffff11",
+                  borderRadius: 2,
+                  height: 3,
+                  width: "100%",
+                  overflow: "hidden",
+                  marginBottom: 2,
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.min((durationMs / limitMs) * 100, 100)}%`,
+                    height: "100%",
+                    background: getTimingColor(durationMs, limitMs),
+                    borderRadius: 2,
+                  }}
+                />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', fontSize: 7.5, color: '#ffffff2a' }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontFamily: "monospace",
+                  fontSize: 7.5,
+                  color: "#ffffff2a",
+                }}
+              >
                 <span>lim: {(limitMs / 1000).toFixed(0)}s</span>
-                <span style={{ color: getTimingColor(durationMs, limitMs) }}>{Math.min((durationMs / limitMs) * 100, 100).toFixed(0)}%</span>
+                <span style={{ color: getTimingColor(durationMs, limitMs) }}>
+                  {Math.min((durationMs / limitMs) * 100, 100).toFixed(0)}%
+                </span>
               </div>
             </>
           )}
-          {status === 'failed' && durationMs >= limitMs * 0.85 && (
-            <div style={{ fontFamily: 'monospace', fontSize: 7.5, color: '#ef4444aa', marginTop: 4 }}>⚠ provável timeout</div>
+          {status === "failed" && durationMs >= limitMs * 0.85 && (
+            <div
+              style={{
+                fontFamily: "monospace",
+                fontSize: 7.5,
+                color: "#ef4444aa",
+                marginTop: 4,
+              }}
+            >
+              ⚠ provável timeout
+            </div>
           )}
         </div>
       )}
@@ -521,9 +841,9 @@ function WorkflowProviderNode({ data }: NodeProps) {
           marginTop: 6,
           fontSize: 8,
           color: `${accentColor}55`,
-          fontFamily: 'monospace',
-          letterSpacing: '0.05em',
-          textAlign: 'right',
+          fontFamily: "monospace",
+          letterSpacing: "0.05em",
+          textAlign: "right",
         }}
       >
         ✎ editar
@@ -535,10 +855,22 @@ function WorkflowProviderNode({ data }: NodeProps) {
 // ─── DispatcherNode (custom ReactFlow node) ───────────────────────────────────
 
 function DispatcherNode({ data }: NodeProps) {
-  const { strategy, maxAttempts, onOpenPanel, status = 'idle', durationMs, limitMs = 20_000 } = data as DispatcherNodeData;
+  const {
+    strategy,
+    maxAttempts,
+    onOpenPanel,
+    status = "idle",
+    durationMs,
+    limitMs = 20_000,
+  } = data as DispatcherNodeData;
   const [hovered, setHovered] = useState(true);
   const [timingDismissed, setTimingDismissed] = useState(false);
-  const borderColor = status === 'active' ? '#c026d3' : status === 'completed' ? '#22c55eaa' : '#c026d3aa';
+  const borderColor =
+    status === "active"
+      ? "#c026d3"
+      : status === "completed"
+        ? "#22c55eaa"
+        : "#c026d3aa";
 
   return (
     <div
@@ -547,46 +879,78 @@ function DispatcherNode({ data }: NodeProps) {
         onOpenPanel();
       }}
       style={{
-        background: status === 'active' ? '#2a003a' : '#1a0028',
+        background: status === "active" ? "#2a003a" : "#1a0028",
         border: `1.5px solid ${borderColor}`,
         borderRadius: 10,
-        padding: '10px 14px',
+        padding: "10px 14px",
         minWidth: 150,
-        fontFamily: 'monospace',
-        cursor: 'pointer',
-        transition: 'box-shadow 0.2s',
-        boxShadow: status === 'active' ? `0 0 16px ${borderColor}` : status === 'completed' ? `0 0 6px ${borderColor}44` : 'none',
-        animation: status === 'active' ? 'nodeGlowPurple 1.1s ease-in-out infinite alternate' : undefined,
-        position: 'relative',
-        overflow: 'visible',
+        fontFamily: "monospace",
+        cursor: "pointer",
+        transition: "box-shadow 0.2s",
+        boxShadow:
+          status === "active"
+            ? `0 0 16px ${borderColor}`
+            : status === "completed"
+              ? `0 0 6px ${borderColor}44`
+              : "none",
+        animation:
+          status === "active"
+            ? "nodeGlowPurple 1.1s ease-in-out infinite alternate"
+            : undefined,
+        position: "relative",
+        overflow: "visible",
       }}
       onMouseEnter={(e) => {
         setHovered(true);
-        (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 14px ${borderColor}88`;
+        (e.currentTarget as HTMLDivElement).style.boxShadow =
+          `0 0 14px ${borderColor}88`;
       }}
       onMouseLeave={(e) => {
         setHovered(false);
-        (e.currentTarget as HTMLDivElement).style.boxShadow = status === 'active' ? `0 0 16px ${borderColor}` : status === 'completed' ? `0 0 6px ${borderColor}44` : 'none';
+        (e.currentTarget as HTMLDivElement).style.boxShadow =
+          status === "active"
+            ? `0 0 16px ${borderColor}`
+            : status === "completed"
+              ? `0 0 6px ${borderColor}44`
+              : "none";
       }}
     >
       {/* Timing tooltip — hover-only after inline panel is dismissed */}
-      {hovered && durationMs !== undefined && status !== 'idle' && timingDismissed && (
-        <TimingTooltip
-          label="Dispatcher"
-          durationMs={durationMs}
-          limitMs={limitMs}
-          color="#c026d3"
-          isActive={status === 'active'}
-        />
-      )}
-      {status !== 'idle' && (
-        <div style={{
-          position: 'absolute', top: -9, right: -3,
-          background: status === 'active' ? '#c026d3' : status === 'completed' ? '#22c55e' : '#ef4444',
-          color: '#000', fontFamily: 'monospace', fontSize: 7, fontWeight: 800,
-          padding: '1px 4px', borderRadius: 3, zIndex: 10, pointerEvents: 'none',
-        }}>
-          {status === 'active' ? '●' : status === 'completed' ? '✓' : '✗'}
+      {hovered &&
+        durationMs !== undefined &&
+        status !== "idle" &&
+        timingDismissed && (
+          <TimingTooltip
+            label="Dispatcher"
+            durationMs={durationMs}
+            limitMs={limitMs}
+            color="#c026d3"
+            isActive={status === "active"}
+          />
+        )}
+      {status !== "idle" && (
+        <div
+          style={{
+            position: "absolute",
+            top: -9,
+            right: -3,
+            background:
+              status === "active"
+                ? "#c026d3"
+                : status === "completed"
+                  ? "#22c55e"
+                  : "#ef4444",
+            color: "#000",
+            fontFamily: "monospace",
+            fontSize: 7,
+            fontWeight: 800,
+            padding: "1px 4px",
+            borderRadius: 3,
+            zIndex: 10,
+            pointerEvents: "none",
+          }}
+        >
+          {status === "active" ? "●" : status === "completed" ? "✓" : "✗"}
         </div>
       )}
       <Handle
@@ -600,39 +964,46 @@ function DispatcherNode({ data }: NodeProps) {
         style={{ background: borderColor, borderColor }}
       />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          marginBottom: 6,
+        }}
+      >
         <span style={{ fontSize: 13 }}>⎇</span>
         <span
           style={{
             color: borderColor,
             fontSize: 11,
             fontWeight: 700,
-            letterSpacing: '0.04em',
+            letterSpacing: "0.04em",
           }}
         >
           Dispatcher
         </span>
         <span
           style={{
-            marginLeft: 'auto',
+            marginLeft: "auto",
             fontSize: 8,
-            color: '#c026d388',
-            letterSpacing: '0.06em',
+            color: "#c026d388",
+            letterSpacing: "0.06em",
           }}
         >
           ⚙ config
         </span>
       </div>
 
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
         <span
           style={{
             fontSize: 9,
-            background: '#c026d322',
-            color: '#c026d3',
+            background: "#c026d322",
+            color: "#c026d3",
             borderRadius: 4,
-            padding: '1px 5px',
-            border: '1px solid #c026d344',
+            padding: "1px 5px",
+            border: "1px solid #c026d344",
           }}
         >
           {strategy}
@@ -640,38 +1011,139 @@ function DispatcherNode({ data }: NodeProps) {
         <span
           style={{
             fontSize: 9,
-            background: '#ffffff11',
-            color: '#ffffff66',
+            background: "#ffffff11",
+            color: "#ffffff66",
             borderRadius: 4,
-            padding: '1px 5px',
-            border: '1px solid #ffffff22',
+            padding: "1px 5px",
+            border: "1px solid #ffffff22",
           }}
         >
           max {maxAttempts}
         </span>
         {/* Compact badge shown only in dismissed mode */}
-        {durationMs !== undefined && (status === 'completed' || status === 'failed') && timingDismissed && (
-          <TimingBadge durationMs={durationMs} limitMs={limitMs} />
-        )}
+        {durationMs !== undefined &&
+          (status === "completed" || status === "failed") &&
+          timingDismissed && (
+            <TimingBadge durationMs={durationMs} limitMs={limitMs} />
+          )}
       </div>
       {/* Inline timing panel — default visible, × to dismiss */}
-      {durationMs !== undefined && status !== 'idle' && !timingDismissed && (
-        <div style={{ marginTop: 7, padding: '5px 7px', background: '#c026d30d', border: '1px solid #c026d322', borderRadius: 6, position: 'relative' }}>
-          <button onClick={(e) => { e.stopPropagation(); setTimingDismissed(true); }} style={{ position: 'absolute', top: 1, right: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#ffffff33', fontSize: 12, padding: 0, lineHeight: 1 }} title="Ocultar">×</button>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginBottom: 4 }}>
-            <span style={{ fontFamily: 'monospace', fontSize: 8, color: getTimingColor(durationMs, limitMs) }}>⏱</span>
-            <span style={{ fontFamily: 'monospace', fontSize: 18, fontWeight: 800, color: '#fff', lineHeight: 1 }}>{fmtSec(durationMs)}</span>
-            <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff55' }}>s</span>
-            {status === 'active' && <span style={{ fontFamily: 'monospace', fontSize: 7, color: '#c026d3', marginLeft: 2 }}>contando…</span>}
+      {durationMs !== undefined && status !== "idle" && !timingDismissed && (
+        <div
+          style={{
+            marginTop: 7,
+            padding: "5px 7px",
+            background: "#c026d30d",
+            border: "1px solid #c026d322",
+            borderRadius: 6,
+            position: "relative",
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setTimingDismissed(true);
+            }}
+            style={{
+              position: "absolute",
+              top: 1,
+              right: 3,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: "#ffffff33",
+              fontSize: 12,
+              padding: 0,
+              lineHeight: 1,
+            }}
+            title="Ocultar"
+          >
+            ×
+          </button>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 3,
+              marginBottom: 4,
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "monospace",
+                fontSize: 8,
+                color: getTimingColor(durationMs, limitMs),
+              }}
+            >
+              ⏱
+            </span>
+            <span
+              style={{
+                fontFamily: "monospace",
+                fontSize: 18,
+                fontWeight: 800,
+                color: "#fff",
+                lineHeight: 1,
+              }}
+            >
+              {fmtSec(durationMs)}
+            </span>
+            <span
+              style={{
+                fontFamily: "monospace",
+                fontSize: 9,
+                color: "#ffffff55",
+              }}
+            >
+              s
+            </span>
+            {status === "active" && (
+              <span
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: 7,
+                  color: "#c026d3",
+                  marginLeft: 2,
+                }}
+              >
+                contando…
+              </span>
+            )}
           </div>
-          {status !== 'active' && (
+          {status !== "active" && (
             <>
-              <div style={{ background: '#ffffff11', borderRadius: 2, height: 3, width: '100%', overflow: 'hidden', marginBottom: 2 }}>
-                <div style={{ width: `${Math.min((durationMs / limitMs) * 100, 100)}%`, height: '100%', background: getTimingColor(durationMs, limitMs), borderRadius: 2 }} />
+              <div
+                style={{
+                  background: "#ffffff11",
+                  borderRadius: 2,
+                  height: 3,
+                  width: "100%",
+                  overflow: "hidden",
+                  marginBottom: 2,
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.min((durationMs / limitMs) * 100, 100)}%`,
+                    height: "100%",
+                    background: getTimingColor(durationMs, limitMs),
+                    borderRadius: 2,
+                  }}
+                />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', fontSize: 7.5, color: '#ffffff2a' }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontFamily: "monospace",
+                  fontSize: 7.5,
+                  color: "#ffffff2a",
+                }}
+              >
                 <span>lim: {(limitMs / 1000).toFixed(0)}s</span>
-                <span style={{ color: getTimingColor(durationMs, limitMs) }}>{Math.min((durationMs / limitMs) * 100, 100).toFixed(0)}%</span>
+                <span style={{ color: getTimingColor(durationMs, limitMs) }}>
+                  {Math.min((durationMs / limitMs) * 100, 100).toFixed(0)}%
+                </span>
               </div>
             </>
           )}
@@ -684,120 +1156,317 @@ function DispatcherNode({ data }: NodeProps) {
 // ─── LLMRouterNode (custom ReactFlow node) ───────────────────────────────────
 
 function LLMRouterNode({ data }: NodeProps) {
-  const { model, provider, visionEnabled, visionModel, onOpenPanel, status = 'idle', durationMs, limitMs = 20_000, visionDurationMs } = data as LLMRouterNodeData;
+  const {
+    model,
+    provider,
+    visionEnabled,
+    visionModel,
+    onOpenPanel,
+    status = "idle",
+    durationMs,
+    limitMs = 20_000,
+    visionDurationMs,
+  } = data as LLMRouterNodeData;
   const [hovered, setHovered] = useState(true);
   const [timingDismissed, setTimingDismissed] = useState(false);
   const isEnabled = !!model;
-  const isActive = status === 'active';
-  const isCompleted = status === 'completed';
-  const color = isActive ? '#22d3ee' : isCompleted ? '#22c55ecc' : isEnabled ? '#22d3ee99' : '#555555';
+  const isActive = status === "active";
+  const isCompleted = status === "completed";
+  const color = isActive
+    ? "#22d3ee"
+    : isCompleted
+      ? "#22c55ecc"
+      : isEnabled
+        ? "#22d3ee99"
+        : "#555555";
 
   return (
     <div
-      onClick={(e) => { e.stopPropagation(); onOpenPanel(); }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpenPanel();
+      }}
       style={{
-        background: isActive ? '#001522' : '#080f12',
+        background: isActive ? "#001522" : "#080f12",
         border: `1.5px solid ${color}`,
         borderRadius: 10,
-        padding: '8px 12px',
+        padding: "8px 12px",
         minWidth: 160,
-        fontFamily: 'monospace',
-        cursor: 'pointer',
-        transition: 'box-shadow 0.2s',
-        boxShadow: isActive ? `0 0 16px ${color}` : isCompleted ? `0 0 6px ${color}44` : 'none',
-        animation: isActive ? 'nodeGlowCyan 1.1s ease-in-out infinite alternate' : undefined,
-        position: 'relative',
-        overflow: 'visible',
+        fontFamily: "monospace",
+        cursor: "pointer",
+        transition: "box-shadow 0.2s",
+        boxShadow: isActive
+          ? `0 0 16px ${color}`
+          : isCompleted
+            ? `0 0 6px ${color}44`
+            : "none",
+        animation: isActive
+          ? "nodeGlowCyan 1.1s ease-in-out infinite alternate"
+          : undefined,
+        position: "relative",
+        overflow: "visible",
       }}
       onMouseEnter={(e) => {
         setHovered(true);
-        if (!isActive) (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 12px ${color}66`;
+        if (!isActive)
+          (e.currentTarget as HTMLDivElement).style.boxShadow =
+            `0 0 12px ${color}66`;
       }}
       onMouseLeave={(e) => {
         setHovered(false);
-        (e.currentTarget as HTMLDivElement).style.boxShadow = isActive ? `0 0 16px ${color}` : isCompleted ? `0 0 6px ${color}44` : 'none';
+        (e.currentTarget as HTMLDivElement).style.boxShadow = isActive
+          ? `0 0 16px ${color}`
+          : isCompleted
+            ? `0 0 6px ${color}44`
+            : "none";
       }}
     >
       {/* Timing tooltip — hover-only after inline panel dismissed */}
-      {hovered && durationMs !== undefined && status !== 'idle' && timingDismissed && (
-        <TimingTooltip
-          label="LLM Router"
-          durationMs={durationMs}
-          limitMs={limitMs}
-          color="#22d3ee"
-          isActive={isActive}
-        />
-      )}
+      {hovered &&
+        durationMs !== undefined &&
+        status !== "idle" &&
+        timingDismissed && (
+          <TimingTooltip
+            label="LLM Router"
+            durationMs={durationMs}
+            limitMs={limitMs}
+            color="#22d3ee"
+            isActive={isActive}
+          />
+        )}
       {(isActive || isCompleted) && (
-        <div style={{
-          position: 'absolute', top: -9, right: -3,
-          background: isActive ? '#22d3ee' : '#22c55e',
-          color: '#000', fontFamily: 'monospace', fontSize: 7, fontWeight: 800,
-          padding: '1px 4px', borderRadius: 3, zIndex: 10, pointerEvents: 'none',
-        }}>
-          {isActive ? '●' : '✓'}
+        <div
+          style={{
+            position: "absolute",
+            top: -9,
+            right: -3,
+            background: isActive ? "#22d3ee" : "#22c55e",
+            color: "#000",
+            fontFamily: "monospace",
+            fontSize: 7,
+            fontWeight: 800,
+            padding: "1px 4px",
+            borderRadius: 3,
+            zIndex: 10,
+            pointerEvents: "none",
+          }}
+        >
+          {isActive ? "●" : "✓"}
         </div>
       )}
-      <Handle type="target" position={Position.Left} style={{ background: color, borderColor: color }} />
-      <Handle type="source" position={Position.Right} style={{ background: color, borderColor: color }} />
+      <Handle
+        type="target"
+        position={Position.Left}
+        style={{ background: color, borderColor: color }}
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        style={{ background: color, borderColor: color }}
+      />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          marginBottom: 4,
+        }}
+      >
         <span style={{ fontSize: 11 }}>🤖</span>
-        <span style={{ color, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em' }}>LLM Router</span>
+        <span
+          style={{
+            color,
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: "0.04em",
+          }}
+        >
+          LLM Router
+        </span>
         {isActive && (
-          <span style={{ color: '#22d3ee', fontSize: 8, marginLeft: 'auto' }}>●</span>
+          <span style={{ color: "#22d3ee", fontSize: 8, marginLeft: "auto" }}>
+            ●
+          </span>
         )}
-        <span style={{ fontSize: 8, color: `${color}66`, marginLeft: isActive ? 0 : 'auto' }}>⚙</span>
+        <span
+          style={{
+            fontSize: 8,
+            color: `${color}66`,
+            marginLeft: isActive ? 0 : "auto",
+          }}
+        >
+          ⚙
+        </span>
       </div>
 
-      <div style={{ fontSize: 9, fontFamily: 'monospace', marginBottom: 4 }}>
+      <div style={{ fontSize: 9, fontFamily: "monospace", marginBottom: 4 }}>
         {isEnabled ? (
           <>
             <span style={{ color: `${color}99` }}>{provider}: </span>
             <span style={{ color }}>
-              {model.length > 18 ? model.slice(0, 18) + '…' : model}
+              {model.length > 18 ? model.slice(0, 18) + "…" : model}
             </span>
           </>
         ) : (
-          <span style={{ color: '#555555', fontStyle: 'italic' }}>desabilitado</span>
+          <span style={{ color: "#555555", fontStyle: "italic" }}>
+            desabilitado
+          </span>
         )}
       </div>
 
-      <div style={{ fontSize: 8, fontFamily: 'monospace', color: visionEnabled ? '#a855f7aa' : '#ffffff22', borderTop: '1px solid #ffffff0d', paddingTop: 4 }}>
+      <div
+        style={{
+          fontSize: 8,
+          fontFamily: "monospace",
+          color: visionEnabled ? "#a855f7aa" : "#ffffff22",
+          borderTop: "1px solid #ffffff0d",
+          paddingTop: 4,
+        }}
+      >
         <span style={{ marginRight: 4 }}>👁</span>
         {visionEnabled && visionModel ? (
-          <span style={{ color: '#a855f7' }}>{visionModel.length > 20 ? visionModel.slice(0, 20) + '…' : visionModel}</span>
+          <span style={{ color: "#a855f7" }}>
+            {visionModel.length > 20
+              ? visionModel.slice(0, 20) + "…"
+              : visionModel}
+          </span>
         ) : (
-          <span style={{ fontStyle: 'italic' }}>vision: off</span>
+          <span style={{ fontStyle: "italic" }}>vision: off</span>
         )}
         {visionDurationMs !== undefined && (
-          <span style={{ marginLeft: 6, color: '#a855f7', fontWeight: 700 }}>
+          <span style={{ marginLeft: 6, color: "#a855f7", fontWeight: 700 }}>
             ⏱ {fmtSec(visionDurationMs)}s
           </span>
         )}
       </div>
       {/* Compact badge — only in dismissed mode */}
-      {durationMs !== undefined && (isCompleted || status === 'failed') && timingDismissed && (
-        <TimingBadge durationMs={durationMs} limitMs={limitMs} accentColor={status === 'failed' ? '#ef4444' : '#22d3ee'} />
-      )}
+      {durationMs !== undefined &&
+        (isCompleted || status === "failed") &&
+        timingDismissed && (
+          <TimingBadge
+            durationMs={durationMs}
+            limitMs={limitMs}
+            accentColor={status === "failed" ? "#ef4444" : "#22d3ee"}
+          />
+        )}
       {/* Inline timing panel — default visible, × to dismiss */}
-      {durationMs !== undefined && status !== 'idle' && !timingDismissed && (
-        <div style={{ marginTop: 7, padding: '5px 7px', background: '#22d3ee0d', border: '1px solid #22d3ee22', borderRadius: 6, position: 'relative' }}>
-          <button onClick={(e) => { e.stopPropagation(); setTimingDismissed(true); }} style={{ position: 'absolute', top: 1, right: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#ffffff33', fontSize: 12, padding: 0, lineHeight: 1 }} title="Ocultar">×</button>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginBottom: 4 }}>
-            <span style={{ fontFamily: 'monospace', fontSize: 8, color: getTimingColor(durationMs, limitMs) }}>⏱</span>
-            <span style={{ fontFamily: 'monospace', fontSize: 18, fontWeight: 800, color: '#fff', lineHeight: 1 }}>{fmtSec(durationMs)}</span>
-            <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff55' }}>s</span>
-            {isActive && <span style={{ fontFamily: 'monospace', fontSize: 7, color: '#22d3ee', marginLeft: 2 }}>contando…</span>}
+      {durationMs !== undefined && status !== "idle" && !timingDismissed && (
+        <div
+          style={{
+            marginTop: 7,
+            padding: "5px 7px",
+            background: "#22d3ee0d",
+            border: "1px solid #22d3ee22",
+            borderRadius: 6,
+            position: "relative",
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setTimingDismissed(true);
+            }}
+            style={{
+              position: "absolute",
+              top: 1,
+              right: 3,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: "#ffffff33",
+              fontSize: 12,
+              padding: 0,
+              lineHeight: 1,
+            }}
+            title="Ocultar"
+          >
+            ×
+          </button>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 3,
+              marginBottom: 4,
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "monospace",
+                fontSize: 8,
+                color: getTimingColor(durationMs, limitMs),
+              }}
+            >
+              ⏱
+            </span>
+            <span
+              style={{
+                fontFamily: "monospace",
+                fontSize: 18,
+                fontWeight: 800,
+                color: "#fff",
+                lineHeight: 1,
+              }}
+            >
+              {fmtSec(durationMs)}
+            </span>
+            <span
+              style={{
+                fontFamily: "monospace",
+                fontSize: 9,
+                color: "#ffffff55",
+              }}
+            >
+              s
+            </span>
+            {isActive && (
+              <span
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: 7,
+                  color: "#22d3ee",
+                  marginLeft: 2,
+                }}
+              >
+                contando…
+              </span>
+            )}
           </div>
           {!isActive && (
             <>
-              <div style={{ background: '#ffffff11', borderRadius: 2, height: 3, width: '100%', overflow: 'hidden', marginBottom: 2 }}>
-                <div style={{ width: `${Math.min((durationMs / limitMs) * 100, 100)}%`, height: '100%', background: getTimingColor(durationMs, limitMs), borderRadius: 2 }} />
+              <div
+                style={{
+                  background: "#ffffff11",
+                  borderRadius: 2,
+                  height: 3,
+                  width: "100%",
+                  overflow: "hidden",
+                  marginBottom: 2,
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.min((durationMs / limitMs) * 100, 100)}%`,
+                    height: "100%",
+                    background: getTimingColor(durationMs, limitMs),
+                    borderRadius: 2,
+                  }}
+                />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', fontSize: 7.5, color: '#ffffff2a' }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontFamily: "monospace",
+                  fontSize: 7.5,
+                  color: "#ffffff2a",
+                }}
+              >
                 <span>lim: {(limitMs / 1000).toFixed(0)}s</span>
-                <span style={{ color: getTimingColor(durationMs, limitMs) }}>{Math.min((durationMs / limitMs) * 100, 100).toFixed(0)}%</span>
+                <span style={{ color: getTimingColor(durationMs, limitMs) }}>
+                  {Math.min((durationMs / limitMs) * 100, 100).toFixed(0)}%
+                </span>
               </div>
             </>
           )}
@@ -816,32 +1485,32 @@ function AddWorkflowNode({ data }: NodeProps) {
     <div
       onClick={onAdd}
       style={{
-        background: 'transparent',
-        border: '1.5px dashed #ffffff22',
+        background: "transparent",
+        border: "1.5px dashed #ffffff22",
         borderRadius: 10,
-        padding: '10px 12px',
+        padding: "10px 12px",
         minWidth: 160,
         maxWidth: 200,
-        fontFamily: 'monospace',
-        cursor: 'pointer',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        transition: 'border-color 0.2s',
+        fontFamily: "monospace",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        transition: "border-color 0.2s",
       }}
       onMouseEnter={(e) => {
-        (e.currentTarget as HTMLDivElement).style.borderColor = '#ffffff44';
+        (e.currentTarget as HTMLDivElement).style.borderColor = "#ffffff44";
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLDivElement).style.borderColor = '#ffffff22';
+        (e.currentTarget as HTMLDivElement).style.borderColor = "#ffffff22";
       }}
     >
       <Handle
         type="target"
         position={Position.Left}
-        style={{ background: '#ffffff22', borderColor: '#ffffff22' }}
+        style={{ background: "#ffffff22", borderColor: "#ffffff22" }}
       />
-      <span style={{ color: '#666666', fontSize: 11 }}>+ Novo workflow</span>
+      <span style={{ color: "#666666", fontSize: 11 }}>+ Novo workflow</span>
     </div>
   );
 }
@@ -849,31 +1518,39 @@ function AddWorkflowNode({ data }: NodeProps) {
 // ─── Panel sub-components (info blocks used in side panels) ──────────────────
 
 const infoText: React.CSSProperties = {
-  fontFamily: 'monospace',
+  fontFamily: "monospace",
   fontSize: 9,
-  color: '#ffffff77',
+  color: "#ffffff77",
   lineHeight: 1.75,
   margin: 0,
 };
 
-function Section({ title, color, children }: { title: string; color: string; children: React.ReactNode }) {
+function Section({
+  title,
+  color,
+  children,
+}: {
+  title: string;
+  color: string;
+  children: React.ReactNode;
+}) {
   return (
     <div
       style={{
         background: `${color}0a`,
         border: `1px solid ${color}22`,
         borderRadius: 8,
-        padding: '10px 12px',
+        padding: "10px 12px",
       }}
     >
       <div
         style={{
-          fontFamily: 'monospace',
+          fontFamily: "monospace",
           fontSize: 9,
           fontWeight: 700,
           color,
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
           marginBottom: 8,
         }}
       >
@@ -885,7 +1562,11 @@ function Section({ title, color, children }: { title: string; color: string; chi
 }
 
 function DecisionStep({
-  step, color, condition, result, note,
+  step,
+  color,
+  condition,
+  result,
+  note,
 }: {
   step: string;
   color: string;
@@ -896,18 +1577,18 @@ function DecisionStep({
   return (
     <div
       style={{
-        background: '#ffffff06',
+        background: "#ffffff06",
         border: `1px solid ${color}22`,
         borderRadius: 6,
-        padding: '7px 10px',
-        display: 'flex',
+        padding: "7px 10px",
+        display: "flex",
         gap: 8,
-        alignItems: 'flex-start',
+        alignItems: "flex-start",
       }}
     >
       <span
         style={{
-          fontFamily: 'monospace',
+          fontFamily: "monospace",
           fontSize: 9,
           fontWeight: 700,
           color,
@@ -919,13 +1600,31 @@ function DecisionStep({
         {step}
       </span>
       <div>
-        <div style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff88' }}>
+        <div
+          style={{ fontFamily: "monospace", fontSize: 9, color: "#ffffff88" }}
+        >
           {condition}
         </div>
-        <div style={{ fontFamily: 'monospace', fontSize: 9, color, fontWeight: 700, marginTop: 2 }}>
+        <div
+          style={{
+            fontFamily: "monospace",
+            fontSize: 9,
+            color,
+            fontWeight: 700,
+            marginTop: 2,
+          }}
+        >
           {result}
         </div>
-        <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff44', marginTop: 2, lineHeight: 1.5 }}>
+        <div
+          style={{
+            fontFamily: "monospace",
+            fontSize: 8,
+            color: "#ffffff44",
+            marginTop: 2,
+            lineHeight: 1.5,
+          }}
+        >
           {note}
         </div>
       </div>
@@ -935,7 +1634,13 @@ function DecisionStep({
 
 // ─── ResizeHandle ─────────────────────────────────────────────────────────────
 
-function ResizeHandle({ onMouseDown, color }: { onMouseDown: (e: React.MouseEvent) => void; color: string }) {
+function ResizeHandle({
+  onMouseDown,
+  color,
+}: {
+  onMouseDown: (e: React.MouseEvent) => void;
+  color: string;
+}) {
   const [hovered, setHovered] = useState(false);
   return (
     <div
@@ -943,22 +1648,30 @@ function ResizeHandle({ onMouseDown, color }: { onMouseDown: (e: React.MouseEven
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        position: 'absolute',
+        position: "absolute",
         left: 0,
         top: 0,
         bottom: 0,
         width: 6,
-        cursor: 'ew-resize',
+        cursor: "ew-resize",
         zIndex: 30,
-        background: hovered ? `${color}55` : 'transparent',
-        transition: 'background 0.15s',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        background: hovered ? `${color}55` : "transparent",
+        transition: "background 0.15s",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
       }}
     >
       {hovered && (
-        <div style={{ width: 2, height: 40, borderRadius: 2, background: color, boxShadow: `0 0 8px ${color}` }} />
+        <div
+          style={{
+            width: 2,
+            height: 40,
+            borderRadius: 2,
+            background: color,
+            boxShadow: `0 0 8px ${color}`,
+          }}
+        />
       )}
     </div>
   );
@@ -993,38 +1706,48 @@ function buildNodes(
 
   const nodes: Node[] = [
     {
-      id: 'entry',
-      type: 'default',
+      id: "entry",
+      type: "default",
       position: { x: 0, y: centerY - 30 },
-      data: { label: '🖼 Image Gen' },
+      data: { label: "🖼 Image Gen" },
       style: {
-        background: '#3a1a00',
-        border: '1.5px solid #f97316',
+        background: "#3a1a00",
+        border: "1.5px solid #f97316",
         borderRadius: 10,
-        color: '#f97316',
-        fontFamily: 'monospace',
+        color: "#f97316",
+        fontFamily: "monospace",
         fontSize: 11,
         fontWeight: 700,
-        padding: '8px 14px',
+        padding: "8px 14px",
         minWidth: 120,
-        textAlign: 'center',
+        textAlign: "center",
       },
     },
     {
-      id: 'dispatcher',
-      type: 'dispatcherNode',
+      id: "dispatcher",
+      type: "dispatcherNode",
       position: { x: 200, y: centerY - 40 },
-      data: { strategy, maxAttempts, onOpenPanel: onOpenDispatcherPanel } as DispatcherNodeData,
+      data: {
+        strategy,
+        maxAttempts,
+        onOpenPanel: onOpenDispatcherPanel,
+      } as DispatcherNodeData,
     },
     {
-      id: 'llmRouter',
-      type: 'llmRouterNode',
+      id: "llmRouter",
+      type: "llmRouterNode",
       position: { x: 390, y: centerY - 35 },
-      data: { model: routerConfig.model, provider: routerConfig.provider, visionEnabled: visionConfig.enabled ?? false, visionModel: visionConfig.model ?? '', onOpenPanel: onOpenRouterPanel } as LLMRouterNodeData,
+      data: {
+        model: routerConfig.model,
+        provider: routerConfig.provider,
+        visionEnabled: visionConfig.enabled ?? false,
+        visionModel: visionConfig.model ?? "",
+        onOpenPanel: onOpenRouterPanel,
+      } as LLMRouterNodeData,
     },
     ...providers.map((p, i) => ({
       id: `provider_${p.name}`,
-      type: 'workflowNode',
+      type: "workflowNode",
       position: { x: 590, y: i * 110 },
       data: {
         provider: p,
@@ -1033,8 +1756,8 @@ function buildNodes(
       } as WorkflowNodeData,
     })),
     {
-      id: 'addNode',
-      type: 'addNode',
+      id: "addNode",
+      type: "addNode",
       position: { x: 590, y: providers.length * 110 },
       data: { onAdd } as AddNodeData,
     },
@@ -1042,37 +1765,41 @@ function buildNodes(
 
   const edges: Edge[] = [
     {
-      id: 'entry→dispatcher',
-      source: 'entry',
-      target: 'dispatcher',
-      style: { stroke: '#f9731688', strokeWidth: 1.5 },
+      id: "entry→dispatcher",
+      source: "entry",
+      target: "dispatcher",
+      style: { stroke: "#f9731688", strokeWidth: 1.5 },
       animated: false,
     },
     {
-      id: 'dispatcher→llmRouter',
-      source: 'dispatcher',
-      target: 'llmRouter',
-      style: { stroke: '#c026d366', strokeWidth: 1.5 },
+      id: "dispatcher→llmRouter",
+      source: "dispatcher",
+      target: "llmRouter",
+      style: { stroke: "#c026d366", strokeWidth: 1.5 },
       animated: false,
     },
     ...providers.map((p) => ({
       id: `llmRouter→provider_${p.name}`,
-      source: 'llmRouter',
+      source: "llmRouter",
       target: `provider_${p.name}`,
       style: {
-        stroke: p.enabled ? (p.executionMode === 'cloud' ? '#22d3ee55' : '#f9731655') : '#33333355',
+        stroke: p.enabled
+          ? p.executionMode === "cloud"
+            ? "#22d3ee55"
+            : "#f9731655"
+          : "#33333355",
         strokeWidth: 1.5,
       },
       animated: false,
     })),
     {
-      id: 'llmRouter→addNode',
-      source: 'llmRouter',
-      target: 'addNode',
+      id: "llmRouter→addNode",
+      source: "llmRouter",
+      target: "addNode",
       style: {
-        stroke: '#ffffff11',
+        stroke: "#ffffff11",
         strokeWidth: 1,
-        strokeDasharray: '4 3',
+        strokeDasharray: "4 3",
       },
       animated: false,
     },
@@ -1083,25 +1810,46 @@ function buildNodes(
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-const DEFAULT_ROUTER_CONFIG: ImageRouterConfig = { model: '', provider: 'ollama', timeoutMs: 12000 };
+const DEFAULT_ROUTER_CONFIG: ImageRouterConfig = {
+  model: "",
+  provider: "ollama",
+  timeoutMs: 12000,
+};
 
-export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }: ImageGenSubFlowProps) {
+export function ImageGenSubFlow({
+  baseUrl,
+  definition,
+  onBack,
+  conversationId,
+}: ImageGenSubFlowProps) {
   const [providers, setProviders] = useState<ImageWorkflowProvider[]>([]);
-  const [strategy, setStrategy] = useState('priority_list');
+  const [strategy, setStrategy] = useState("priority_list");
   const [maxAttempts, setMaxAttempts] = useState(3);
   const [loading, setLoading] = useState(true);
   const [addingNew, setAddingNew] = useState(false);
   const [dispatcherPanelOpen, setDispatcherPanelOpen] = useState(false);
-  const [dispatcherForm, setDispatcherForm] = useState({ strategy: 'priority_list', maxAttempts: 3 });
+  const [dispatcherForm, setDispatcherForm] = useState({
+    strategy: "priority_list",
+    maxAttempts: 3,
+  });
   const [savingDispatcher, setSavingDispatcher] = useState(false);
-  const [editingProviderName, setEditingProviderName] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ label: '', prePrompt: '', workflowPath: '', generationType: 'text2img', description: '', timeoutMs: 90000 });
+  const [editingProviderName, setEditingProviderName] = useState<string | null>(
+    null,
+  );
+  const [editForm, setEditForm] = useState({
+    label: "",
+    prePrompt: "",
+    workflowPath: "",
+    generationType: "text2img",
+    description: "",
+    timeoutMs: 90000,
+  });
   const [form, setForm] = useState({
-    name: '',
-    generationType: 'text2img',
-    executionMode: 'local',
-    workflowPath: '',
-    description: '',
+    name: "",
+    generationType: "text2img",
+    executionMode: "local",
+    workflowPath: "",
+    description: "",
     timeoutMs: 90000,
   });
   const [savingEdit, setSavingEdit] = useState(false);
@@ -1114,36 +1862,58 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
 
   // ─── Custom Workflow Scan state ───────────────────────────────────────────
   const [scanPanelOpen, setScanPanelOpen] = useState(false);
-  const [customWf, setCustomWf] = useState<CustomWorkflowsState>({ folder: null, discovered: {} });
-  const [scanFolder, setScanFolder] = useState('');
+  const [customWf, setCustomWf] = useState<CustomWorkflowsState>({
+    folder: null,
+    discovered: {},
+  });
+  const [scanFolder, setScanFolder] = useState("");
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [savingWf, setSavingWf] = useState<string | null>(null);
 
   // ─── Panel resize ─────────────────────────────────────────────────────────
 
-  const { width: panelWidth, onMouseDown: onResizeMouseDown } = useResizablePanel(320, 260, 860);
+  const { width: panelWidth, onMouseDown: onResizeMouseDown } =
+    useResizablePanel(320, 260, 860);
 
   // ─── LLM Router state ─────────────────────────────────────────────────────
 
-  const [routerConfig, setRouterConfig] = useState<ImageRouterConfig>(DEFAULT_ROUTER_CONFIG);
+  const [routerConfig, setRouterConfig] = useState<ImageRouterConfig>(
+    DEFAULT_ROUTER_CONFIG,
+  );
   const [routerPanelOpen, setRouterPanelOpen] = useState(false);
-  const [routerForm, setRouterForm] = useState<ImageRouterConfig>(DEFAULT_ROUTER_CONFIG);
+  const [routerForm, setRouterForm] = useState<ImageRouterConfig>(
+    DEFAULT_ROUTER_CONFIG,
+  );
   const [savingRouter, setSavingRouter] = useState(false);
 
   // ─── Vision Descriptor state ───────────────────────────────────────────────
 
-  const DEFAULT_VISION_CONFIG: VisionDescriptorSkillConfig = { enabled: false, provider: 'ollama', model: '', timeoutMs: 60000, fallback: { provider: 'openai', model: 'gpt-4o' } };
-  const [visionConfig, setVisionConfig] = useState<VisionDescriptorSkillConfig>(DEFAULT_VISION_CONFIG);
-  const [visionForm, setVisionForm] = useState<VisionDescriptorSkillConfig>(DEFAULT_VISION_CONFIG);
+  const DEFAULT_VISION_CONFIG: VisionDescriptorSkillConfig = {
+    enabled: false,
+    provider: "ollama",
+    model: "",
+    timeoutMs: 60000,
+    fallback: { provider: "openai", model: "gpt-4o" },
+  };
+  const [visionConfig, setVisionConfig] = useState<VisionDescriptorSkillConfig>(
+    DEFAULT_VISION_CONFIG,
+  );
+  const [visionForm, setVisionForm] = useState<VisionDescriptorSkillConfig>(
+    DEFAULT_VISION_CONFIG,
+  );
   const [savingVision, setSavingVision] = useState(false);
 
   // ─── SSE animation state ───────────────────────────────────────────────────
 
-  const [nodeStatuses, setNodeStatuses] = useState<Map<string, NodeStatus>>(new Map());
+  const [nodeStatuses, setNodeStatuses] = useState<Map<string, NodeStatus>>(
+    new Map(),
+  );
   const [tick, setTick] = useState(0);
   const [activeProviderId, setActiveProviderId] = useState<string | null>(null);
-  const [execInfoMap, setExecInfoMap] = useState<Map<string, ExecInfo>>(new Map());
+  const [execInfoMap, setExecInfoMap] = useState<Map<string, ExecInfo>>(
+    new Map(),
+  );
   const [nodeTimes, setNodeTimes] = useState<Map<string, NodeTime>>(new Map());
   const activeProviderRef = useRef<string | null>(null);
   const pendingPromptRef = useRef<string | null>(null);
@@ -1151,14 +1921,16 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
 
   // Real-time tick: re-runs liveNodes every second while any node is active.
   useEffect(() => {
-    const hasActive = [...nodeStatuses.values()].some(s => s === 'active');
+    const hasActive = [...nodeStatuses.values()].some((s) => s === "active");
     if (!hasActive) return;
-    const id = setInterval(() => setTick(t => t + 1), 1000);
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, [nodeStatuses]);
 
   // Keep ref in sync with state so applyImageEvent can access it without closure issues
-  useEffect(() => { activeProviderRef.current = activeProviderId; }, [activeProviderId]);
+  useEffect(() => {
+    activeProviderRef.current = activeProviderId;
+  }, [activeProviderId]);
 
   // ─── Populate edit form when a provider is selected ───────────────────────
 
@@ -1168,10 +1940,10 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
     if (!p) return;
     setEditForm({
       label: p.label ?? p.name,
-      prePrompt: p.prePrompt ?? '',
-      workflowPath: p.workflowPath ?? '',
-      generationType: p.generationType ?? 'text2img',
-      description: p.description ?? '',
+      prePrompt: p.prePrompt ?? "",
+      workflowPath: p.workflowPath ?? "",
+      generationType: p.generationType ?? "text2img",
+      description: p.description ?? "",
       timeoutMs: p.timeoutMs ?? 90000,
     });
   }, [editingProviderName]);
@@ -1207,7 +1979,7 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
     getCustomWorkflows(baseUrl)
       .then((s) => {
         setCustomWf(s);
-        setScanFolder(s.folder ?? '');
+        setScanFolder(s.folder ?? "");
       })
       .catch(() => {});
   }, [baseUrl]);
@@ -1216,10 +1988,13 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
     setScanning(true);
     setScanError(null);
     try {
-      const result = await scanCustomWorkflows(baseUrl, scanFolder || undefined);
+      const result = await scanCustomWorkflows(
+        baseUrl,
+        scanFolder || undefined,
+      );
       setCustomWf({ folder: result.folder, discovered: result.discovered });
     } catch (e: unknown) {
-      setScanError(e instanceof Error ? e.message : 'Erro ao escanear');
+      setScanError(e instanceof Error ? e.message : "Erro ao escanear");
     } finally {
       setScanning(false);
     }
@@ -1228,7 +2003,9 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
   async function handleToggleCustomWf(name: string, entry: DiscoveredWorkflow) {
     setSavingWf(name);
     try {
-      const result = await updateCustomWorkflow(baseUrl, name, { enabled: !entry.enabled });
+      const result = await updateCustomWorkflow(baseUrl, name, {
+        enabled: !entry.enabled,
+      });
       setCustomWf((prev) => ({
         ...prev,
         discovered: { ...prev.discovered, [name]: result.workflow },
@@ -1243,10 +2020,15 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
     }
   }
 
-  async function handleSetCustomWfType(name: string, generationType: 'txt2img' | 'img2img') {
+  async function handleSetCustomWfType(
+    name: string,
+    generationType: "txt2img" | "img2img",
+  ) {
     setSavingWf(name);
     try {
-      const result = await updateCustomWorkflow(baseUrl, name, { generationType });
+      const result = await updateCustomWorkflow(baseUrl, name, {
+        generationType,
+      });
       setCustomWf((prev) => ({
         ...prev,
         discovered: { ...prev.discovered, [name]: result.workflow },
@@ -1267,40 +2049,52 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
     times: Map<string, NodeTime>,
     activeProvNodeId?: string,
   ) {
-    const end = (id: string) => { const t = times.get(id); if (t && !t.endTs) times.set(id, { ...t, endTs: ts }); };
-    if (eventName === 'vision.described') {
+    const end = (id: string) => {
+      const t = times.get(id);
+      if (t && !t.endTs) times.set(id, { ...t, endTs: ts });
+    };
+    if (eventName === "vision.described") {
       // vision fires BEFORE stage.started; use payload.durationMs if available
       const dur = payload?.durationMs as number | undefined;
-      if (dur) times.set('vision', { startTs: ts - dur, endTs: ts });
-      else times.set('vision', { startTs: ts, endTs: ts });
-    } else if (eventName === 'stage.started' && payload?.stageId === 'image_gen') {
-      times.set('entry', { startTs: ts });
-    } else if (eventName === 'image.gen_started') {
+      if (dur) times.set("vision", { startTs: ts - dur, endTs: ts });
+      else times.set("vision", { startTs: ts, endTs: ts });
+    } else if (
+      eventName === "stage.started" &&
+      payload?.stageId === "image_gen"
+    ) {
+      times.set("entry", { startTs: ts });
+    } else if (eventName === "image.gen_started") {
       // Routing phase starts (dispatcher + LLM router)
-      times.set('dispatcher', { startTs: ts });
-      times.set('llmRouter', { startTs: ts });
-    } else if (eventName === 'image.dispatcher_selected') {
+      times.set("dispatcher", { startTs: ts });
+      times.set("llmRouter", { startTs: ts });
+    } else if (eventName === "image.dispatcher_selected") {
       // Routing done → provider generation starts
-      end('dispatcher');
-      end('llmRouter');
+      end("dispatcher");
+      end("llmRouter");
       const prov = payload?.provider as string | undefined;
       if (prov) times.set(`provider_${prov}`, { startTs: ts });
-    } else if (eventName === 'image.gen_completed') {
+    } else if (eventName === "image.gen_completed") {
       const prov = payload?.provider as string | undefined;
       if (prov) end(`provider_${prov}`);
-    } else if (eventName === 'image.gen_failed') {
+    } else if (eventName === "image.gen_failed") {
       const prov = payload?.provider as string | undefined;
       if (prov) end(`provider_${prov}`);
-    } else if (eventName === 'stage.completed' && payload?.stageId === 'image_gen') {
-      end('entry');
+    } else if (
+      eventName === "stage.completed" &&
+      payload?.stageId === "image_gen"
+    ) {
+      end("entry");
       // Also close active provider timing in case image.gen_completed had a name mismatch
       if (activeProvNodeId) end(activeProvNodeId);
-      end('dispatcher');
-      end('llmRouter');
-    } else if (eventName === 'stage.failed' && payload?.stageId === 'image_gen') {
-      end('entry');
-      end('dispatcher');
-      end('llmRouter');
+      end("dispatcher");
+      end("llmRouter");
+    } else if (
+      eventName === "stage.failed" &&
+      payload?.stageId === "image_gen"
+    ) {
+      end("entry");
+      end("dispatcher");
+      end("llmRouter");
       if (activeProvNodeId) end(activeProvNodeId);
     }
   }
@@ -1313,35 +2107,51 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
   ): string | null | undefined {
     // returns new activeProviderId when dispatcher_selected fires, undefined otherwise
     // currentActiveProv overrides activeProviderRef.current (used in replay)
-    const activeProv = currentActiveProv !== undefined ? currentActiveProv : activeProviderRef.current;
-    if (eventName === 'stage.started' && payload?.stageId === 'image_gen') {
+    const activeProv =
+      currentActiveProv !== undefined
+        ? currentActiveProv
+        : activeProviderRef.current;
+    if (eventName === "stage.started" && payload?.stageId === "image_gen") {
       // Only entry activates; dispatcher/llmRouter activate when image.gen_started fires
-      m.set('entry', 'active');
-    } else if (eventName === 'vision.described') {
+      m.set("entry", "active");
+    } else if (eventName === "vision.described") {
       // Vision descriptor runs before image.gen_started — mark llmRouter as preparing
-      m.set('llmRouter', 'active');
-    } else if (eventName === 'image.gen_started') {
+      m.set("llmRouter", "active");
+    } else if (eventName === "image.gen_started") {
       // Routing phase: both dispatcher and LLM router activate together
-      m.set('dispatcher', 'active'); m.set('llmRouter', 'active'); m.set('entry', 'active');
-    } else if (eventName === 'image.dispatcher_selected') {
-      m.set('dispatcher', 'completed'); m.set('llmRouter', 'completed');
+      m.set("dispatcher", "active");
+      m.set("llmRouter", "active");
+      m.set("entry", "active");
+    } else if (eventName === "image.dispatcher_selected") {
+      m.set("dispatcher", "completed");
+      m.set("llmRouter", "completed");
       const sel = payload?.provider as string | undefined;
-      if (sel) m.set(`provider_${sel}`, 'active');
+      if (sel) m.set(`provider_${sel}`, "active");
       return sel ? `provider_${sel}` : null;
-    } else if (eventName === 'image.gen_completed') {
+    } else if (eventName === "image.gen_completed") {
       const prov = payload?.provider as string | undefined;
-      if (prov) m.set(`provider_${prov}`, 'completed');
-      m.set('entry', 'completed');
-    } else if (eventName === 'image.gen_failed') {
+      if (prov) m.set(`provider_${prov}`, "completed");
+      m.set("entry", "completed");
+    } else if (eventName === "image.gen_failed") {
       const prov = payload?.provider as string | undefined;
-      if (prov) m.set(`provider_${prov}`, 'failed');
-      m.set('entry', 'failed');
-    } else if (eventName === 'stage.completed' && payload?.stageId === 'image_gen') {
-      m.set('entry', 'completed'); m.set('dispatcher', 'completed'); m.set('llmRouter', 'completed');
-      if (activeProv) m.set(activeProv, 'completed');
-    } else if (eventName === 'stage.failed' && payload?.stageId === 'image_gen') {
-      m.set('entry', 'failed'); m.set('dispatcher', 'failed'); m.set('llmRouter', 'failed');
-      if (activeProv) m.set(activeProv, 'failed');
+      if (prov) m.set(`provider_${prov}`, "failed");
+      m.set("entry", "failed");
+    } else if (
+      eventName === "stage.completed" &&
+      payload?.stageId === "image_gen"
+    ) {
+      m.set("entry", "completed");
+      m.set("dispatcher", "completed");
+      m.set("llmRouter", "completed");
+      if (activeProv) m.set(activeProv, "completed");
+    } else if (
+      eventName === "stage.failed" &&
+      payload?.stageId === "image_gen"
+    ) {
+      m.set("entry", "failed");
+      m.set("dispatcher", "failed");
+      m.set("llmRouter", "failed");
+      if (activeProv) m.set(activeProv, "failed");
     }
     return undefined;
   }
@@ -1359,28 +2169,44 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
 
     const cleanup = subscribeToFlowEvents(baseUrl, conversationId, (raw) => {
       // Replay: restore full state from past events
-      if ('type' in raw && raw.type === 'trace_replay') {
+      if ("type" in raw && raw.type === "trace_replay") {
         const replayedStatuses = new Map<string, NodeStatus>();
         const replayedTimes = new Map<string, NodeTime>();
         let replayedActive: string | null = null;
         const replayedExecMap = new Map<string, ExecInfo>();
-        let replayedPendingPrompt = '';
-        for (const evt of ((raw.events ?? []) as StageEvent[])) {
-          if (evt.eventName === 'image.gen_started' && evt.payload?.prompt) {
+        let replayedPendingPrompt = "";
+        for (const evt of (raw.events ?? []) as StageEvent[]) {
+          if (evt.eventName === "image.gen_started" && evt.payload?.prompt) {
             replayedPendingPrompt = evt.payload.prompt as string;
           }
-          if (evt.eventName === 'image.dispatcher_selected' && evt.payload?.provider) {
+          if (
+            evt.eventName === "image.dispatcher_selected" &&
+            evt.payload?.provider
+          ) {
             const prov = evt.payload.provider as string;
-            const prompt = (evt.payload.prompt as string | undefined) ?? replayedPendingPrompt;
+            const prompt =
+              (evt.payload.prompt as string | undefined) ??
+              replayedPendingPrompt;
             replayedExecMap.set(`provider_${prov}`, {
               prompt,
-              reasoning: (evt.payload.reasoning as string) ?? '',
+              reasoning: (evt.payload.reasoning as string) ?? "",
               ts: evt.ts,
             });
-            replayedPendingPrompt = '';
+            replayedPendingPrompt = "";
           }
-          applyTimeEvent(evt.eventName, evt.payload, evt.ts, replayedTimes, replayedActive ?? undefined);
-          const newActive = applyImageEvent(evt.eventName, evt.payload, replayedStatuses, replayedActive);
+          applyTimeEvent(
+            evt.eventName,
+            evt.payload,
+            evt.ts,
+            replayedTimes,
+            replayedActive ?? undefined,
+          );
+          const newActive = applyImageEvent(
+            evt.eventName,
+            evt.payload,
+            replayedStatuses,
+            replayedActive,
+          );
           if (newActive !== undefined) replayedActive = newActive;
         }
         setNodeStatuses(new Map(replayedStatuses));
@@ -1393,20 +2219,23 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
       const { eventName, payload, ts } = raw as StageEvent;
 
       // Track pending prompt (gen_started fires before dispatcher_selected)
-      if (eventName === 'image.gen_started' && payload?.prompt) {
+      if (eventName === "image.gen_started" && payload?.prompt) {
         pendingPromptRef.current = payload.prompt as string;
       }
 
       // Track which provider was selected and what prompt was sent
-      if (eventName === 'image.dispatcher_selected' && payload?.provider) {
+      if (eventName === "image.dispatcher_selected" && payload?.provider) {
         const prov = payload.provider as string;
-        const prompt = (payload.prompt as string | undefined) ?? pendingPromptRef.current ?? '';
+        const prompt =
+          (payload.prompt as string | undefined) ??
+          pendingPromptRef.current ??
+          "";
         pendingPromptRef.current = null;
         setExecInfoMap((prev) => {
           const next = new Map(prev);
           next.set(`provider_${prov}`, {
             prompt,
-            reasoning: (payload.reasoning as string) ?? '',
+            reasoning: (payload.reasoning as string) ?? "",
             ts: ts ?? Date.now(),
           });
           return next;
@@ -1416,7 +2245,13 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
       // Track timing (pass active provider so stage.completed can close its timing)
       setNodeTimes((prev) => {
         const t = new Map(prev);
-        applyTimeEvent(eventName, payload, ts ?? Date.now(), t, activeProviderRef.current ?? undefined);
+        applyTimeEvent(
+          eventName,
+          payload,
+          ts ?? Date.now(),
+          t,
+          activeProviderRef.current ?? undefined,
+        );
         return t;
       });
 
@@ -1427,11 +2262,15 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
         return m;
       });
 
-      if (newActiveProvider !== undefined) setActiveProviderId(newActiveProvider);
+      if (newActiveProvider !== undefined)
+        setActiveProviderId(newActiveProvider);
     });
 
     sseCleanupRef.current = cleanup;
-    return () => { sseCleanupRef.current?.(); sseCleanupRef.current = null; };
+    return () => {
+      sseCleanupRef.current?.();
+      sseCleanupRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseUrl, conversationId]);
 
@@ -1453,13 +2292,13 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
 
   async function handleAdd() {
     setSaving(true);
-    const envVarName = `${form.name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_KEY`;
+    const envVarName = `${form.name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_KEY`;
     try {
       const result = await addImageWorkflow(baseUrl, {
         name: form.name,
-        label: form.name.replace(/_/g, ' '),
-        executionMode: form.executionMode as 'cloud' | 'local',
-        generationType: form.generationType as 'text2img' | 'img2img' | 'pulid',
+        label: form.name.replace(/_/g, " "),
+        executionMode: form.executionMode as "cloud" | "local",
+        generationType: form.generationType as "text2img" | "img2img" | "pulid",
         description: form.description,
         timeoutMs: form.timeoutMs,
         envKey: envVarName,
@@ -1469,15 +2308,15 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
       });
       setProviders((prev) => [...prev, result.provider]);
       setCreatedEnvVar(
-        `${envVarName}=${form.workflowPath || '/caminho/do/workflow.json'}`,
+        `${envVarName}=${form.workflowPath || "/caminho/do/workflow.json"}`,
       );
       setAddingNew(false);
       setForm({
-        name: '',
-        generationType: 'text2img',
-        executionMode: 'local',
-        workflowPath: '',
-        description: '',
+        name: "",
+        generationType: "text2img",
+        executionMode: "local",
+        workflowPath: "",
+        description: "",
         timeoutMs: 90000,
       });
     } finally {
@@ -1508,7 +2347,8 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
         label: editForm.label,
         prePrompt: editForm.prePrompt,
         workflowPath: editForm.workflowPath || null,
-        generationType: editForm.generationType as ImageWorkflowProvider['generationType'],
+        generationType:
+          editForm.generationType as ImageWorkflowProvider["generationType"],
         description: editForm.description,
         timeoutMs: editForm.timeoutMs,
       });
@@ -1520,7 +2360,8 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                 label: editForm.label,
                 prePrompt: editForm.prePrompt,
                 workflowPath: editForm.workflowPath || null,
-                generationType: editForm.generationType as ImageWorkflowProvider['generationType'],
+                generationType:
+                  editForm.generationType as ImageWorkflowProvider["generationType"],
                 description: editForm.description,
                 timeoutMs: editForm.timeoutMs,
               }
@@ -1539,7 +2380,9 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
     setDeletingWorkflow(true);
     try {
       await deleteImageWorkflow(baseUrl, editingProviderName);
-      setProviders((prev) => prev.filter((p) => p.name !== editingProviderName));
+      setProviders((prev) =>
+        prev.filter((p) => p.name !== editingProviderName),
+      );
       setEditingProviderName(null);
       setConfirmDelete(false);
     } catch {
@@ -1583,9 +2426,22 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
         visionConfig,
         handleToggle,
         () => setAddingNew(true),
-        () => { setDispatcherPanelOpen(true); setEditingProviderName(null); setRouterPanelOpen(false); },
-        () => { setRouterPanelOpen(true); setDispatcherPanelOpen(false); setEditingProviderName(null); },
-        (name) => { setEditingProviderName(name); setDispatcherPanelOpen(false); setAddingNew(false); setRouterPanelOpen(false); },
+        () => {
+          setDispatcherPanelOpen(true);
+          setEditingProviderName(null);
+          setRouterPanelOpen(false);
+        },
+        () => {
+          setRouterPanelOpen(true);
+          setDispatcherPanelOpen(false);
+          setEditingProviderName(null);
+        },
+        (name) => {
+          setEditingProviderName(name);
+          setDispatcherPanelOpen(false);
+          setAddingNew(false);
+          setRouterPanelOpen(false);
+        },
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [providers, strategy, maxAttempts, routerConfig, visionConfig],
@@ -1593,30 +2449,35 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
 
   const liveNodes = useMemo(() => {
     const now = Date.now();
-    const globalLocalTimeoutMs = definition?.resourcePolicy?.localTimeoutMs ?? 90_000;
+    const globalLocalTimeoutMs =
+      definition?.resourcePolicy?.localTimeoutMs ?? 90_000;
     const routerLimitMs = routerConfig?.timeoutMs ?? 20_000;
 
     // Vision descriptor timing
-    const visionT = nodeTimes.get('vision');
+    const visionT = nodeTimes.get("vision");
     const visionDurationMs = visionT
-      ? visionT.endTs !== undefined ? visionT.endTs - visionT.startTs : undefined
+      ? visionT.endTs !== undefined
+        ? visionT.endTs - visionT.startTs
+        : undefined
       : undefined;
 
     return baseNodes.map((n) => {
-      const status = nodeStatuses.get(n.id) ?? 'idle';
+      const status = nodeStatuses.get(n.id) ?? "idle";
       const isActiveProvider = n.id === activeProviderId;
       const t = nodeTimes.get(n.id);
       const durationMs = t
         ? t.endTs !== undefined
           ? t.endTs - t.startTs
-          : status === 'active' ? now - t.startTs : undefined
+          : status === "active"
+            ? now - t.startTs
+            : undefined
         : undefined;
       // Per-provider timeoutMs from config; fall back to global localTimeoutMs
       let limitMs: number | undefined;
-      if (n.id === 'dispatcher' || n.id === 'llmRouter') {
+      if (n.id === "dispatcher" || n.id === "llmRouter") {
         limitMs = routerLimitMs;
-      } else if (n.id.startsWith('provider_')) {
-        const provName = n.id.slice('provider_'.length);
+      } else if (n.id.startsWith("provider_")) {
+        const provName = n.id.slice("provider_".length);
         const prov = providers.find((p) => p.name === provName);
         limitMs = prov?.timeoutMs ?? globalLocalTimeoutMs;
       }
@@ -1628,50 +2489,80 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
           isActiveProvider,
           durationMs,
           limitMs,
-          ...(n.id === 'llmRouter' ? { visionDurationMs } : {}),
-          ...(execInfoMap.has(n.id) ? { lastExecution: execInfoMap.get(n.id) } : {}),
+          ...(n.id === "llmRouter" ? { visionDurationMs } : {}),
+          ...(execInfoMap.has(n.id)
+            ? { lastExecution: execInfoMap.get(n.id) }
+            : {}),
         },
       };
       // Inject animated style into default 'entry' node
-      if (n.id === 'entry') {
+      if (n.id === "entry") {
         base.style = {
           ...n.style,
-          border: status === 'completed'
-            ? '1.5px solid #22c55ecc'
-            : status === 'failed'
-              ? '1.5px solid #ef4444cc'
-              : '1.5px solid #f97316',
-          boxShadow: status === 'active' ? '0 0 18px #f97316' : 'none',
-          animation: status === 'active' ? 'nodeGlowOrange 1.1s ease-in-out infinite alternate' : undefined,
+          border:
+            status === "completed"
+              ? "1.5px solid #22c55ecc"
+              : status === "failed"
+                ? "1.5px solid #ef4444cc"
+                : "1.5px solid #f97316",
+          boxShadow: status === "active" ? "0 0 18px #f97316" : "none",
+          animation:
+            status === "active"
+              ? "nodeGlowOrange 1.1s ease-in-out infinite alternate"
+              : undefined,
         };
       }
       return base;
     });
-  }, [baseNodes, nodeStatuses, activeProviderId, execInfoMap, nodeTimes, definition, routerConfig, tick]);
+  }, [
+    baseNodes,
+    nodeStatuses,
+    activeProviderId,
+    execInfoMap,
+    nodeTimes,
+    definition,
+    routerConfig,
+    tick,
+  ]);
 
   // ─── Highlight execution path on edges ────────────────────────────────────
 
   const liveEdges = useMemo(() => {
-    const dispatcherStatus = nodeStatuses.get('dispatcher') ?? 'idle';
-    const llmRouterStatus  = nodeStatuses.get('llmRouter')  ?? 'idle';
-    const dispatcherDone = dispatcherStatus !== 'idle';
-    const llmRouterDone  = llmRouterStatus  !== 'idle';
-    const selectedProv   = activeProviderId; // e.g. "provider_custom_image_z_image_turbo"
+    const dispatcherStatus = nodeStatuses.get("dispatcher") ?? "idle";
+    const llmRouterStatus = nodeStatuses.get("llmRouter") ?? "idle";
+    const dispatcherDone = dispatcherStatus !== "idle";
+    const llmRouterDone = llmRouterStatus !== "idle";
+    const selectedProv = activeProviderId; // e.g. "provider_custom_image_z_image_turbo"
 
     return edges.map((e) => {
-      if (e.id === 'entry→dispatcher' && dispatcherDone) {
-        return { ...e, animated: true, style: { ...e.style, stroke: '#f97316dd', strokeWidth: 2.5 } };
-      }
-      // dispatcher→llmRouter animates when dispatcher is active OR when llmRouter is active/completed
-      if (e.id === 'dispatcher→llmRouter' && (dispatcherDone || llmRouterDone)) {
-        return { ...e, animated: true, style: { ...e.style, stroke: '#c026d3dd', strokeWidth: 2.5 } };
-      }
-      if (selectedProv && e.target === selectedProv) {
-        const isCloud = e.style?.stroke?.toString().includes('22d3ee');
+      if (e.id === "entry→dispatcher" && dispatcherDone) {
         return {
           ...e,
           animated: true,
-          style: { ...e.style, stroke: isCloud ? '#22d3eedd' : '#f97316dd', strokeWidth: 3 },
+          style: { ...e.style, stroke: "#f97316dd", strokeWidth: 2.5 },
+        };
+      }
+      // dispatcher→llmRouter animates when dispatcher is active OR when llmRouter is active/completed
+      if (
+        e.id === "dispatcher→llmRouter" &&
+        (dispatcherDone || llmRouterDone)
+      ) {
+        return {
+          ...e,
+          animated: true,
+          style: { ...e.style, stroke: "#c026d3dd", strokeWidth: 2.5 },
+        };
+      }
+      if (selectedProv && e.target === selectedProv) {
+        const isCloud = e.style?.stroke?.toString().includes("22d3ee");
+        return {
+          ...e,
+          animated: true,
+          style: {
+            ...e.style,
+            stroke: isCloud ? "#22d3eedd" : "#f97316dd",
+            strokeWidth: 3,
+          },
         };
       }
       return e;
@@ -1683,39 +2574,39 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
   return (
     <div
       style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        background: '#0a0a0f',
-        overflow: 'hidden',
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        background: "#0a0a0f",
+        overflow: "hidden",
       }}
     >
       {/* Top bar */}
       <div
         style={{
-          display: 'flex',
-          alignItems: 'center',
+          display: "flex",
+          alignItems: "center",
           gap: 12,
           height: 44,
           paddingLeft: 12,
           paddingRight: 12,
           flexShrink: 0,
-          background: '#0a0014',
-          borderBottom: '1px solid #22d3ee22',
+          background: "#0a0014",
+          borderBottom: "1px solid #22d3ee22",
         }}
       >
         {/* Back button */}
         <button
           onClick={onBack}
           style={{
-            background: 'transparent',
-            border: '1px solid #ffffff22',
-            color: '#ffffff88',
-            fontFamily: 'monospace',
+            background: "transparent",
+            border: "1px solid #ffffff22",
+            color: "#ffffff88",
+            fontFamily: "monospace",
             fontSize: 11,
-            padding: '4px 10px',
+            padding: "4px 10px",
             borderRadius: 6,
-            cursor: 'pointer',
+            cursor: "pointer",
             flexShrink: 0,
           }}
         >
@@ -1726,11 +2617,11 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
         <span
           style={{
             flex: 1,
-            fontFamily: 'monospace',
+            fontFamily: "monospace",
             fontSize: 13,
             fontWeight: 700,
-            color: '#22d3ee',
-            letterSpacing: '0.12em',
+            color: "#22d3ee",
+            letterSpacing: "0.12em",
           }}
         >
           ◈ IMAGE GENERATION
@@ -1740,16 +2631,16 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
         <button
           onClick={() => setScanPanelOpen((v) => !v)}
           style={{
-            background: scanPanelOpen ? '#22d3ee22' : 'transparent',
-            border: `1px solid ${scanPanelOpen ? '#22d3ee66' : '#22d3ee33'}`,
-            color: scanPanelOpen ? '#22d3ee' : '#22d3ee88',
-            fontFamily: 'monospace',
+            background: scanPanelOpen ? "#22d3ee22" : "transparent",
+            border: `1px solid ${scanPanelOpen ? "#22d3ee66" : "#22d3ee33"}`,
+            color: scanPanelOpen ? "#22d3ee" : "#22d3ee88",
+            fontFamily: "monospace",
             fontSize: 11,
-            padding: '4px 12px',
+            padding: "4px 12px",
             borderRadius: 6,
-            cursor: 'pointer',
+            cursor: "pointer",
             flexShrink: 0,
-            transition: 'background 0.15s, color 0.15s',
+            transition: "background 0.15s, color 0.15s",
           }}
         >
           📂 Scan Pasta
@@ -1759,14 +2650,14 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
         <button
           onClick={() => setAddingNew(true)}
           style={{
-            background: '#f9731422',
-            border: '1px solid #f9731466',
-            color: '#f97316',
-            fontFamily: 'monospace',
+            background: "#f9731422",
+            border: "1px solid #f9731466",
+            color: "#f97316",
+            fontFamily: "monospace",
             fontSize: 11,
-            padding: '4px 12px',
+            padding: "4px 12px",
             borderRadius: 6,
-            cursor: 'pointer',
+            cursor: "pointer",
             flexShrink: 0,
           }}
         >
@@ -1780,23 +2671,38 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
           <motion.div
             key="scan-panel"
             initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
+            animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
             style={{
-              overflow: 'hidden',
+              overflow: "hidden",
               flexShrink: 0,
-              background: '#00111a',
-              borderBottom: '1px solid #22d3ee22',
+              background: "#00111a",
+              borderBottom: "1px solid #22d3ee22",
             }}
           >
-            <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div
+              style={{
+                padding: "14px 16px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+            >
               {/* Folder input + scan button */}
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <div
+                style={{ display: "flex", gap: 8, alignItems: "flex-start" }}
+              >
                 <div style={{ flex: 1 }}>
-                  <label style={{ ...labelStyle, color: '#22d3ee88' }}>Pasta de workflows do ComfyUI</label>
+                  <label style={{ ...labelStyle, color: "#22d3ee88" }}>
+                    Pasta de workflows do ComfyUI
+                  </label>
                   <input
-                    style={{ ...inputStyle, borderColor: '#22d3ee33', background: '#001522' }}
+                    style={{
+                      ...inputStyle,
+                      borderColor: "#22d3ee33",
+                      background: "#001522",
+                    }}
                     value={scanFolder}
                     onChange={(e) => setScanFolder(e.target.value)}
                     placeholder="D:\ComfyUI\user\default\workflows"
@@ -1807,155 +2713,252 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                     onClick={handleScan}
                     disabled={scanning}
                     style={{
-                      background: scanning ? '#001522' : '#22d3ee22',
-                      border: `1px solid ${scanning ? '#22d3ee22' : '#22d3ee55'}`,
-                      color: scanning ? '#22d3ee55' : '#22d3ee',
-                      fontFamily: 'monospace',
+                      background: scanning ? "#001522" : "#22d3ee22",
+                      border: `1px solid ${scanning ? "#22d3ee22" : "#22d3ee55"}`,
+                      color: scanning ? "#22d3ee55" : "#22d3ee",
+                      fontFamily: "monospace",
                       fontSize: 11,
                       fontWeight: 700,
-                      padding: '7px 14px',
+                      padding: "7px 14px",
                       borderRadius: 6,
-                      cursor: scanning ? 'not-allowed' : 'pointer',
-                      whiteSpace: 'nowrap',
+                      cursor: scanning ? "not-allowed" : "pointer",
+                      whiteSpace: "nowrap",
                     }}
                   >
-                    {scanning ? '⟳ Escaneando…' : '⟳ Escanear'}
+                    {scanning ? "⟳ Escaneando…" : "⟳ Escanear"}
                   </button>
                 </div>
               </div>
 
               {scanError && (
-                <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#ef4444', background: '#1a0000', border: '1px solid #ef444433', borderRadius: 6, padding: '6px 10px' }}>
+                <div
+                  style={{
+                    fontFamily: "monospace",
+                    fontSize: 10,
+                    color: "#ef4444",
+                    background: "#1a0000",
+                    border: "1px solid #ef444433",
+                    borderRadius: 6,
+                    padding: "6px 10px",
+                  }}
+                >
                   {scanError}
                 </div>
               )}
 
               {/* Discovered workflows list */}
               {Object.keys(customWf.discovered).length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div style={{ fontFamily: 'monospace', fontSize: 9, color: '#22d3ee66', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                    {Object.keys(customWf.discovered).length} workflow(s) encontrado(s)
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                >
+                  <div
+                    style={{
+                      fontFamily: "monospace",
+                      fontSize: 9,
+                      color: "#22d3ee66",
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {Object.keys(customWf.discovered).length} workflow(s)
+                    encontrado(s)
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
-                    {Object.entries(customWf.discovered).map(([name, entry]) => {
-                      const isApi = entry.format === 'api';
-                      const isSaving = savingWf === name;
-                      return (
-                        <div
-                          key={name}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10,
-                            background: entry.enabled ? '#001a10' : '#0a0a0a',
-                            border: `1px solid ${entry.enabled ? '#22c55e33' : '#ffffff11'}`,
-                            borderRadius: 6,
-                            padding: '7px 10px',
-                            opacity: isSaving ? 0.6 : 1,
-                            transition: 'opacity 0.15s',
-                          }}
-                        >
-                          {/* Format badge */}
-                          <span
-                            title={isApi ? 'Formato API — pronto para execução' : `Formato ${entry.format} — não executável diretamente`}
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                      maxHeight: 260,
+                      overflowY: "auto",
+                    }}
+                  >
+                    {Object.entries(customWf.discovered).map(
+                      ([name, entry]) => {
+                        const isApi = entry.format === "api";
+                        const isSaving = savingWf === name;
+                        return (
+                          <div
+                            key={name}
                             style={{
-                              fontSize: 8,
-                              fontFamily: 'monospace',
-                              background: isApi ? '#22c55e22' : '#f9731622',
-                              color: isApi ? '#22c55e' : '#f97316',
-                              border: `1px solid ${isApi ? '#22c55e44' : '#f9731644'}`,
-                              borderRadius: 4,
-                              padding: '1px 5px',
-                              flexShrink: 0,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 10,
+                              background: entry.enabled ? "#001a10" : "#0a0a0a",
+                              border: `1px solid ${entry.enabled ? "#22c55e33" : "#ffffff11"}`,
+                              borderRadius: 6,
+                              padding: "7px 10px",
+                              opacity: isSaving ? 0.6 : 1,
+                              transition: "opacity 0.15s",
                             }}
                           >
-                            {isApi ? '✓ API' : `⚠ ${entry.format ?? 'UI'}`}
-                          </span>
-
-                          {/* Name */}
-                          <span style={{ fontFamily: 'monospace', fontSize: 10, color: entry.enabled ? '#22c55e' : '#ffffff88', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {name}
-                          </span>
-
-                          {/* Gen type selector — only for API format */}
-                          {isApi && (
-                            <select
-                              value={entry.generationType ?? 'txt2img'}
-                              onChange={(e) => handleSetCustomWfType(name, e.target.value as 'txt2img' | 'img2img')}
-                              disabled={isSaving}
+                            {/* Format badge */}
+                            <span
+                              title={
+                                isApi
+                                  ? "Formato API — pronto para execução"
+                                  : `Formato ${entry.format} — não executável diretamente`
+                              }
                               style={{
-                                background: '#001a10',
-                                color: '#22c55eaa',
-                                border: '1px solid #22c55e22',
+                                fontSize: 8,
+                                fontFamily: "monospace",
+                                background: isApi ? "#22c55e22" : "#f9731622",
+                                color: isApi ? "#22c55e" : "#f97316",
+                                border: `1px solid ${isApi ? "#22c55e44" : "#f9731644"}`,
                                 borderRadius: 4,
-                                fontFamily: 'monospace',
-                                fontSize: 9,
-                                padding: '2px 4px',
-                                cursor: isSaving ? 'not-allowed' : 'pointer',
+                                padding: "1px 5px",
                                 flexShrink: 0,
                               }}
                             >
-                              <option value="txt2img">txt→img</option>
-                              <option value="img2img">img→img</option>
-                            </select>
-                          )}
+                              {isApi ? "✓ API" : `⚠ ${entry.format ?? "UI"}`}
+                            </span>
 
-                          {/* Toggle enable */}
-                          <button
-                            onClick={() => { if (!isSaving && isApi) handleToggleCustomWf(name, entry); }}
-                            disabled={isSaving || !isApi}
-                            title={!isApi ? 'Só workflows no formato API podem ser ativados' : entry.enabled ? 'Desativar' : 'Ativar'}
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              cursor: isSaving || !isApi ? 'not-allowed' : 'pointer',
-                              padding: 0,
-                              display: 'flex',
-                              alignItems: 'center',
-                              opacity: !isApi ? 0.35 : 1,
-                              flexShrink: 0,
-                            }}
-                          >
-                            {entry.enabled
-                              ? <ToggleRight size={18} style={{ color: '#22c55e' }} />
-                              : <ToggleLeft size={18} style={{ color: '#555555' }} />}
-                          </button>
-                        </div>
-                      );
-                    })}
+                            {/* Name */}
+                            <span
+                              style={{
+                                fontFamily: "monospace",
+                                fontSize: 10,
+                                color: entry.enabled ? "#22c55e" : "#ffffff88",
+                                flex: 1,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {name}
+                            </span>
+
+                            {/* Gen type selector — only for API format */}
+                            {isApi && (
+                              <select
+                                value={entry.generationType ?? "txt2img"}
+                                onChange={(e) =>
+                                  handleSetCustomWfType(
+                                    name,
+                                    e.target.value as "txt2img" | "img2img",
+                                  )
+                                }
+                                disabled={isSaving}
+                                style={{
+                                  background: "#001a10",
+                                  color: "#22c55eaa",
+                                  border: "1px solid #22c55e22",
+                                  borderRadius: 4,
+                                  fontFamily: "monospace",
+                                  fontSize: 9,
+                                  padding: "2px 4px",
+                                  cursor: isSaving ? "not-allowed" : "pointer",
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <option value="txt2img">txt→img</option>
+                                <option value="img2img">img→img</option>
+                              </select>
+                            )}
+
+                            {/* Toggle enable */}
+                            <button
+                              onClick={() => {
+                                if (!isSaving && isApi)
+                                  handleToggleCustomWf(name, entry);
+                              }}
+                              disabled={isSaving || !isApi}
+                              title={
+                                !isApi
+                                  ? "Só workflows no formato API podem ser ativados"
+                                  : entry.enabled
+                                    ? "Desativar"
+                                    : "Ativar"
+                              }
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                cursor:
+                                  isSaving || !isApi
+                                    ? "not-allowed"
+                                    : "pointer",
+                                padding: 0,
+                                display: "flex",
+                                alignItems: "center",
+                                opacity: !isApi ? 0.35 : 1,
+                                flexShrink: 0,
+                              }}
+                            >
+                              {entry.enabled ? (
+                                <ToggleRight
+                                  size={18}
+                                  style={{ color: "#22c55e" }}
+                                />
+                              ) : (
+                                <ToggleLeft
+                                  size={18}
+                                  style={{ color: "#555555" }}
+                                />
+                              )}
+                            </button>
+                          </div>
+                        );
+                      },
+                    )}
                   </div>
-                  {Object.values(customWf.discovered).some((e) => e.format !== 'api') && (
-                    <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#f9731688', lineHeight: 1.5 }}>
-                      ⚠ Workflows com formato UI precisam ser exportados em formato API pelo ComfyUI (Save → Export API).
+                  {Object.values(customWf.discovered).some(
+                    (e) => e.format !== "api",
+                  ) && (
+                    <div
+                      style={{
+                        fontFamily: "monospace",
+                        fontSize: 8,
+                        color: "#f9731688",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      ⚠ Workflows com formato UI precisam ser exportados em
+                      formato API pelo ComfyUI (Save → Export API).
                     </div>
                   )}
                 </div>
               )}
 
-              {Object.keys(customWf.discovered).length === 0 && !scanning && customWf.folder && (
-                <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#ffffff33', fontStyle: 'italic' }}>
-                  Nenhum workflow encontrado. Clique em Escanear para atualizar.
-                </div>
-              )}
+              {Object.keys(customWf.discovered).length === 0 &&
+                !scanning &&
+                customWf.folder && (
+                  <div
+                    style={{
+                      fontFamily: "monospace",
+                      fontSize: 10,
+                      color: "#ffffff33",
+                      fontStyle: "italic",
+                    }}
+                  >
+                    Nenhum workflow encontrado. Clique em Escanear para
+                    atualizar.
+                  </div>
+                )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Main area */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          overflow: "hidden",
+          position: "relative",
+        }}
+      >
         {/* ReactFlow canvas */}
-        <div style={{ flex: 1, position: 'relative' }}>
+        <div style={{ flex: 1, position: "relative" }}>
           {loading ? (
             <div
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: '100%',
-                fontFamily: 'monospace',
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                height: "100%",
+                fontFamily: "monospace",
                 fontSize: 12,
-                color: '#f97316',
+                color: "#f97316",
               }}
             >
               Carregando workflows…
@@ -1983,9 +2986,9 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                 />
                 <Controls
                   style={{
-                    background: '#0a0014',
-                    border: '1px solid #22d3ee33',
-                    color: '#22d3ee',
+                    background: "#0a0014",
+                    border: "1px solid #22d3ee33",
+                    color: "#22d3ee",
                   }}
                 />
               </ReactFlow>
@@ -2019,41 +3022,45 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               style={{
-                position: 'absolute',
+                position: "absolute",
                 top: 16,
-                left: '50%',
-                transform: 'translateX(-50%)',
-                background: '#0a1a00',
-                border: '1px solid #22c55e66',
+                left: "50%",
+                transform: "translateX(-50%)",
+                background: "#0a1a00",
+                border: "1px solid #22c55e66",
                 borderRadius: 10,
-                padding: '14px 20px',
-                fontFamily: 'monospace',
+                padding: "14px 20px",
+                fontFamily: "monospace",
                 fontSize: 11,
-                color: '#22c55e',
+                color: "#22c55e",
                 zIndex: 20,
                 minWidth: 320,
-                boxShadow: '0 4px 24px #000000aa',
+                boxShadow: "0 4px 24px #000000aa",
               }}
             >
-              <div style={{ fontWeight: 700, marginBottom: 8 }}>✓ Workflow criado!</div>
-              <div style={{ color: '#ffffff88', fontSize: 10, marginBottom: 4 }}>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>
+                ✓ Workflow criado!
+              </div>
+              <div
+                style={{ color: "#ffffff88", fontSize: 10, marginBottom: 4 }}
+              >
                 Adicione ao .env:
               </div>
               <code
                 style={{
-                  display: 'block',
-                  background: '#000000aa',
-                  color: '#22d3ee',
+                  display: "block",
+                  background: "#000000aa",
+                  color: "#22d3ee",
                   borderRadius: 6,
-                  padding: '6px 10px',
+                  padding: "6px 10px",
                   fontSize: 10,
-                  wordBreak: 'break-all',
+                  wordBreak: "break-all",
                   marginBottom: 10,
                 }}
               >
                 {createdEnvVar}
               </code>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: "flex", gap: 8 }}>
                 <button
                   onClick={async () => {
                     try {
@@ -2065,29 +3072,29 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                     }
                   }}
                   style={{
-                    background: '#22c55e22',
-                    border: '1px solid #22c55e55',
-                    color: '#22c55e',
-                    fontFamily: 'monospace',
+                    background: "#22c55e22",
+                    border: "1px solid #22c55e55",
+                    color: "#22c55e",
+                    fontFamily: "monospace",
                     fontSize: 10,
-                    padding: '4px 12px',
+                    padding: "4px 12px",
                     borderRadius: 6,
-                    cursor: 'pointer',
+                    cursor: "pointer",
                   }}
                 >
-                  {copied ? '✓ Copiado' : 'Copiar'}
+                  {copied ? "✓ Copiado" : "Copiar"}
                 </button>
                 <button
                   onClick={() => setCreatedEnvVar(null)}
                   style={{
-                    background: '#ffffff11',
-                    border: '1px solid #ffffff22',
-                    color: '#ffffff88',
-                    fontFamily: 'monospace',
+                    background: "#ffffff11",
+                    border: "1px solid #ffffff22",
+                    color: "#ffffff88",
+                    fontFamily: "monospace",
                     fontSize: 10,
-                    padding: '4px 12px',
+                    padding: "4px 12px",
                     borderRadius: 6,
-                    cursor: 'pointer',
+                    cursor: "pointer",
                   }}
                 >
                   OK
@@ -2099,288 +3106,519 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
 
         {/* Provider edit panel */}
         <AnimatePresence>
-          {editingProviderName && (() => {
-            const editingProvider = providers.find((p) => p.name === editingProviderName);
-            const accentColor = editingProvider?.executionMode === 'cloud' ? '#22d3ee' : '#f97316';
-            return (
-              <motion.div
-                key={`edit-${editingProviderName}`}
-                initial={{ x: 340, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                exit={{ x: 340, opacity: 0 }}
-                transition={{ duration: 0.22 }}
-                style={{
-                  width: panelWidth,
-                  flexShrink: 0,
-                  background: '#0a0a00',
-                  borderLeft: `1px solid ${accentColor}33`,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  overflow: 'hidden',
-                  position: 'relative',
-                }}
-              >
-                <ResizeHandle onMouseDown={onResizeMouseDown} color={accentColor} />
-                {/* Fixed header */}
-                <div
+          {editingProviderName &&
+            (() => {
+              const editingProvider = providers.find(
+                (p) => p.name === editingProviderName,
+              );
+              const accentColor =
+                editingProvider?.executionMode === "cloud"
+                  ? "#22d3ee"
+                  : "#f97316";
+              return (
+                <motion.div
+                  key={`edit-${editingProviderName}`}
+                  initial={{ x: 340, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: 340, opacity: 0 }}
+                  transition={{ duration: 0.22 }}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '12px 16px',
-                    borderBottom: `1px solid ${accentColor}22`,
+                    width: panelWidth,
                     flexShrink: 0,
-                    background: '#0a0a00',
+                    background: "#0a0a00",
+                    borderLeft: `1px solid ${accentColor}33`,
+                    display: "flex",
+                    flexDirection: "column",
+                    overflow: "hidden",
+                    position: "relative",
                   }}
                 >
-                  <span style={{ fontSize: 14 }}>✎</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, color: accentColor, letterSpacing: '0.06em' }}>
-                      {editingProvider?.label ?? editingProviderName}
-                    </div>
-                    <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff33', marginTop: 1 }}>
-                      {editingProviderName}
-                    </div>
-                  </div>
-                  {/* Zoom controls */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <button
-                      onClick={() => setPanelZoom((z) => Math.max(0.7, +(z - 0.1).toFixed(1)))}
-                      title="Diminuir zoom"
-                      style={{ background: '#ffffff11', border: '1px solid #ffffff22', color: '#ffffff66', fontFamily: 'monospace', fontSize: 12, width: 22, height: 22, borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1 }}
-                    >−</button>
-                    <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff44', minWidth: 28, textAlign: 'center' }}>
-                      {Math.round(panelZoom * 100)}%
-                    </span>
-                    <button
-                      onClick={() => setPanelZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)))}
-                      title="Aumentar zoom"
-                      style={{ background: '#ffffff11', border: '1px solid #ffffff22', color: '#ffffff66', fontFamily: 'monospace', fontSize: 12, width: 22, height: 22, borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1 }}
-                    >+</button>
-                  </div>
-                  <button
-                    onClick={() => setEditingProviderName(null)}
-                    style={{ background: 'transparent', border: 'none', color: '#ffffff44', fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1, marginLeft: 2 }}
-                  >×</button>
-                </div>
-
-                {/* Scrollable content with zoom */}
-                <div style={{ overflowY: 'auto', flex: 1 }}>
-                <div style={{ zoom: panelZoom, padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-
-                {/* Label */}
-                <div>
-                  <label style={{ ...labelStyle, color: `${accentColor}aa` }}>Nome de exibição</label>
-                  <input
-                    style={{ ...inputStyle, borderColor: `${accentColor}33` }}
-                    value={editForm.label}
-                    onChange={(e) => setEditForm((f) => ({ ...f, label: e.target.value }))}
-                    placeholder="Nome exibido no canvas"
+                  <ResizeHandle
+                    onMouseDown={onResizeMouseDown}
+                    color={accentColor}
                   />
-                </div>
-
-                {/* Caminho do workflow */}
-                <div>
-                  <label style={{ ...labelStyle, color: `${accentColor}aa` }}>Caminho do workflow</label>
-                  <input
-                    style={{ ...inputStyle, borderColor: `${accentColor}33` }}
-                    value={editForm.workflowPath}
-                    onChange={(e) => setEditForm((f) => ({ ...f, workflowPath: e.target.value }))}
-                    placeholder="/workflows/meu_workflow.json"
-                  />
-                  <div style={{ marginTop: 4, fontSize: 8, color: '#ffffff22', fontFamily: 'monospace' }}>
-                    Caminho absoluto para o arquivo .json exportado do ComfyUI.
-                  </div>
-                </div>
-
-                {/* Tipo de geração */}
-                <div>
-                  <label style={{ ...labelStyle, color: `${accentColor}aa` }}>Tipo de geração</label>
-                  <select
-                    style={{ ...inputStyle, borderColor: `${accentColor}33`, cursor: 'pointer' }}
-                    value={editForm.generationType}
-                    onChange={(e) => setEditForm((f) => ({ ...f, generationType: e.target.value }))}
-                  >
-                    <option value="text2img">text2img</option>
-                    <option value="img2img">img2img</option>
-                    <option value="pulid">pulid</option>
-                  </select>
-                </div>
-
-                {/* Pré-prompt obrigatório */}
-                <div>
-                  <label style={{ ...labelStyle, color: `${accentColor}aa` }}>Pré-prompt obrigatório</label>
-                  <textarea
+                  {/* Fixed header */}
+                  <div
                     style={{
-                      ...inputStyle,
-                      borderColor: `${accentColor}44`,
-                      resize: 'vertical',
-                      minHeight: 90,
-                      lineHeight: 1.6,
-                    }}
-                    value={editForm.prePrompt}
-                    onChange={(e) => setEditForm((f) => ({ ...f, prePrompt: e.target.value }))}
-                    placeholder="Texto sempre adicionado no início do prompt antes de enviar ao ComfyUI…"
-                  />
-                  <div style={{ marginTop: 4, fontSize: 8, color: '#ffffff22', fontFamily: 'monospace', lineHeight: 1.5 }}>
-                    Este texto é concatenado automaticamente antes do prompt gerado pelo LLM.
-                    Use para forçar estilos, qualidade ou instruções fixas do workflow.
-                  </div>
-                </div>
-
-                {/* Descrição para o LLM */}
-                <div>
-                  <label style={{ ...labelStyle, color: `${accentColor}aa` }}>Descrição para o LLM</label>
-                  <textarea
-                    style={{
-                      ...inputStyle,
-                      borderColor: `${accentColor}33`,
-                      resize: 'vertical',
-                      minHeight: 60,
-                    }}
-                    value={editForm.description}
-                    onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
-                    placeholder="Descreva quando este workflow deve ser usado…"
-                  />
-                  <div style={{ marginTop: 4, fontSize: 8, color: '#ffffff22', fontFamily: 'monospace' }}>
-                    O orquestrador usa este texto para decidir qual workflow escolher.
-                  </div>
-                </div>
-
-                {/* Timeout */}
-                <div>
-                  <label style={{ ...labelStyle, color: `${accentColor}aa` }}>Timeout (ms)</label>
-                  <input
-                    type="number"
-                    step={1000}
-                    style={{ ...inputStyle, borderColor: `${accentColor}33`, width: 140 }}
-                    value={editForm.timeoutMs}
-                    onChange={(e) => {
-                      const v = parseInt(e.target.value, 10);
-                      if (!isNaN(v)) setEditForm((f) => ({ ...f, timeoutMs: v }));
-                    }}
-                  />
-                  <div style={{ marginTop: 4, fontSize: 8, color: '#ffffff22', fontFamily: 'monospace' }}>
-                    Timeout para este workflow específico. Substitui o timeout padrão local do resourcePolicy.
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-                  <button
-                    onClick={handleSaveEdit}
-                    disabled={savingEdit}
-                    style={{
-                      background: savingEdit ? '#1a0a00' : `${accentColor}22`,
-                      border: `1px solid ${savingEdit ? `${accentColor}33` : `${accentColor}66`}`,
-                      color: savingEdit ? `${accentColor}77` : accentColor,
-                      fontFamily: 'monospace',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      padding: '8px 0',
-                      borderRadius: 6,
-                      cursor: savingEdit ? 'not-allowed' : 'pointer',
-                      letterSpacing: '0.06em',
-                      transition: 'background 0.15s',
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "12px 16px",
+                      borderBottom: `1px solid ${accentColor}22`,
+                      flexShrink: 0,
+                      background: "#0a0a00",
                     }}
                   >
-                    {savingEdit ? 'Salvando…' : 'Salvar alterações'}
-                  </button>
-                  <button
-                    onClick={() => { setEditingProviderName(null); setConfirmDelete(false); }}
-                    style={{
-                      background: 'transparent',
-                      border: '1px solid #ffffff22',
-                      color: '#ffffff44',
-                      fontFamily: 'monospace',
-                      fontSize: 10,
-                      padding: '6px 0',
-                      borderRadius: 6,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Cancelar
-                  </button>
-
-                  {/* Delete section */}
-                  <div style={{ marginTop: 4, borderTop: '1px solid #ff000022', paddingTop: 10 }}>
-                    {!confirmDelete ? (
-                      <button
-                        onClick={() => setConfirmDelete(true)}
+                    <span style={{ fontSize: 14 }}>✎</span>
+                    <div style={{ flex: 1 }}>
+                      <div
                         style={{
-                          width: '100%',
-                          background: 'transparent',
-                          border: '1px solid #ef444433',
-                          color: '#ef444488',
-                          fontFamily: 'monospace',
-                          fontSize: 10,
-                          padding: '6px 0',
-                          borderRadius: 6,
-                          cursor: 'pointer',
-                          letterSpacing: '0.04em',
-                          transition: 'border-color 0.15s, color 0.15s',
+                          fontFamily: "monospace",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: accentColor,
+                          letterSpacing: "0.06em",
                         }}
                       >
-                        ✕ Excluir workflow
+                        {editingProvider?.label ?? editingProviderName}
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: "monospace",
+                          fontSize: 8,
+                          color: "#ffffff33",
+                          marginTop: 1,
+                        }}
+                      >
+                        {editingProviderName}
+                      </div>
+                    </div>
+                    {/* Zoom controls */}
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 4 }}
+                    >
+                      <button
+                        onClick={() =>
+                          setPanelZoom((z) =>
+                            Math.max(0.7, +(z - 0.1).toFixed(1)),
+                          )
+                        }
+                        title="Diminuir zoom"
+                        style={{
+                          background: "#ffffff11",
+                          border: "1px solid #ffffff22",
+                          color: "#ffffff66",
+                          fontFamily: "monospace",
+                          fontSize: 12,
+                          width: 22,
+                          height: 22,
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: 0,
+                          lineHeight: 1,
+                        }}
+                      >
+                        −
                       </button>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <div style={{
-                          fontFamily: 'monospace',
+                      <span
+                        style={{
+                          fontFamily: "monospace",
                           fontSize: 9,
-                          color: '#ef4444bb',
-                          textAlign: 'center',
-                          padding: '4px 0',
-                          lineHeight: 1.5,
-                        }}>
-                          Tem certeza? Esta ação não pode ser desfeita.
-                        </div>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button
-                            onClick={handleDeleteWorkflow}
-                            disabled={deletingWorkflow}
-                            style={{
-                              flex: 1,
-                              background: deletingWorkflow ? '#1a0000' : '#ef444422',
-                              border: '1px solid #ef444466',
-                              color: deletingWorkflow ? '#ef444455' : '#ef4444',
-                              fontFamily: 'monospace',
-                              fontSize: 10,
-                              fontWeight: 700,
-                              padding: '6px 0',
-                              borderRadius: 6,
-                              cursor: deletingWorkflow ? 'not-allowed' : 'pointer',
-                            }}
-                          >
-                            {deletingWorkflow ? 'Excluindo…' : 'Sim, excluir'}
-                          </button>
-                          <button
-                            onClick={() => setConfirmDelete(false)}
-                            disabled={deletingWorkflow}
-                            style={{
-                              flex: 1,
-                              background: 'transparent',
-                              border: '1px solid #ffffff22',
-                              color: '#ffffff44',
-                              fontFamily: 'monospace',
-                              fontSize: 10,
-                              padding: '6px 0',
-                              borderRadius: 6,
-                              cursor: deletingWorkflow ? 'not-allowed' : 'pointer',
-                            }}
-                          >
-                            Não
-                          </button>
+                          color: "#ffffff44",
+                          minWidth: 28,
+                          textAlign: "center",
+                        }}
+                      >
+                        {Math.round(panelZoom * 100)}%
+                      </span>
+                      <button
+                        onClick={() =>
+                          setPanelZoom((z) =>
+                            Math.min(2, +(z + 0.1).toFixed(1)),
+                          )
+                        }
+                        title="Aumentar zoom"
+                        style={{
+                          background: "#ffffff11",
+                          border: "1px solid #ffffff22",
+                          color: "#ffffff66",
+                          fontFamily: "monospace",
+                          fontSize: 12,
+                          width: 22,
+                          height: 22,
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: 0,
+                          lineHeight: 1,
+                        }}
+                      >
+                        +
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => setEditingProviderName(null)}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#ffffff44",
+                        fontSize: 18,
+                        cursor: "pointer",
+                        padding: 0,
+                        lineHeight: 1,
+                        marginLeft: 2,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  {/* Scrollable content with zoom */}
+                  <div style={{ overflowY: "auto", flex: 1 }}>
+                    <div
+                      style={{
+                        zoom: panelZoom,
+                        padding: 20,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 14,
+                      }}
+                    >
+                      {/* Label */}
+                      <div>
+                        <label
+                          style={{ ...labelStyle, color: `${accentColor}aa` }}
+                        >
+                          Nome de exibição
+                        </label>
+                        <input
+                          style={{
+                            ...inputStyle,
+                            borderColor: `${accentColor}33`,
+                          }}
+                          value={editForm.label}
+                          onChange={(e) =>
+                            setEditForm((f) => ({
+                              ...f,
+                              label: e.target.value,
+                            }))
+                          }
+                          placeholder="Nome exibido no canvas"
+                        />
+                      </div>
+
+                      {/* Caminho do workflow */}
+                      <div>
+                        <label
+                          style={{ ...labelStyle, color: `${accentColor}aa` }}
+                        >
+                          Caminho do workflow
+                        </label>
+                        <input
+                          style={{
+                            ...inputStyle,
+                            borderColor: `${accentColor}33`,
+                          }}
+                          value={editForm.workflowPath}
+                          onChange={(e) =>
+                            setEditForm((f) => ({
+                              ...f,
+                              workflowPath: e.target.value,
+                            }))
+                          }
+                          placeholder="/workflows/meu_workflow.json"
+                        />
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 8,
+                            color: "#ffffff22",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          Caminho absoluto para o arquivo .json exportado do
+                          ComfyUI.
                         </div>
                       </div>
-                    )}
+
+                      {/* Tipo de geração */}
+                      <div>
+                        <label
+                          style={{ ...labelStyle, color: `${accentColor}aa` }}
+                        >
+                          Tipo de geração
+                        </label>
+                        <select
+                          style={{
+                            ...inputStyle,
+                            borderColor: `${accentColor}33`,
+                            cursor: "pointer",
+                          }}
+                          value={editForm.generationType}
+                          onChange={(e) =>
+                            setEditForm((f) => ({
+                              ...f,
+                              generationType: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="text2img">text2img</option>
+                          <option value="img2img">img2img</option>
+                          <option value="pulid">pulid</option>
+                        </select>
+                      </div>
+
+                      {/* Pré-prompt obrigatório */}
+                      <div>
+                        <label
+                          style={{ ...labelStyle, color: `${accentColor}aa` }}
+                        >
+                          Pré-prompt obrigatório
+                        </label>
+                        <textarea
+                          style={{
+                            ...inputStyle,
+                            borderColor: `${accentColor}44`,
+                            resize: "vertical",
+                            minHeight: 90,
+                            lineHeight: 1.6,
+                          }}
+                          value={editForm.prePrompt}
+                          onChange={(e) =>
+                            setEditForm((f) => ({
+                              ...f,
+                              prePrompt: e.target.value,
+                            }))
+                          }
+                          placeholder="Texto sempre adicionado no início do prompt antes de enviar ao ComfyUI…"
+                        />
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 8,
+                            color: "#ffffff22",
+                            fontFamily: "monospace",
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          Este texto é concatenado automaticamente antes do
+                          prompt gerado pelo LLM. Use para forçar estilos,
+                          qualidade ou instruções fixas do workflow.
+                        </div>
+                      </div>
+
+                      {/* Descrição para o LLM */}
+                      <div>
+                        <label
+                          style={{ ...labelStyle, color: `${accentColor}aa` }}
+                        >
+                          Descrição para o LLM
+                        </label>
+                        <textarea
+                          style={{
+                            ...inputStyle,
+                            borderColor: `${accentColor}33`,
+                            resize: "vertical",
+                            minHeight: 60,
+                          }}
+                          value={editForm.description}
+                          onChange={(e) =>
+                            setEditForm((f) => ({
+                              ...f,
+                              description: e.target.value,
+                            }))
+                          }
+                          placeholder="Descreva quando este workflow deve ser usado…"
+                        />
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 8,
+                            color: "#ffffff22",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          O orquestrador usa este texto para decidir qual
+                          workflow escolher.
+                        </div>
+                      </div>
+
+                      {/* Timeout */}
+                      <div>
+                        <label
+                          style={{ ...labelStyle, color: `${accentColor}aa` }}
+                        >
+                          Timeout (ms)
+                        </label>
+                        <input
+                          type="number"
+                          step={1000}
+                          style={{
+                            ...inputStyle,
+                            borderColor: `${accentColor}33`,
+                            width: 140,
+                          }}
+                          value={editForm.timeoutMs}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value, 10);
+                            if (!isNaN(v))
+                              setEditForm((f) => ({ ...f, timeoutMs: v }));
+                          }}
+                        />
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 8,
+                            color: "#ffffff22",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          Timeout para este workflow específico. Substitui o
+                          timeout padrão local do resourcePolicy.
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                          marginTop: 4,
+                        }}
+                      >
+                        <button
+                          onClick={handleSaveEdit}
+                          disabled={savingEdit}
+                          style={{
+                            background: savingEdit
+                              ? "#1a0a00"
+                              : `${accentColor}22`,
+                            border: `1px solid ${savingEdit ? `${accentColor}33` : `${accentColor}66`}`,
+                            color: savingEdit
+                              ? `${accentColor}77`
+                              : accentColor,
+                            fontFamily: "monospace",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: "8px 0",
+                            borderRadius: 6,
+                            cursor: savingEdit ? "not-allowed" : "pointer",
+                            letterSpacing: "0.06em",
+                            transition: "background 0.15s",
+                          }}
+                        >
+                          {savingEdit ? "Salvando…" : "Salvar alterações"}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingProviderName(null);
+                            setConfirmDelete(false);
+                          }}
+                          style={{
+                            background: "transparent",
+                            border: "1px solid #ffffff22",
+                            color: "#ffffff44",
+                            fontFamily: "monospace",
+                            fontSize: 10,
+                            padding: "6px 0",
+                            borderRadius: 6,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Cancelar
+                        </button>
+
+                        {/* Delete section */}
+                        <div
+                          style={{
+                            marginTop: 4,
+                            borderTop: "1px solid #ff000022",
+                            paddingTop: 10,
+                          }}
+                        >
+                          {!confirmDelete ? (
+                            <button
+                              onClick={() => setConfirmDelete(true)}
+                              style={{
+                                width: "100%",
+                                background: "transparent",
+                                border: "1px solid #ef444433",
+                                color: "#ef444488",
+                                fontFamily: "monospace",
+                                fontSize: 10,
+                                padding: "6px 0",
+                                borderRadius: 6,
+                                cursor: "pointer",
+                                letterSpacing: "0.04em",
+                                transition: "border-color 0.15s, color 0.15s",
+                              }}
+                            >
+                              ✕ Excluir workflow
+                            </button>
+                          ) : (
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 6,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontFamily: "monospace",
+                                  fontSize: 9,
+                                  color: "#ef4444bb",
+                                  textAlign: "center",
+                                  padding: "4px 0",
+                                  lineHeight: 1.5,
+                                }}
+                              >
+                                Tem certeza? Esta ação não pode ser desfeita.
+                              </div>
+                              <div style={{ display: "flex", gap: 6 }}>
+                                <button
+                                  onClick={handleDeleteWorkflow}
+                                  disabled={deletingWorkflow}
+                                  style={{
+                                    flex: 1,
+                                    background: deletingWorkflow
+                                      ? "#1a0000"
+                                      : "#ef444422",
+                                    border: "1px solid #ef444466",
+                                    color: deletingWorkflow
+                                      ? "#ef444455"
+                                      : "#ef4444",
+                                    fontFamily: "monospace",
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    padding: "6px 0",
+                                    borderRadius: 6,
+                                    cursor: deletingWorkflow
+                                      ? "not-allowed"
+                                      : "pointer",
+                                  }}
+                                >
+                                  {deletingWorkflow
+                                    ? "Excluindo…"
+                                    : "Sim, excluir"}
+                                </button>
+                                <button
+                                  onClick={() => setConfirmDelete(false)}
+                                  disabled={deletingWorkflow}
+                                  style={{
+                                    flex: 1,
+                                    background: "transparent",
+                                    border: "1px solid #ffffff22",
+                                    color: "#ffffff44",
+                                    fontFamily: "monospace",
+                                    fontSize: 10,
+                                    padding: "6px 0",
+                                    borderRadius: 6,
+                                    cursor: deletingWorkflow
+                                      ? "not-allowed"
+                                      : "pointer",
+                                  }}
+                                >
+                                  Não
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {/* end zoom */}
                   </div>
-                </div>
-                </div>{/* end zoom */}
-                </div>{/* end scroll */}
-              </motion.div>
-            );
-          })()}
+                  {/* end scroll */}
+                </motion.div>
+              );
+            })()}
         </AnimatePresence>
 
         {/* Dispatcher config panel */}
@@ -2394,83 +3632,161 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
               style={{
                 width: panelWidth,
                 flexShrink: 0,
-                background: '#0a0014',
-                borderLeft: '1px solid #c026d344',
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-                position: 'relative',
+                background: "#0a0014",
+                borderLeft: "1px solid #c026d344",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                position: "relative",
               }}
             >
               <ResizeHandle onMouseDown={onResizeMouseDown} color="#c026d3" />
               {/* Fixed header + zoom controls */}
               <div
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
+                  display: "flex",
+                  alignItems: "center",
                   gap: 8,
-                  padding: '12px 16px',
-                  borderBottom: '1px solid #c026d322',
+                  padding: "12px 16px",
+                  borderBottom: "1px solid #c026d322",
                   flexShrink: 0,
-                  background: '#0a0014',
+                  background: "#0a0014",
                 }}
               >
                 <span style={{ fontSize: 16 }}>⎇</span>
                 <span
                   style={{
-                    fontFamily: 'monospace',
+                    fontFamily: "monospace",
                     fontSize: 13,
                     fontWeight: 700,
-                    color: '#c026d3',
-                    letterSpacing: '0.08em',
+                    color: "#c026d3",
+                    letterSpacing: "0.08em",
                     flex: 1,
                   }}
                 >
                   Dispatcher
                 </span>
                 {/* Zoom controls */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                   <button
-                    onClick={() => setPanelZoom((z) => Math.max(0.7, +(z - 0.1).toFixed(1)))}
+                    onClick={() =>
+                      setPanelZoom((z) => Math.max(0.7, +(z - 0.1).toFixed(1)))
+                    }
                     title="Diminuir zoom"
-                    style={{ background: '#ffffff11', border: '1px solid #ffffff22', color: '#ffffff66', fontFamily: 'monospace', fontSize: 12, width: 22, height: 22, borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1 }}
-                  >−</button>
-                  <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff44', minWidth: 28, textAlign: 'center' }}>
+                    style={{
+                      background: "#ffffff11",
+                      border: "1px solid #ffffff22",
+                      color: "#ffffff66",
+                      fontFamily: "monospace",
+                      fontSize: 12,
+                      width: 22,
+                      height: 22,
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 0,
+                      lineHeight: 1,
+                    }}
+                  >
+                    −
+                  </button>
+                  <span
+                    style={{
+                      fontFamily: "monospace",
+                      fontSize: 9,
+                      color: "#ffffff44",
+                      minWidth: 28,
+                      textAlign: "center",
+                    }}
+                  >
                     {Math.round(panelZoom * 100)}%
                   </span>
                   <button
-                    onClick={() => setPanelZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)))}
+                    onClick={() =>
+                      setPanelZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)))
+                    }
                     title="Aumentar zoom"
-                    style={{ background: '#ffffff11', border: '1px solid #ffffff22', color: '#ffffff66', fontFamily: 'monospace', fontSize: 12, width: 22, height: 22, borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1 }}
-                  >+</button>
+                    style={{
+                      background: "#ffffff11",
+                      border: "1px solid #ffffff22",
+                      color: "#ffffff66",
+                      fontFamily: "monospace",
+                      fontSize: 12,
+                      width: 22,
+                      height: 22,
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 0,
+                      lineHeight: 1,
+                    }}
+                  >
+                    +
+                  </button>
                 </div>
                 <button
                   onClick={() => setDispatcherPanelOpen(false)}
-                  style={{ background: 'transparent', border: 'none', color: '#ffffff44', fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1, marginLeft: 2 }}
-                >×</button>
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "#ffffff44",
+                    fontSize: 18,
+                    cursor: "pointer",
+                    padding: 0,
+                    lineHeight: 1,
+                    marginLeft: 2,
+                  }}
+                >
+                  ×
+                </button>
               </div>
 
               {/* Scrollable content (zoom applied here) */}
-              <div style={{ overflowY: 'auto', flex: 1 }}>
-                <div style={{ zoom: panelZoom, padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
-
+              <div style={{ overflowY: "auto", flex: 1 }}>
+                <div
+                  style={{
+                    zoom: panelZoom,
+                    padding: 20,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 16,
+                  }}
+                >
                   {/* Bloco: O que é */}
                   <Section title="O que é o Dispatcher?" color="#c026d3">
                     <p style={infoText}>
-                      O Dispatcher é o <em style={{ color: '#c026d3' }}>roteador de disponibilidade</em> do
-                      sub-fluxo de geração de imagem. Ele recebe a requisição e escolhe qual
-                      provider/workflow executar com base em <strong style={{ color: '#ffffff99' }}>regras
-                      determinísticas de disponibilidade</strong> — sem envolver o LLM nessa decisão.
+                      O Dispatcher é o{" "}
+                      <em style={{ color: "#c026d3" }}>
+                        roteador de disponibilidade
+                      </em>{" "}
+                      do sub-fluxo de geração de imagem. Ele recebe a requisição
+                      e escolhe qual provider/workflow executar com base em{" "}
+                      <strong style={{ color: "#ffffff99" }}>
+                        regras determinísticas de disponibilidade
+                      </strong>{" "}
+                      — sem envolver o LLM nessa decisão.
                     </p>
                   </Section>
 
                   {/* Bloco: Como decide */}
                   <Section title="Como ele decide?" color="#22d3ee">
                     <p style={infoText}>
-                      A decisão é feita em tempo real, na hora em que a geração é solicitada.
-                      O dispatcher verifica, nesta ordem de prioridade:
+                      A decisão é feita em tempo real, na hora em que a geração
+                      é solicitada. O dispatcher verifica, nesta ordem de
+                      prioridade:
                     </p>
-                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div
+                      style={{
+                        marginTop: 10,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
+                    >
                       <DecisionStep
                         step="1"
                         color="#f97316"
@@ -2500,29 +3816,74 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                         note="Evento de falha emitido no EventBus. Orquestrador omite imagem."
                       />
                     </div>
-                    <div style={{ ...infoText, marginTop: 10, color: '#ffffff44' }}>
-                      A ordem acima é fixa no código (<code style={{ color: '#c026d3' }}>selectAutoImageProvider</code> em{' '}
-                      <code style={{ color: '#ffffff55' }}>imageProvider.js</code>). A variável de
-                      ambiente <code style={{ color: '#22d3ee' }}>IMAGE_PROVIDER</code> pode forçar
-                      um provider específico ignorando a ordem.
+                    <div
+                      style={{ ...infoText, marginTop: 10, color: "#ffffff44" }}
+                    >
+                      A ordem acima é fixa no código (
+                      <code style={{ color: "#c026d3" }}>
+                        selectAutoImageProvider
+                      </code>{" "}
+                      em{" "}
+                      <code style={{ color: "#ffffff55" }}>
+                        imageProvider.js
+                      </code>
+                      ). A variável de ambiente{" "}
+                      <code style={{ color: "#22d3ee" }}>IMAGE_PROVIDER</code>{" "}
+                      pode forçar um provider específico ignorando a ordem.
                     </div>
                   </Section>
 
                   {/* Bloco: LLM envolvido? */}
-                  <Section title="O LLM decide qual provider usar?" color="#22c55e">
+                  <Section
+                    title="O LLM decide qual provider usar?"
+                    color="#22c55e"
+                  >
                     <p style={infoText}>
-                      <strong style={{ color: '#ef4444' }}>Não.</strong> O LLM nunca é consultado
-                      para escolher o provider de imagem. Ele atua <em>antes</em> do dispatcher,
-                      apenas para gerar o <strong style={{ color: '#f97316' }}>prompt textual</strong>{' '}
-                      que descreve a imagem a ser criada. A escolha do pipeline de execução é 100%
-                      baseada em disponibilidade de infraestrutura.
+                      <strong style={{ color: "#ef4444" }}>Não.</strong> O LLM
+                      nunca é consultado para escolher o provider de imagem. Ele
+                      atua <em>antes</em> do dispatcher, apenas para gerar o{" "}
+                      <strong style={{ color: "#f97316" }}>
+                        prompt textual
+                      </strong>{" "}
+                      que descreve a imagem a ser criada. A escolha do pipeline
+                      de execução é 100% baseada em disponibilidade de
+                      infraestrutura.
                     </p>
-                    <div style={{ marginTop: 8, background: '#001a22', border: '1px solid #22c55e22', borderRadius: 6, padding: '8px 10px' }}>
-                      <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#22c55eaa', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Fluxo real</div>
-                      <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff66', lineHeight: 1.8 }}>
-                        LLM → <span style={{ color: '#f97316' }}>image_prompt</span>{' '}
-                        → image_qc (reparo) → <span style={{ color: '#c026d3' }}>Dispatcher</span>{' '}
-                        → verifica infra → executa provider → <span style={{ color: '#22c55e' }}>imagem gerada</span>
+                    <div
+                      style={{
+                        marginTop: 8,
+                        background: "#001a22",
+                        border: "1px solid #22c55e22",
+                        borderRadius: 6,
+                        padding: "8px 10px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontFamily: "monospace",
+                          fontSize: 8,
+                          color: "#22c55eaa",
+                          marginBottom: 4,
+                          letterSpacing: "0.06em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        Fluxo real
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: "monospace",
+                          fontSize: 8,
+                          color: "#ffffff66",
+                          lineHeight: 1.8,
+                        }}
+                      >
+                        LLM →{" "}
+                        <span style={{ color: "#f97316" }}>image_prompt</span> →
+                        image_qc (reparo) →{" "}
+                        <span style={{ color: "#c026d3" }}>Dispatcher</span> →
+                        verifica infra → executa provider →{" "}
+                        <span style={{ color: "#22c55e" }}>imagem gerada</span>
                       </div>
                     </div>
                   </Section>
@@ -2530,60 +3891,134 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                   {/* Bloco: Quando um provider falha */}
                   <Section title="Fallback automático" color="#f97316">
                     <p style={infoText}>
-                      Cada provider tem um <strong style={{ color: '#f97316' }}>fallbackProvider</strong>{' '}
-                      definido internamente. Se o provider primário lançar uma exceção durante a
-                      execução (ex: ComfyUI trava no meio da geração), o dispatcher tenta
-                      automaticamente o fallback antes de declarar falha.
+                      Cada provider tem um{" "}
+                      <strong style={{ color: "#f97316" }}>
+                        fallbackProvider
+                      </strong>{" "}
+                      definido internamente. Se o provider primário lançar uma
+                      exceção durante a execução (ex: ComfyUI trava no meio da
+                      geração), o dispatcher tenta automaticamente o fallback
+                      antes de declarar falha.
                     </p>
-                    <div style={{ ...infoText, marginTop: 8, color: '#ffffff44' }}>
-                      Providers <em>desabilitados</em> (toggle off neste canvas) são pulados
-                      completamente — nem chegam a ser tentados.
+                    <div
+                      style={{ ...infoText, marginTop: 8, color: "#ffffff44" }}
+                    >
+                      Providers <em>desabilitados</em> (toggle off neste canvas)
+                      são pulados completamente — nem chegam a ser tentados.
                     </div>
                   </Section>
 
                   {/* Separador */}
-                  <div style={{ borderTop: '1px solid #c026d322', paddingTop: 16 }}>
-                    <div style={{ fontFamily: 'monospace', fontSize: 9, color: '#c026d3aa', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 14 }}>
+                  <div
+                    style={{ borderTop: "1px solid #c026d322", paddingTop: 16 }}
+                  >
+                    <div
+                      style={{
+                        fontFamily: "monospace",
+                        fontSize: 9,
+                        color: "#c026d3aa",
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        marginBottom: 14,
+                      }}
+                    >
                       Configuração
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 14,
+                      }}
+                    >
                       {/* Strategy */}
                       <div>
-                        <label style={{ ...labelStyle, color: '#c026d3aa' }}>Estratégia de seleção</label>
+                        <label style={{ ...labelStyle, color: "#c026d3aa" }}>
+                          Estratégia de seleção
+                        </label>
                         <select
-                          style={{ ...inputStyle, border: '1px solid #c026d344', cursor: 'pointer' }}
+                          style={{
+                            ...inputStyle,
+                            border: "1px solid #c026d344",
+                            cursor: "pointer",
+                          }}
                           value={dispatcherForm.strategy}
-                          onChange={(e) => setDispatcherForm((f) => ({ ...f, strategy: e.target.value }))}
+                          onChange={(e) =>
+                            setDispatcherForm((f) => ({
+                              ...f,
+                              strategy: e.target.value,
+                            }))
+                          }
                         >
-                          <option value="priority_list">priority_list — ordem de prioridade (atual)</option>
-                          <option value="round_robin">round_robin — rodízio entre habilitados</option>
-                          <option value="random">random — escolha aleatória</option>
-                          <option value="fastest_first">fastest_first — histórico de latência</option>
+                          <option value="priority_list">
+                            priority_list — ordem de prioridade (atual)
+                          </option>
+                          <option value="round_robin">
+                            round_robin — rodízio entre habilitados
+                          </option>
+                          <option value="random">
+                            random — escolha aleatória
+                          </option>
+                          <option value="fastest_first">
+                            fastest_first — histórico de latência
+                          </option>
                         </select>
-                        <div style={{ marginTop: 4, fontSize: 8, color: '#ffffff33', fontFamily: 'monospace' }}>
-                          Salvo em <code>orchestrator.flow.json</code>. A lógica atual usa sempre{' '}
-                          <code style={{ color: '#c026d3' }}>priority_list</code>; outros modos são
-                          preparação para versões futuras do engine.
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 8,
+                            color: "#ffffff33",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          Salvo em <code>orchestrator.flow.json</code>. A lógica
+                          atual usa sempre{" "}
+                          <code style={{ color: "#c026d3" }}>
+                            priority_list
+                          </code>
+                          ; outros modos são preparação para versões futuras do
+                          engine.
                         </div>
                       </div>
 
                       {/* Max attempts */}
                       <div>
-                        <label style={{ ...labelStyle, color: '#c026d3aa' }}>Máximo de tentativas</label>
+                        <label style={{ ...labelStyle, color: "#c026d3aa" }}>
+                          Máximo de tentativas
+                        </label>
                         <input
                           type="number"
                           min={1}
                           max={10}
-                          style={{ ...inputStyle, border: '1px solid #c026d344', width: 80 }}
+                          style={{
+                            ...inputStyle,
+                            border: "1px solid #c026d344",
+                            width: 80,
+                          }}
                           value={dispatcherForm.maxAttempts}
                           onChange={(e) => {
                             const v = parseInt(e.target.value, 10);
-                            if (!isNaN(v) && v >= 1) setDispatcherForm((f) => ({ ...f, maxAttempts: v }));
+                            if (!isNaN(v) && v >= 1)
+                              setDispatcherForm((f) => ({
+                                ...f,
+                                maxAttempts: v,
+                              }));
                           }}
                         />
-                        <div style={{ marginTop: 4, fontSize: 8, color: '#ffffff33', fontFamily: 'monospace' }}>
-                          Providers a tentar (incluindo fallbacks) antes de emitir{' '}
-                          <code style={{ color: '#ef4444' }}>image.gen_failed</code>.
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 8,
+                            color: "#ffffff33",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          Providers a tentar (incluindo fallbacks) antes de
+                          emitir{" "}
+                          <code style={{ color: "#ef4444" }}>
+                            image.gen_failed
+                          </code>
+                          .
                         </div>
                       </div>
 
@@ -2592,23 +4027,24 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                         onClick={handleSaveDispatcher}
                         disabled={savingDispatcher}
                         style={{
-                          background: savingDispatcher ? '#1a0028' : '#c026d322',
-                          border: `1px solid ${savingDispatcher ? '#c026d333' : '#c026d366'}`,
-                          color: savingDispatcher ? '#c026d377' : '#c026d3',
-                          fontFamily: 'monospace',
+                          background: savingDispatcher
+                            ? "#1a0028"
+                            : "#c026d322",
+                          border: `1px solid ${savingDispatcher ? "#c026d333" : "#c026d366"}`,
+                          color: savingDispatcher ? "#c026d377" : "#c026d3",
+                          fontFamily: "monospace",
                           fontSize: 11,
                           fontWeight: 700,
-                          padding: '8px 0',
+                          padding: "8px 0",
                           borderRadius: 6,
-                          cursor: savingDispatcher ? 'not-allowed' : 'pointer',
-                          letterSpacing: '0.06em',
+                          cursor: savingDispatcher ? "not-allowed" : "pointer",
+                          letterSpacing: "0.06em",
                         }}
                       >
-                        {savingDispatcher ? 'Salvando…' : 'Salvar configuração'}
+                        {savingDispatcher ? "Salvando…" : "Salvar configuração"}
                       </button>
                     </div>
                   </div>
-
                 </div>
               </div>
             </motion.div>
@@ -2626,126 +4062,286 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
               style={{
                 width: panelWidth,
                 flexShrink: 0,
-                background: '#080f12',
-                borderLeft: '1px solid #22d3ee44',
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-                position: 'relative',
+                background: "#080f12",
+                borderLeft: "1px solid #22d3ee44",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                position: "relative",
               }}
             >
               <ResizeHandle onMouseDown={onResizeMouseDown} color="#22d3ee" />
               {/* Header + zoom */}
               <div
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
+                  display: "flex",
+                  alignItems: "center",
                   gap: 8,
-                  padding: '12px 16px',
-                  borderBottom: '1px solid #22d3ee22',
+                  padding: "12px 16px",
+                  borderBottom: "1px solid #22d3ee22",
                   flexShrink: 0,
                 }}
               >
                 <span style={{ fontSize: 14 }}>🤖</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: '#22d3ee', letterSpacing: '0.08em', flex: 1 }}>
+                <span
+                  style={{
+                    fontFamily: "monospace",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#22d3ee",
+                    letterSpacing: "0.08em",
+                    flex: 1,
+                  }}
+                >
                   LLM Router
                 </span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <button onClick={() => setPanelZoom((z) => Math.max(0.7, +(z - 0.1).toFixed(1)))} title="Diminuir zoom" style={{ background: '#ffffff11', border: '1px solid #ffffff22', color: '#ffffff66', fontFamily: 'monospace', fontSize: 12, width: 22, height: 22, borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>−</button>
-                  <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff44', minWidth: 28, textAlign: 'center' }}>{Math.round(panelZoom * 100)}%</span>
-                  <button onClick={() => setPanelZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)))} title="Aumentar zoom" style={{ background: '#ffffff11', border: '1px solid #ffffff22', color: '#ffffff66', fontFamily: 'monospace', fontSize: 12, width: 22, height: 22, borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>+</button>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <button
+                    onClick={() =>
+                      setPanelZoom((z) => Math.max(0.7, +(z - 0.1).toFixed(1)))
+                    }
+                    title="Diminuir zoom"
+                    style={{
+                      background: "#ffffff11",
+                      border: "1px solid #ffffff22",
+                      color: "#ffffff66",
+                      fontFamily: "monospace",
+                      fontSize: 12,
+                      width: 22,
+                      height: 22,
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 0,
+                    }}
+                  >
+                    −
+                  </button>
+                  <span
+                    style={{
+                      fontFamily: "monospace",
+                      fontSize: 9,
+                      color: "#ffffff44",
+                      minWidth: 28,
+                      textAlign: "center",
+                    }}
+                  >
+                    {Math.round(panelZoom * 100)}%
+                  </span>
+                  <button
+                    onClick={() =>
+                      setPanelZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)))
+                    }
+                    title="Aumentar zoom"
+                    style={{
+                      background: "#ffffff11",
+                      border: "1px solid #ffffff22",
+                      color: "#ffffff66",
+                      fontFamily: "monospace",
+                      fontSize: 12,
+                      width: 22,
+                      height: 22,
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 0,
+                    }}
+                  >
+                    +
+                  </button>
                 </div>
-                <button onClick={() => setRouterPanelOpen(false)} style={{ background: 'transparent', border: 'none', color: '#ffffff44', fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1, marginLeft: 2 }}>×</button>
+                <button
+                  onClick={() => setRouterPanelOpen(false)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "#ffffff44",
+                    fontSize: 18,
+                    cursor: "pointer",
+                    padding: 0,
+                    lineHeight: 1,
+                    marginLeft: 2,
+                  }}
+                >
+                  ×
+                </button>
               </div>
 
               {/* Scrollable content */}
-              <div style={{ overflowY: 'auto', flex: 1 }}>
-                <div style={{ zoom: panelZoom, padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
-
+              <div style={{ overflowY: "auto", flex: 1 }}>
+                <div
+                  style={{
+                    zoom: panelZoom,
+                    padding: 20,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 16,
+                  }}
+                >
                   {/* What is it */}
                   <Section title="O que é o LLM Router?" color="#22d3ee">
                     <p style={infoText}>
-                      Quando há múltiplos workflows habilitados que aceitam os mesmos tipos de entrada
-                      (ex: dois workflows img2img), um LLM leve analisa o <strong style={{ color: '#f97316' }}>prompt</strong>{' '}
-                      e a <strong style={{ color: '#22d3ee' }}>descrição</strong> de cada workflow para
-                      decidir qual é mais adequado ao pedido do cliente.
+                      Quando há múltiplos workflows habilitados que aceitam os
+                      mesmos tipos de entrada (ex: dois workflows img2img), um
+                      LLM leve analisa o{" "}
+                      <strong style={{ color: "#f97316" }}>prompt</strong> e a{" "}
+                      <strong style={{ color: "#22d3ee" }}>descrição</strong> de
+                      cada workflow para decidir qual é mais adequado ao pedido
+                      do cliente.
                     </p>
-                    <div style={{ ...infoText, marginTop: 8, color: '#ffffff44' }}>
-                      Se o modelo estiver vazio, a seleção é <em>determinística</em>: o dispatcher
-                      usa apenas disponibilidade e prioridade numérica.
+                    <div
+                      style={{ ...infoText, marginTop: 8, color: "#ffffff44" }}
+                    >
+                      Se o modelo estiver vazio, a seleção é{" "}
+                      <em>determinística</em>: o dispatcher usa apenas
+                      disponibilidade e prioridade numérica.
                     </div>
                   </Section>
 
                   {/* Vision Descriptor */}
                   <Section title="👁 Vision Descriptor" color="#a855f7">
                     <p style={infoText}>
-                      O LLM Router também é responsável por <strong style={{ color: '#a855f7' }}>descrever imagens de referência</strong>{' '}
-                      usando um modelo multimodal antes de construir o prompt final para o ComfyUI.
-                      O modelo vision analisa a foto do cliente e gera uma descrição detalhada
-                      (cabelo, pele, traços, roupa) que substitui o texto genérico{' '}
-                      <em style={{ color: '#f97316' }}>"Transform the person from the reference photo"</em>.
+                      O LLM Router também é responsável por{" "}
+                      <strong style={{ color: "#a855f7" }}>
+                        descrever imagens de referência
+                      </strong>{" "}
+                      usando um modelo multimodal antes de construir o prompt
+                      final para o ComfyUI. O modelo vision analisa a foto do
+                      cliente e gera uma descrição detalhada (cabelo, pele,
+                      traços, roupa) que substitui o texto genérico{" "}
+                      <em style={{ color: "#f97316" }}>
+                        "Transform the person from the reference photo"
+                      </em>
+                      .
                     </p>
-                    <div style={{ ...infoText, marginTop: 6, color: '#ffffff33' }}>
-                      Apenas modelos com capacidade multimodal aparecem no seletor abaixo.
-                      Modelos locais (Ollama) mantêm o lock de GPU durante a chamada.
+                    <div
+                      style={{ ...infoText, marginTop: 6, color: "#ffffff33" }}
+                    >
+                      Apenas modelos com capacidade multimodal aparecem no
+                      seletor abaixo. Modelos locais (Ollama) mantêm o lock de
+                      GPU durante a chamada.
                     </div>
                   </Section>
 
-                  <div style={{ borderTop: '1px solid #22d3ee22', paddingTop: 16 }}>
-                    <div style={{ fontFamily: 'monospace', fontSize: 9, color: '#22d3eeaa', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 14 }}>
+                  <div
+                    style={{ borderTop: "1px solid #22d3ee22", paddingTop: 16 }}
+                  >
+                    <div
+                      style={{
+                        fontFamily: "monospace",
+                        fontSize: 9,
+                        color: "#22d3eeaa",
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        marginBottom: 14,
+                      }}
+                    >
                       Configuração
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 14,
+                      }}
+                    >
                       {/* Model */}
                       <div>
-                        <label style={{ ...labelStyle, color: '#22d3eeaa' }}>Modelo LLM</label>
+                        <label style={{ ...labelStyle, color: "#22d3eeaa" }}>
+                          Modelo LLM
+                        </label>
                         <ModelSelector
                           baseUrl={baseUrl}
                           provider={routerForm.provider}
                           value={routerForm.model}
-                          onChange={(m) => setRouterForm((f) => ({ ...f, model: m }))}
+                          onChange={(m) =>
+                            setRouterForm((f) => ({ ...f, model: m }))
+                          }
                           color="#22d3ee"
                         />
                       </div>
 
                       {/* Provider */}
                       <div>
-                        <label style={{ ...labelStyle, color: '#22d3eeaa' }}>Provider</label>
+                        <label style={{ ...labelStyle, color: "#22d3eeaa" }}>
+                          Provider
+                        </label>
                         <select
-                          style={{ ...inputStyle, borderColor: '#22d3ee33', cursor: 'pointer' }}
+                          style={{
+                            ...inputStyle,
+                            borderColor: "#22d3ee33",
+                            cursor: "pointer",
+                          }}
                           value={routerForm.provider}
-                          onChange={(e) => setRouterForm((f) => ({ ...f, provider: e.target.value }))}
+                          onChange={(e) =>
+                            setRouterForm((f) => ({
+                              ...f,
+                              provider: e.target.value,
+                            }))
+                          }
                         >
                           <option value="ollama">ollama (local)</option>
                           <option value="anthropic">anthropic (cloud)</option>
                           <option value="openai">openai (cloud)</option>
                           <option value="xai">xai (cloud)</option>
                         </select>
-                        <div style={{ marginTop: 4, fontSize: 8, color: '#ffffff33', fontFamily: 'monospace' }}>
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 8,
+                            color: "#ffffff33",
+                            fontFamily: "monospace",
+                          }}
+                        >
                           Cloud providers exigem API key configurada no .env.
                         </div>
                       </div>
 
                       {/* Timeout */}
                       <div>
-                        <label style={{ ...labelStyle, color: '#22d3eeaa' }}>Timeout (ms)</label>
+                        <label style={{ ...labelStyle, color: "#22d3eeaa" }}>
+                          Timeout (ms)
+                        </label>
                         <input
                           type="number"
-                          style={{ ...inputStyle, borderColor: '#22d3ee33', width: 120 }}
-                          value={routerForm.timeoutMs || ''}
+                          style={{
+                            ...inputStyle,
+                            borderColor: "#22d3ee33",
+                            width: 120,
+                          }}
+                          value={routerForm.timeoutMs || ""}
                           onChange={(e) => {
                             const v = parseInt(e.target.value, 10);
-                            setRouterForm((f) => ({ ...f, timeoutMs: isNaN(v) ? 0 : v }));
+                            setRouterForm((f) => ({
+                              ...f,
+                              timeoutMs: isNaN(v) ? 0 : v,
+                            }));
                           }}
                           onBlur={(e) => {
                             const v = parseInt(e.target.value, 10);
-                            const clamped = isNaN(v) ? 1000 : Math.min(120000, Math.max(1000, v));
-                            setRouterForm((f) => ({ ...f, timeoutMs: clamped }));
+                            const clamped = isNaN(v)
+                              ? 1000
+                              : Math.min(120000, Math.max(1000, v));
+                            setRouterForm((f) => ({
+                              ...f,
+                              timeoutMs: clamped,
+                            }));
                           }}
                         />
-                        <div style={{ marginTop: 4, fontSize: 8, color: '#ffffff33', fontFamily: 'monospace' }}>
-                          Se o LLM não responder no tempo, a seleção cai para determinística.
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 8,
+                            color: "#ffffff33",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          Se o LLM não responder no tempo, a seleção cai para
+                          determinística.
                         </div>
                       </div>
 
@@ -2754,54 +4350,116 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                         onClick={handleSaveRouter}
                         disabled={savingRouter}
                         style={{
-                          background: savingRouter ? '#001522' : '#22d3ee22',
-                          border: `1px solid ${savingRouter ? '#22d3ee33' : '#22d3ee66'}`,
-                          color: savingRouter ? '#22d3ee77' : '#22d3ee',
-                          fontFamily: 'monospace',
+                          background: savingRouter ? "#001522" : "#22d3ee22",
+                          border: `1px solid ${savingRouter ? "#22d3ee33" : "#22d3ee66"}`,
+                          color: savingRouter ? "#22d3ee77" : "#22d3ee",
+                          fontFamily: "monospace",
                           fontSize: 11,
                           fontWeight: 700,
-                          padding: '8px 0',
+                          padding: "8px 0",
                           borderRadius: 6,
-                          cursor: savingRouter ? 'not-allowed' : 'pointer',
-                          letterSpacing: '0.06em',
+                          cursor: savingRouter ? "not-allowed" : "pointer",
+                          letterSpacing: "0.06em",
                         }}
                       >
-                        {savingRouter ? 'Salvando…' : 'Salvar configuração'}
+                        {savingRouter ? "Salvando…" : "Salvar configuração"}
                       </button>
                     </div>
                   </div>
 
                   {/* Vision Descriptor configuration */}
-                  <div style={{ borderTop: '1px solid #a855f722', paddingTop: 16 }}>
-                    <div style={{ fontFamily: 'monospace', fontSize: 9, color: '#a855f7aa', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 14 }}>
+                  <div
+                    style={{ borderTop: "1px solid #a855f722", paddingTop: 16 }}
+                  >
+                    <div
+                      style={{
+                        fontFamily: "monospace",
+                        fontSize: 9,
+                        color: "#a855f7aa",
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        marginBottom: 14,
+                      }}
+                    >
                       👁 Vision Descriptor
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 14,
+                      }}
+                    >
                       {/* Enable toggle */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                        }}
+                      >
                         <button
-                          onClick={() => setVisionForm((f) => ({ ...f, enabled: !f.enabled }))}
-                          style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }}
+                          onClick={() =>
+                            setVisionForm((f) => ({
+                              ...f,
+                              enabled: !f.enabled,
+                            }))
+                          }
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                            padding: 0,
+                            display: "flex",
+                            alignItems: "center",
+                          }}
                         >
-                          {visionForm.enabled
-                            ? <ToggleRight size={22} style={{ color: '#a855f7' }} />
-                            : <ToggleLeft size={22} style={{ color: '#555555' }} />}
+                          {visionForm.enabled ? (
+                            <ToggleRight
+                              size={22}
+                              style={{ color: "#a855f7" }}
+                            />
+                          ) : (
+                            <ToggleLeft
+                              size={22}
+                              style={{ color: "#555555" }}
+                            />
+                          )}
                         </button>
-                        <span style={{ fontFamily: 'monospace', fontSize: 10, color: visionForm.enabled ? '#a855f7' : '#555555' }}>
-                          {visionForm.enabled ? 'Habilitado' : 'Desabilitado'}
+                        <span
+                          style={{
+                            fontFamily: "monospace",
+                            fontSize: 10,
+                            color: visionForm.enabled ? "#a855f7" : "#555555",
+                          }}
+                        >
+                          {visionForm.enabled ? "Habilitado" : "Desabilitado"}
                         </span>
                       </div>
 
                       {/* Provider */}
                       <div>
-                        <label style={{ ...labelStyle, color: '#a855f7aa' }}>Provider (vision)</label>
+                        <label style={{ ...labelStyle, color: "#a855f7aa" }}>
+                          Provider (vision)
+                        </label>
                         <select
-                          style={{ ...inputStyle, borderColor: '#a855f733', cursor: 'pointer' }}
+                          style={{
+                            ...inputStyle,
+                            borderColor: "#a855f733",
+                            cursor: "pointer",
+                          }}
                           value={visionForm.provider}
-                          onChange={(e) => setVisionForm((f) => ({ ...f, provider: e.target.value, model: '' }))}
+                          onChange={(e) =>
+                            setVisionForm((f) => ({
+                              ...f,
+                              provider: e.target.value,
+                              model: "",
+                            }))
+                          }
                         >
-                          <option value="ollama">ollama (local — GPU lock)</option>
+                          <option value="ollama">
+                            ollama (local — GPU lock)
+                          </option>
                           <option value="anthropic">anthropic (cloud)</option>
                           <option value="openai">openai (cloud)</option>
                         </select>
@@ -2809,57 +4467,119 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
 
                       {/* Model — only vision-capable */}
                       <div>
-                        <label style={{ ...labelStyle, color: '#a855f7aa' }}>Modelo vision</label>
+                        <label style={{ ...labelStyle, color: "#a855f7aa" }}>
+                          Modelo vision
+                        </label>
                         <ModelSelector
                           baseUrl={baseUrl}
                           provider={visionForm.provider}
-                          value={visionForm.model ?? ''}
-                          onChange={(m) => setVisionForm((f) => ({ ...f, model: m }))}
+                          value={visionForm.model ?? ""}
+                          onChange={(m) =>
+                            setVisionForm((f) => ({ ...f, model: m }))
+                          }
                           color="#a855f7"
                           visionOnly
                         />
-                        <div style={{ marginTop: 4, fontSize: 8, color: '#ffffff33', fontFamily: 'monospace', lineHeight: 1.5 }}>
-                          Apenas modelos multimodais. Para Ollama: instale com{' '}
-                          <code style={{ color: '#a855f7' }}>ollama pull llama3.2-vision:11b</code>.
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 8,
+                            color: "#ffffff33",
+                            fontFamily: "monospace",
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          Apenas modelos multimodais. Para Ollama: instale com{" "}
+                          <code style={{ color: "#a855f7" }}>
+                            ollama pull llama3.2-vision:11b
+                          </code>
+                          .
                         </div>
                       </div>
 
                       {/* Timeout */}
                       <div>
-                        <label style={{ ...labelStyle, color: '#a855f7aa' }}>Timeout (ms)</label>
+                        <label style={{ ...labelStyle, color: "#a855f7aa" }}>
+                          Timeout (ms)
+                        </label>
                         <input
                           type="number"
-                          style={{ ...inputStyle, borderColor: '#a855f733', width: 120 }}
+                          style={{
+                            ...inputStyle,
+                            borderColor: "#a855f733",
+                            width: 120,
+                          }}
                           value={visionForm.timeoutMs ?? 60000}
                           onChange={(e) => {
                             const v = parseInt(e.target.value, 10);
-                            setVisionForm((f) => ({ ...f, timeoutMs: isNaN(v) ? 60000 : v }));
+                            setVisionForm((f) => ({
+                              ...f,
+                              timeoutMs: isNaN(v) ? 60000 : v,
+                            }));
                           }}
                           onBlur={(e) => {
                             const v = parseInt(e.target.value, 10);
-                            const clamped = isNaN(v) ? 60000 : Math.min(300000, Math.max(5000, v));
-                            setVisionForm((f) => ({ ...f, timeoutMs: clamped }));
+                            const clamped = isNaN(v)
+                              ? 60000
+                              : Math.min(300000, Math.max(5000, v));
+                            setVisionForm((f) => ({
+                              ...f,
+                              timeoutMs: clamped,
+                            }));
                           }}
                         />
-                        <div style={{ marginTop: 4, fontSize: 8, color: '#ffffff33', fontFamily: 'monospace' }}>
-                          Se exceder o tempo, o prompt original é mantido (sem falha crítica).
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 8,
+                            color: "#ffffff33",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          Se exceder o tempo, o prompt original é mantido (sem
+                          falha crítica).
                         </div>
                       </div>
 
                       {/* Fallback provider */}
                       <div>
-                        <label style={{ ...labelStyle, color: '#a855f7aa' }}>Fallback provider</label>
+                        <label style={{ ...labelStyle, color: "#a855f7aa" }}>
+                          Fallback provider
+                        </label>
                         <select
-                          style={{ ...inputStyle, borderColor: '#a855f733', cursor: 'pointer' }}
-                          value={visionForm.fallback?.provider ?? 'openai'}
-                          onChange={(e) => setVisionForm((f) => ({ ...f, fallback: { ...f.fallback, provider: e.target.value, model: '' } }))}
+                          style={{
+                            ...inputStyle,
+                            borderColor: "#a855f733",
+                            cursor: "pointer",
+                          }}
+                          value={visionForm.fallback?.provider ?? "openai"}
+                          onChange={(e) =>
+                            setVisionForm((f) => ({
+                              ...f,
+                              fallback: {
+                                ...f.fallback,
+                                provider: e.target.value,
+                                model: "",
+                              },
+                            }))
+                          }
                         >
                           <option value="openai">openai (gpt-4o)</option>
-                          <option value="anthropic">anthropic (claude-haiku-4-5)</option>
+                          <option value="anthropic">
+                            anthropic (claude-haiku-4-5)
+                          </option>
                           <option value="ollama">ollama</option>
                         </select>
-                        <div style={{ marginTop: 4, fontSize: 8, color: '#ffffff33', fontFamily: 'monospace' }}>
-                          Usado se o provider principal falhar ou não tiver modelo configurado.
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 8,
+                            color: "#ffffff33",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          Usado se o provider principal falhar ou não tiver
+                          modelo configurado.
                         </div>
                       </div>
 
@@ -2868,23 +4588,24 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                         onClick={handleSaveVision}
                         disabled={savingVision}
                         style={{
-                          background: savingVision ? '#110022' : '#a855f722',
-                          border: `1px solid ${savingVision ? '#a855f733' : '#a855f766'}`,
-                          color: savingVision ? '#a855f777' : '#a855f7',
-                          fontFamily: 'monospace',
+                          background: savingVision ? "#110022" : "#a855f722",
+                          border: `1px solid ${savingVision ? "#a855f733" : "#a855f766"}`,
+                          color: savingVision ? "#a855f777" : "#a855f7",
+                          fontFamily: "monospace",
                           fontSize: 11,
                           fontWeight: 700,
-                          padding: '8px 0',
+                          padding: "8px 0",
                           borderRadius: 6,
-                          cursor: savingVision ? 'not-allowed' : 'pointer',
-                          letterSpacing: '0.06em',
+                          cursor: savingVision ? "not-allowed" : "pointer",
+                          letterSpacing: "0.06em",
                         }}
                       >
-                        {savingVision ? 'Salvando…' : 'Salvar vision descriptor'}
+                        {savingVision
+                          ? "Salvando…"
+                          : "Salvar vision descriptor"}
                       </button>
                     </div>
                   </div>
-
                 </div>
               </div>
             </motion.div>
@@ -2902,24 +4623,24 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
               style={{
                 width: panelWidth,
                 flexShrink: 0,
-                background: '#0a0014',
-                borderLeft: '1px solid #f9731433',
-                overflowY: 'auto',
+                background: "#0a0014",
+                borderLeft: "1px solid #f9731433",
+                overflowY: "auto",
                 padding: 16,
-                display: 'flex',
-                flexDirection: 'column',
+                display: "flex",
+                flexDirection: "column",
                 gap: 14,
-                position: 'relative',
+                position: "relative",
               }}
             >
               <ResizeHandle onMouseDown={onResizeMouseDown} color="#f97316" />
               <div
                 style={{
-                  fontFamily: 'monospace',
+                  fontFamily: "monospace",
                   fontSize: 12,
                   fontWeight: 700,
-                  color: '#f97316',
-                  letterSpacing: '0.08em',
+                  color: "#f97316",
+                  letterSpacing: "0.08em",
                   marginBottom: 4,
                 }}
               >
@@ -2936,7 +4657,7 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                   onChange={(e) =>
                     setForm((f) => ({
                       ...f,
-                      name: e.target.value.replace(/[^a-zA-Z0-9_]/g, ''),
+                      name: e.target.value.replace(/[^a-zA-Z0-9_]/g, ""),
                     }))
                   }
                 />
@@ -2946,7 +4667,7 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
               <div>
                 <label style={labelStyle}>Tipo de geração</label>
                 <select
-                  style={{ ...inputStyle, cursor: 'pointer' }}
+                  style={{ ...inputStyle, cursor: "pointer" }}
                   value={form.generationType}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, generationType: e.target.value }))
@@ -2962,7 +4683,7 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
               <div>
                 <label style={labelStyle}>Execução</label>
                 <select
-                  style={{ ...inputStyle, cursor: 'pointer' }}
+                  style={{ ...inputStyle, cursor: "pointer" }}
                   value={form.executionMode}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, executionMode: e.target.value }))
@@ -2988,8 +4709,8 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                   style={{
                     marginTop: 4,
                     fontSize: 8,
-                    color: '#ffffff33',
-                    fontFamily: 'monospace',
+                    color: "#ffffff33",
+                    fontFamily: "monospace",
                   }}
                 >
                   Path do arquivo exportado do ComfyUI.
@@ -3002,7 +4723,7 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                 <textarea
                   style={{
                     ...inputStyle,
-                    resize: 'vertical',
+                    resize: "vertical",
                     minHeight: 70,
                   }}
                   placeholder="Descreva quando este workflow deve ser usado…"
@@ -3015,11 +4736,12 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                   style={{
                     marginTop: 4,
                     fontSize: 8,
-                    color: '#ffffff33',
-                    fontFamily: 'monospace',
+                    color: "#ffffff33",
+                    fontFamily: "monospace",
                   }}
                 >
-                  O orquestrador usará este texto para decidir quando usar este workflow.
+                  O orquestrador usará este texto para decidir quando usar este
+                  workflow.
                 </div>
               </div>
 
@@ -3036,7 +4758,9 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                   }}
                   onBlur={(e) => {
                     const v = parseInt(e.target.value, 10);
-                    const clamped = isNaN(v) ? 90000 : Math.max(5000, Math.min(300000, v));
+                    const clamped = isNaN(v)
+                      ? 90000
+                      : Math.max(5000, Math.min(300000, v));
                     setForm((f) => ({ ...f, timeoutMs: clamped }));
                   }}
                 />
@@ -3044,57 +4768,66 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                   style={{
                     marginTop: 4,
                     fontSize: 8,
-                    color: '#ffffff33',
-                    fontFamily: 'monospace',
+                    color: "#ffffff33",
+                    fontFamily: "monospace",
                   }}
                 >
-                  Timeout deste workflow. Substitui o timeout local padrão em caso de execução local.
+                  Timeout deste workflow. Substitui o timeout local padrão em
+                  caso de execução local.
                 </div>
               </div>
 
               {/* Actions */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  marginTop: 4,
+                }}
+              >
                 <button
                   onClick={handleAdd}
                   disabled={saving || !form.name}
                   style={{
-                    background: saving || !form.name ? '#3a1a0088' : '#f9731422',
-                    border: `1px solid ${saving || !form.name ? '#f9731433' : '#f9731466'}`,
-                    color: saving || !form.name ? '#f9731677' : '#f97316',
-                    fontFamily: 'monospace',
+                    background:
+                      saving || !form.name ? "#3a1a0088" : "#f9731422",
+                    border: `1px solid ${saving || !form.name ? "#f9731433" : "#f9731466"}`,
+                    color: saving || !form.name ? "#f9731677" : "#f97316",
+                    fontFamily: "monospace",
                     fontSize: 11,
                     fontWeight: 700,
-                    padding: '8px 0',
+                    padding: "8px 0",
                     borderRadius: 6,
-                    cursor: saving || !form.name ? 'not-allowed' : 'pointer',
-                    letterSpacing: '0.06em',
-                    transition: 'background 0.15s',
+                    cursor: saving || !form.name ? "not-allowed" : "pointer",
+                    letterSpacing: "0.06em",
+                    transition: "background 0.15s",
                   }}
                 >
-                  {saving ? 'Criando…' : 'Criar workflow'}
+                  {saving ? "Criando…" : "Criar workflow"}
                 </button>
 
                 <button
                   onClick={() => {
                     setAddingNew(false);
                     setForm({
-                      name: '',
-                      generationType: 'text2img',
-                      executionMode: 'local',
-                      workflowPath: '',
-                      description: '',
+                      name: "",
+                      generationType: "text2img",
+                      executionMode: "local",
+                      workflowPath: "",
+                      description: "",
                       timeoutMs: 90000,
                     });
                   }}
                   style={{
-                    background: 'transparent',
-                    border: '1px solid #ffffff22',
-                    color: '#ffffff55',
-                    fontFamily: 'monospace',
+                    background: "transparent",
+                    border: "1px solid #ffffff22",
+                    color: "#ffffff55",
+                    fontFamily: "monospace",
                     fontSize: 10,
-                    padding: '6px 0',
+                    padding: "6px 0",
                     borderRadius: 6,
-                    cursor: 'pointer',
+                    cursor: "pointer",
                   }}
                 >
                   Cancelar
