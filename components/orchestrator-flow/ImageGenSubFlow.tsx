@@ -74,6 +74,7 @@ interface LLMRouterNodeData extends Record<string, unknown> {
   status?: NodeStatus;
   durationMs?: number;
   limitMs?: number;
+  visionDurationMs?: number;
 }
 
 interface ExecInfo {
@@ -683,7 +684,7 @@ function DispatcherNode({ data }: NodeProps) {
 // ─── LLMRouterNode (custom ReactFlow node) ───────────────────────────────────
 
 function LLMRouterNode({ data }: NodeProps) {
-  const { model, provider, visionEnabled, visionModel, onOpenPanel, status = 'idle', durationMs, limitMs = 20_000 } = data as LLMRouterNodeData;
+  const { model, provider, visionEnabled, visionModel, onOpenPanel, status = 'idle', durationMs, limitMs = 20_000, visionDurationMs } = data as LLMRouterNodeData;
   const [hovered, setHovered] = useState(true);
   const [timingDismissed, setTimingDismissed] = useState(false);
   const isEnabled = !!model;
@@ -768,6 +769,11 @@ function LLMRouterNode({ data }: NodeProps) {
           <span style={{ color: '#a855f7' }}>{visionModel.length > 20 ? visionModel.slice(0, 20) + '…' : visionModel}</span>
         ) : (
           <span style={{ fontStyle: 'italic' }}>vision: off</span>
+        )}
+        {visionDurationMs !== undefined && (
+          <span style={{ marginLeft: 6, color: '#a855f7', fontWeight: 700 }}>
+            ⏱ {fmtSec(visionDurationMs)}s
+          </span>
         )}
       </div>
       {/* Compact badge — only in dismissed mode */}
@@ -1090,6 +1096,14 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
   const [savingDispatcher, setSavingDispatcher] = useState(false);
   const [editingProviderName, setEditingProviderName] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ label: '', prePrompt: '', workflowPath: '', generationType: 'text2img', description: '', timeoutMs: 90000 });
+  const [form, setForm] = useState({
+    name: '',
+    generationType: 'text2img',
+    executionMode: 'local',
+    workflowPath: '',
+    description: '',
+    timeoutMs: 90000,
+  });
   const [savingEdit, setSavingEdit] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deletingWorkflow, setDeletingWorkflow] = useState(false);
@@ -1097,13 +1111,6 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
   const [saving, setSaving] = useState(false);
   const [createdEnvVar, setCreatedEnvVar] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [form, setForm] = useState({
-    name: '',
-    generationType: 'text2img',
-    executionMode: 'local',
-    workflowPath: '',
-    description: '',
-  });
 
   // ─── Custom Workflow Scan state ───────────────────────────────────────────
   const [scanPanelOpen, setScanPanelOpen] = useState(false);
@@ -1258,9 +1265,15 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
     payload: Record<string, unknown> | undefined,
     ts: number,
     times: Map<string, NodeTime>,
+    activeProvNodeId?: string,
   ) {
     const end = (id: string) => { const t = times.get(id); if (t && !t.endTs) times.set(id, { ...t, endTs: ts }); };
-    if (eventName === 'stage.started' && payload?.stageId === 'image_gen') {
+    if (eventName === 'vision.described') {
+      // vision fires BEFORE stage.started; use payload.durationMs if available
+      const dur = payload?.durationMs as number | undefined;
+      if (dur) times.set('vision', { startTs: ts - dur, endTs: ts });
+      else times.set('vision', { startTs: ts, endTs: ts });
+    } else if (eventName === 'stage.started' && payload?.stageId === 'image_gen') {
       times.set('entry', { startTs: ts });
     } else if (eventName === 'image.gen_started') {
       // Routing phase starts (dispatcher + LLM router)
@@ -1275,12 +1288,20 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
     } else if (eventName === 'image.gen_completed') {
       const prov = payload?.provider as string | undefined;
       if (prov) end(`provider_${prov}`);
+    } else if (eventName === 'image.gen_failed') {
+      const prov = payload?.provider as string | undefined;
+      if (prov) end(`provider_${prov}`);
     } else if (eventName === 'stage.completed' && payload?.stageId === 'image_gen') {
       end('entry');
+      // Also close active provider timing in case image.gen_completed had a name mismatch
+      if (activeProvNodeId) end(activeProvNodeId);
+      end('dispatcher');
+      end('llmRouter');
     } else if (eventName === 'stage.failed' && payload?.stageId === 'image_gen') {
       end('entry');
       end('dispatcher');
       end('llmRouter');
+      if (activeProvNodeId) end(activeProvNodeId);
     }
   }
 
@@ -1288,14 +1309,20 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
     eventName: string,
     payload: Record<string, unknown> | undefined,
     m: Map<string, NodeStatus>,
+    currentActiveProv?: string | null,
   ): string | null | undefined {
     // returns new activeProviderId when dispatcher_selected fires, undefined otherwise
+    // currentActiveProv overrides activeProviderRef.current (used in replay)
+    const activeProv = currentActiveProv !== undefined ? currentActiveProv : activeProviderRef.current;
     if (eventName === 'stage.started' && payload?.stageId === 'image_gen') {
-      m.set('entry', 'active'); m.set('dispatcher', 'active'); m.set('llmRouter', 'active');
+      // Only entry activates; dispatcher/llmRouter activate when image.gen_started fires
+      m.set('entry', 'active');
     } else if (eventName === 'vision.described') {
+      // Vision descriptor runs before image.gen_started — mark llmRouter as preparing
       m.set('llmRouter', 'active');
     } else if (eventName === 'image.gen_started') {
-      m.set('llmRouter', 'completed'); m.set('entry', 'active');
+      // Routing phase: both dispatcher and LLM router activate together
+      m.set('dispatcher', 'active'); m.set('llmRouter', 'active'); m.set('entry', 'active');
     } else if (eventName === 'image.dispatcher_selected') {
       m.set('dispatcher', 'completed'); m.set('llmRouter', 'completed');
       const sel = payload?.provider as string | undefined;
@@ -1305,13 +1332,15 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
       const prov = payload?.provider as string | undefined;
       if (prov) m.set(`provider_${prov}`, 'completed');
       m.set('entry', 'completed');
+    } else if (eventName === 'image.gen_failed') {
+      const prov = payload?.provider as string | undefined;
+      if (prov) m.set(`provider_${prov}`, 'failed');
+      m.set('entry', 'failed');
     } else if (eventName === 'stage.completed' && payload?.stageId === 'image_gen') {
       m.set('entry', 'completed'); m.set('dispatcher', 'completed'); m.set('llmRouter', 'completed');
-      const activeProv = activeProviderRef.current;
       if (activeProv) m.set(activeProv, 'completed');
     } else if (eventName === 'stage.failed' && payload?.stageId === 'image_gen') {
       m.set('entry', 'failed'); m.set('dispatcher', 'failed'); m.set('llmRouter', 'failed');
-      const activeProv = activeProviderRef.current;
       if (activeProv) m.set(activeProv, 'failed');
     }
     return undefined;
@@ -1350,8 +1379,8 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
             });
             replayedPendingPrompt = '';
           }
-          applyTimeEvent(evt.eventName, evt.payload, evt.ts, replayedTimes);
-          const newActive = applyImageEvent(evt.eventName, evt.payload, replayedStatuses);
+          applyTimeEvent(evt.eventName, evt.payload, evt.ts, replayedTimes, replayedActive ?? undefined);
+          const newActive = applyImageEvent(evt.eventName, evt.payload, replayedStatuses, replayedActive);
           if (newActive !== undefined) replayedActive = newActive;
         }
         setNodeStatuses(new Map(replayedStatuses));
@@ -1384,10 +1413,10 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
         });
       }
 
-      // Track timing
+      // Track timing (pass active provider so stage.completed can close its timing)
       setNodeTimes((prev) => {
         const t = new Map(prev);
-        applyTimeEvent(eventName, payload, ts ?? Date.now(), t);
+        applyTimeEvent(eventName, payload, ts ?? Date.now(), t, activeProviderRef.current ?? undefined);
         return t;
       });
 
@@ -1432,6 +1461,7 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
         executionMode: form.executionMode as 'cloud' | 'local',
         generationType: form.generationType as 'text2img' | 'img2img' | 'pulid',
         description: form.description,
+        timeoutMs: form.timeoutMs,
         envKey: envVarName,
         workflowPath: form.workflowPath || null,
         enabled: true,
@@ -1448,6 +1478,7 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
         executionMode: 'local',
         workflowPath: '',
         description: '',
+        timeoutMs: 90000,
       });
     } finally {
       setSaving(false);
@@ -1564,6 +1595,13 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
     const now = Date.now();
     const globalLocalTimeoutMs = definition?.resourcePolicy?.localTimeoutMs ?? 90_000;
     const routerLimitMs = routerConfig?.timeoutMs ?? 20_000;
+
+    // Vision descriptor timing
+    const visionT = nodeTimes.get('vision');
+    const visionDurationMs = visionT
+      ? visionT.endTs !== undefined ? visionT.endTs - visionT.startTs : undefined
+      : undefined;
+
     return baseNodes.map((n) => {
       const status = nodeStatuses.get(n.id) ?? 'idle';
       const isActiveProvider = n.id === activeProviderId;
@@ -1590,6 +1628,7 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
           isActiveProvider,
           durationMs,
           limitMs,
+          ...(n.id === 'llmRouter' ? { visionDurationMs } : {}),
           ...(execInfoMap.has(n.id) ? { lastExecution: execInfoMap.get(n.id) } : {}),
         },
       };
@@ -1613,15 +1652,18 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
   // ─── Highlight execution path on edges ────────────────────────────────────
 
   const liveEdges = useMemo(() => {
-    const dispatcherDone = (nodeStatuses.get('dispatcher') ?? 'idle') !== 'idle';
-    const llmRouterDone  = (nodeStatuses.get('llmRouter')  ?? 'idle') !== 'idle';
-    const selectedProv   = activeProviderId; // e.g. "provider_Image_Z_Image_Turbo"
+    const dispatcherStatus = nodeStatuses.get('dispatcher') ?? 'idle';
+    const llmRouterStatus  = nodeStatuses.get('llmRouter')  ?? 'idle';
+    const dispatcherDone = dispatcherStatus !== 'idle';
+    const llmRouterDone  = llmRouterStatus  !== 'idle';
+    const selectedProv   = activeProviderId; // e.g. "provider_custom_image_z_image_turbo"
 
     return edges.map((e) => {
       if (e.id === 'entry→dispatcher' && dispatcherDone) {
         return { ...e, animated: true, style: { ...e.style, stroke: '#f97316dd', strokeWidth: 2.5 } };
       }
-      if (e.id === 'dispatcher→llmRouter' && llmRouterDone) {
+      // dispatcher→llmRouter animates when dispatcher is active OR when llmRouter is active/completed
+      if (e.id === 'dispatcher→llmRouter' && (dispatcherDone || llmRouterDone)) {
         return { ...e, animated: true, style: { ...e.style, stroke: '#c026d3dd', strokeWidth: 2.5 } };
       }
       if (selectedProv && e.target === selectedProv) {
@@ -2202,6 +2244,24 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                   />
                   <div style={{ marginTop: 4, fontSize: 8, color: '#ffffff22', fontFamily: 'monospace' }}>
                     O orquestrador usa este texto para decidir qual workflow escolher.
+                  </div>
+                </div>
+
+                {/* Timeout */}
+                <div>
+                  <label style={{ ...labelStyle, color: `${accentColor}aa` }}>Timeout (ms)</label>
+                  <input
+                    type="number"
+                    step={1000}
+                    style={{ ...inputStyle, borderColor: `${accentColor}33`, width: 140 }}
+                    value={editForm.timeoutMs}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      if (!isNaN(v)) setEditForm((f) => ({ ...f, timeoutMs: v }));
+                    }}
+                  />
+                  <div style={{ marginTop: 4, fontSize: 8, color: '#ffffff22', fontFamily: 'monospace' }}>
+                    Timeout para este workflow específico. Substitui o timeout padrão local do resourcePolicy.
                   </div>
                 </div>
 
@@ -2963,6 +3023,35 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                 </div>
               </div>
 
+              {/* Timeout */}
+              <div>
+                <label style={labelStyle}>Timeout (ms)</label>
+                <input
+                  type="number"
+                  style={{ ...inputStyle, width: 140 }}
+                  value={form.timeoutMs}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    setForm((f) => ({ ...f, timeoutMs: isNaN(v) ? 90000 : v }));
+                  }}
+                  onBlur={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    const clamped = isNaN(v) ? 90000 : Math.max(5000, Math.min(300000, v));
+                    setForm((f) => ({ ...f, timeoutMs: clamped }));
+                  }}
+                />
+                <div
+                  style={{
+                    marginTop: 4,
+                    fontSize: 8,
+                    color: '#ffffff33',
+                    fontFamily: 'monospace',
+                  }}
+                >
+                  Timeout deste workflow. Substitui o timeout local padrão em caso de execução local.
+                </div>
+              </div>
+
               {/* Actions */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
                 <button
@@ -2994,6 +3083,7 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                       executionMode: 'local',
                       workflowPath: '',
                       description: '',
+                      timeoutMs: 90000,
                     });
                   }}
                   style={{

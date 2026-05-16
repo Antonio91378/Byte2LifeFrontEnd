@@ -210,7 +210,7 @@ export function StageInspector({ stage, definition, providers, baseUrl, onClose,
     }
   }
 
-  const hasTimeout = !!stage.requiresLock || stage.id === 'queue';
+  const hasTimeout = stage.timeoutMs !== undefined || !!stage.requiresLock || stage.id === 'queue';
 
   async function handleSaveTimeout() {
     if (!baseUrl) return;
