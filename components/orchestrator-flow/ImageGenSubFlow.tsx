@@ -1089,7 +1089,7 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
   const [dispatcherForm, setDispatcherForm] = useState({ strategy: 'priority_list', maxAttempts: 3 });
   const [savingDispatcher, setSavingDispatcher] = useState(false);
   const [editingProviderName, setEditingProviderName] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ label: '', prePrompt: '', workflowPath: '', generationType: 'text2img', description: '' });
+  const [editForm, setEditForm] = useState({ label: '', prePrompt: '', workflowPath: '', generationType: 'text2img', description: '', timeoutMs: 90000 });
   const [savingEdit, setSavingEdit] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deletingWorkflow, setDeletingWorkflow] = useState(false);
@@ -1165,6 +1165,7 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
       workflowPath: p.workflowPath ?? '',
       generationType: p.generationType ?? 'text2img',
       description: p.description ?? '',
+      timeoutMs: p.timeoutMs ?? 90000,
     });
   }, [editingProviderName]);
 
@@ -1478,6 +1479,7 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
         workflowPath: editForm.workflowPath || null,
         generationType: editForm.generationType as ImageWorkflowProvider['generationType'],
         description: editForm.description,
+        timeoutMs: editForm.timeoutMs,
       });
       setProviders((prev) =>
         prev.map((p) =>
@@ -1489,6 +1491,7 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
                 workflowPath: editForm.workflowPath || null,
                 generationType: editForm.generationType as ImageWorkflowProvider['generationType'],
                 description: editForm.description,
+                timeoutMs: editForm.timeoutMs,
               }
             : p,
         ),
@@ -1559,7 +1562,7 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
 
   const liveNodes = useMemo(() => {
     const now = Date.now();
-    const localTimeoutMs = definition?.resourcePolicy?.localTimeoutMs ?? 90_000;
+    const globalLocalTimeoutMs = definition?.resourcePolicy?.localTimeoutMs ?? 90_000;
     const routerLimitMs = routerConfig?.timeoutMs ?? 20_000;
     return baseNodes.map((n) => {
       const status = nodeStatuses.get(n.id) ?? 'idle';
@@ -1570,12 +1573,15 @@ export function ImageGenSubFlow({ baseUrl, definition, onBack, conversationId }:
           ? t.endTs - t.startTs
           : status === 'active' ? now - t.startTs : undefined
         : undefined;
-      // Assign the real configured limit per node type
-      const limitMs = (n.id === 'dispatcher' || n.id === 'llmRouter')
-        ? routerLimitMs
-        : n.id.startsWith('provider_')
-          ? localTimeoutMs
-          : undefined;
+      // Per-provider timeoutMs from config; fall back to global localTimeoutMs
+      let limitMs: number | undefined;
+      if (n.id === 'dispatcher' || n.id === 'llmRouter') {
+        limitMs = routerLimitMs;
+      } else if (n.id.startsWith('provider_')) {
+        const provName = n.id.slice('provider_'.length);
+        const prov = providers.find((p) => p.name === provName);
+        limitMs = prov?.timeoutMs ?? globalLocalTimeoutMs;
+      }
       const base = {
         ...n,
         data: {

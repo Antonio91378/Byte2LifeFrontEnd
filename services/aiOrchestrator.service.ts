@@ -708,6 +708,8 @@ export interface ImageWorkflowProvider {
   prePrompt?: string;
   envKey?: string | null;
   preferWhen?: string;
+  /** Per-workflow timeout in ms. Overrides global resourcePolicy.localTimeoutMs for this provider. */
+  timeoutMs?: number;
 }
 
 export async function getImageWorkflows(baseUrl: string): Promise<{
