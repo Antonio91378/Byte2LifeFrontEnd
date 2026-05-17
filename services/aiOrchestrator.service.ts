@@ -693,74 +693,30 @@ export function subscribeToFlowEvents(
   return () => source.close();
 }
 
-// ─── Image Generation Workflow types & functions ──────────────────────────────
+// ─── Image Generation — category-based types & functions ─────────────────────
 
-export interface ImageWorkflowProvider {
+export interface ImageCategoryProvider {
   name: string;
   label?: string;
   executionMode: 'cloud' | 'local';
   requiresLock?: boolean;
   enabled: boolean;
-  priority: number;
   workflowPath?: string | null;
-  generationType?: 'text2img' | 'img2img' | 'pulid';
+  promptNodeId?: string | null;
+  format?: string;
+  /** Description shown to the LLM router when picking a provider. Editable in Studio. */
   description?: string;
-  prePrompt?: string;
+  model?: string | null;
   envKey?: string | null;
-  preferWhen?: string;
-  /** Per-workflow timeout in ms. Overrides global resourcePolicy.localTimeoutMs for this provider. */
+  /** Per-provider timeout in ms (local default 300 000, cloud default 60 000). */
   timeoutMs?: number;
 }
 
-export async function getImageWorkflows(baseUrl: string): Promise<{
-  providers: ImageWorkflowProvider[];
-  strategy: string;
-  maxAttempts: number;
-}> {
-  return request(baseUrl, '/flow/image-workflows');
-}
-
-export async function addImageWorkflow(
-  baseUrl: string,
-  provider: Omit<ImageWorkflowProvider, 'priority'> & { priority?: number },
-): Promise<{ ok: boolean; provider: ImageWorkflowProvider }> {
-  return request(baseUrl, '/flow/image-workflows', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(provider),
-  });
-}
-
-export async function updateImageWorkflow(
-  baseUrl: string,
-  name: string,
-  patch: Partial<ImageWorkflowProvider>,
-): Promise<{ ok: boolean; provider: ImageWorkflowProvider }> {
-  return request(baseUrl, `/flow/image-workflows/${encodeURIComponent(name)}`, {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(patch),
-  });
-}
-
-export async function deleteImageWorkflow(
-  baseUrl: string,
-  name: string,
-): Promise<{ ok: boolean }> {
-  return request(baseUrl, `/flow/image-workflows/${encodeURIComponent(name)}`, {
-    method: 'DELETE',
-  });
-}
-
-export async function updateImageDispatcher(
-  baseUrl: string,
-  patch: { strategy?: string; maxAttempts?: number },
-): Promise<{ ok: boolean }> {
-  return request(baseUrl, '/flow/image-gen', {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(patch),
-  });
+export interface ImageCategoryConfig {
+  label?: string;
+  description?: string;
+  providers: ImageCategoryProvider[];
+  fallback: ImageCategoryProvider | null;
 }
 
 export interface ImageRouterConfig {
@@ -769,23 +725,74 @@ export interface ImageRouterConfig {
   timeoutMs: number;
 }
 
-export async function getImageGenConfig(baseUrl: string): Promise<{
-  providers: ImageWorkflowProvider[];
-  strategy: string;
-  maxAttempts: number;
+export interface ImageGenConfig {
+  categories: Record<string, ImageCategoryConfig>;
   routerConfig: ImageRouterConfig;
-}> {
-  return request(baseUrl, '/flow/image-gen');
+}
+
+export async function getImageGenConfig(baseUrl: string): Promise<ImageGenConfig> {
+  return request<ImageGenConfig>(baseUrl, '/flow/image-gen');
 }
 
 export async function updateImageRouterConfig(
   baseUrl: string,
   routerConfig: Partial<ImageRouterConfig>,
-): Promise<{ ok: boolean }> {
+): Promise<{ ok: boolean; routerConfig: ImageRouterConfig }> {
   return request(baseUrl, '/flow/image-gen', {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ routerConfig }),
+  });
+}
+
+export async function getImageCategories(baseUrl: string): Promise<{ categories: Record<string, ImageCategoryConfig> }> {
+  return request(baseUrl, '/flow/image-categories');
+}
+
+export async function addImageCategoryProvider(
+  baseUrl: string,
+  category: string,
+  provider: Omit<ImageCategoryProvider, 'enabled'> & { enabled?: boolean },
+): Promise<{ ok: boolean; category: string; provider: ImageCategoryProvider }> {
+  return request(baseUrl, `/flow/image-categories/${encodeURIComponent(category)}/providers`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(provider),
+  });
+}
+
+export async function updateImageCategoryProvider(
+  baseUrl: string,
+  category: string,
+  name: string,
+  patch: Partial<ImageCategoryProvider>,
+): Promise<{ ok: boolean; category: string; provider: ImageCategoryProvider }> {
+  return request(baseUrl, `/flow/image-categories/${encodeURIComponent(category)}/providers/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteImageCategoryProvider(
+  baseUrl: string,
+  category: string,
+  name: string,
+): Promise<{ ok: boolean }> {
+  return request(baseUrl, `/flow/image-categories/${encodeURIComponent(category)}/providers/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function setImageCategoryFallback(
+  baseUrl: string,
+  category: string,
+  fallback: ImageCategoryProvider | null,
+): Promise<{ ok: boolean; category: string; fallback: ImageCategoryProvider | null }> {
+  return request(baseUrl, `/flow/image-categories/${encodeURIComponent(category)}/fallback`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(fallback),
   });
 }
 
@@ -874,7 +881,7 @@ export interface VisionDescriptorSkillConfig {
   model?: string;
   timeoutMs?: number;
   requiresLock?: boolean;
-  fallback?: { provider: string; model?: string };
+  fallback?: { provider: string; model?: string; timeoutMs?: number };
   notes?: string;
 }
 

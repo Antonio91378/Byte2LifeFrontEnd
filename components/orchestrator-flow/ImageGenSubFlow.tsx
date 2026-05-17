@@ -17,24 +17,24 @@ import { ToggleLeft, ToggleRight } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useResizablePanel } from "../../hooks/useResizablePanel";
 import {
-    addImageWorkflow,
-    deleteImageWorkflow,
+    addImageCategoryProvider,
+    deleteImageCategoryProvider,
     getCustomWorkflows,
     getImageGenConfig,
-    getImageWorkflows,
     getVisionDescriptorConfig,
     scanCustomWorkflows,
+    setImageCategoryFallback,
     subscribeToFlowEvents,
     updateCustomWorkflow,
-    updateImageDispatcher,
+    updateImageCategoryProvider,
     updateImageRouterConfig,
-    updateImageWorkflow,
     updateVisionDescriptorConfig,
     type CustomWorkflowsState,
     type DiscoveredWorkflow,
     type FlowDefinition,
+    type ImageCategoryConfig,
+    type ImageCategoryProvider,
     type ImageRouterConfig,
-    type ImageWorkflowProvider,
     type StageEvent,
     type VisionDescriptorSkillConfig,
 } from "../../services/aiOrchestrator.service";
@@ -55,10 +55,10 @@ interface AddNodeData extends Record<string, unknown> {
   onAdd: () => void;
 }
 
-interface DispatcherNodeData extends Record<string, unknown> {
-  strategy: string;
-  maxAttempts: number;
-  onOpenPanel: () => void;
+interface CategoryBranchNodeData extends Record<string, unknown> {
+  categoryKey: string;
+  label: string;
+  providerCount: number;
   status?: NodeStatus;
   durationMs?: number;
   limitMs?: number;
@@ -67,13 +67,39 @@ interface DispatcherNodeData extends Record<string, unknown> {
 interface LLMRouterNodeData extends Record<string, unknown> {
   model: string;
   provider: string;
-  visionEnabled: boolean;
-  visionModel: string;
   onOpenPanel: () => void;
   status?: NodeStatus;
   durationMs?: number;
   limitMs?: number;
-  visionDurationMs?: number;
+}
+
+interface VisionDescriptorNodeData extends Record<string, unknown> {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  fallbackProvider: string;
+  fallbackModel: string;
+  timeoutMs: number;
+  onOpenPanel: () => void;
+  status?: NodeStatus;
+  durationMs?: number;
+  limitMs?: number;
+}
+
+interface VisionFallbackNodeData extends Record<string, unknown> {
+  provider: string;
+  model: string;
+  onOpenPanel: () => void;
+  status?: NodeStatus;
+}
+
+interface CategoryFallbackNodeData extends Record<string, unknown> {
+  categoryKey: string;
+  fallback: ImageCategoryProvider | null;
+  onEdit: () => void;
+  status?: NodeStatus;
+  durationMs?: number;
+  limitMs?: number;
 }
 
 interface ExecInfo {
@@ -83,9 +109,10 @@ interface ExecInfo {
 }
 
 interface WorkflowNodeData extends Record<string, unknown> {
-  provider: ImageWorkflowProvider;
-  onToggle: (name: string, enabled: boolean) => void;
-  onEdit: (name: string) => void;
+  provider: ImageCategoryProvider;
+  categoryKey: string;
+  onToggle: (category: string, name: string, enabled: boolean) => void;
+  onEdit: (category: string, name: string) => void;
   status?: NodeStatus;
   isActiveProvider?: boolean;
   lastExecution?: ExecInfo;
@@ -337,6 +364,7 @@ const inputStyle: React.CSSProperties = {
 function WorkflowProviderNode({ data }: NodeProps) {
   const {
     provider,
+    categoryKey,
     onToggle,
     onEdit,
     status = "idle",
@@ -360,12 +388,7 @@ function WorkflowProviderNode({ data }: NodeProps) {
         ? `0 0 22px ${accentColor}`
         : "none";
 
-  const genTypeLabel =
-    provider.generationType === "img2img"
-      ? "img→img"
-      : provider.generationType === "pulid"
-        ? "PuLID"
-        : "txt→img";
+  const genTypeLabel = categoryKey === "img2img" ? "img→img" : "txt→img";
 
   const descSnippet = provider.description
     ? provider.description.slice(0, 70)
@@ -375,7 +398,7 @@ function WorkflowProviderNode({ data }: NodeProps) {
     <div
       onClick={(e) => {
         e.stopPropagation();
-        onEdit(provider.name);
+        onEdit(categoryKey, provider.name);
       }}
       style={{
         background: isEnabled ? (isCloud ? "#001a22" : "#1a0a00") : "#111111",
@@ -565,7 +588,7 @@ function WorkflowProviderNode({ data }: NodeProps) {
         <button
           onClick={(e) => {
             e.stopPropagation();
-            onToggle(provider.name, !isEnabled);
+            onToggle(categoryKey, provider.name, !isEnabled);
           }}
           style={{
             background: "transparent",
@@ -672,23 +695,6 @@ function WorkflowProviderNode({ data }: NodeProps) {
         </div>
       )}
 
-      {/* Pre-prompt indicator */}
-      {provider.prePrompt && (
-        <div
-          style={{
-            marginTop: 5,
-            fontSize: 8,
-            color: `${accentColor}88`,
-            fontFamily: "monospace",
-            letterSpacing: "0.04em",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          ✎ pré-prompt ativo
-        </div>
-      )}
 
       {/* Compact badge — only in dismissed mode */}
       {durationMs !== undefined &&
@@ -852,40 +858,38 @@ function WorkflowProviderNode({ data }: NodeProps) {
   );
 }
 
-// ─── DispatcherNode (custom ReactFlow node) ───────────────────────────────────
+// ─── CategoryBranchNode (custom ReactFlow node) ───────────────────────────────
 
-function DispatcherNode({ data }: NodeProps) {
+function CategoryBranchNode({ data }: NodeProps) {
   const {
-    strategy,
-    maxAttempts,
-    onOpenPanel,
+    categoryKey,
+    label,
+    providerCount,
     status = "idle",
     durationMs,
     limitMs = 20_000,
-  } = data as DispatcherNodeData;
-  const [hovered, setHovered] = useState(true);
+  } = data as CategoryBranchNodeData;
   const [timingDismissed, setTimingDismissed] = useState(false);
+  const isImg2img = categoryKey === "img2img";
+  const baseColor = isImg2img ? "#a855f7" : "#f97316";
   const borderColor =
     status === "active"
-      ? "#c026d3"
+      ? baseColor
       : status === "completed"
         ? "#22c55eaa"
-        : "#c026d3aa";
+        : `${baseColor}88`;
 
   return (
     <div
-      onClick={(e) => {
-        e.stopPropagation();
-        onOpenPanel();
-      }}
       style={{
-        background: status === "active" ? "#2a003a" : "#1a0028",
+        background: status === "active"
+          ? (isImg2img ? "#1a0030" : "#1a0800")
+          : "#0a0014",
         border: `1.5px solid ${borderColor}`,
         borderRadius: 10,
-        padding: "10px 14px",
-        minWidth: 150,
+        padding: "8px 12px",
+        minWidth: 130,
         fontFamily: "monospace",
-        cursor: "pointer",
         transition: "box-shadow 0.2s",
         boxShadow:
           status === "active"
@@ -895,39 +899,12 @@ function DispatcherNode({ data }: NodeProps) {
               : "none",
         animation:
           status === "active"
-            ? "nodeGlowPurple 1.1s ease-in-out infinite alternate"
+            ? (isImg2img ? "nodeGlowPurple" : "nodeGlowOrange") + " 1.1s ease-in-out infinite alternate"
             : undefined,
         position: "relative",
         overflow: "visible",
       }}
-      onMouseEnter={(e) => {
-        setHovered(true);
-        (e.currentTarget as HTMLDivElement).style.boxShadow =
-          `0 0 14px ${borderColor}88`;
-      }}
-      onMouseLeave={(e) => {
-        setHovered(false);
-        (e.currentTarget as HTMLDivElement).style.boxShadow =
-          status === "active"
-            ? `0 0 16px ${borderColor}`
-            : status === "completed"
-              ? `0 0 6px ${borderColor}44`
-              : "none";
-      }}
     >
-      {/* Timing tooltip — hover-only after inline panel is dismissed */}
-      {hovered &&
-        durationMs !== undefined &&
-        status !== "idle" &&
-        timingDismissed && (
-          <TimingTooltip
-            label="Dispatcher"
-            durationMs={durationMs}
-            limitMs={limitMs}
-            color="#c026d3"
-            isActive={status === "active"}
-          />
-        )}
       {status !== "idle" && (
         <div
           style={{
@@ -935,11 +912,7 @@ function DispatcherNode({ data }: NodeProps) {
             top: -9,
             right: -3,
             background:
-              status === "active"
-                ? "#c026d3"
-                : status === "completed"
-                  ? "#22c55e"
-                  : "#ef4444",
+              status === "active" ? baseColor : status === "completed" ? "#22c55e" : "#ef4444",
             color: "#000",
             fontFamily: "monospace",
             fontSize: 7,
@@ -964,186 +937,61 @@ function DispatcherNode({ data }: NodeProps) {
         style={{ background: borderColor, borderColor }}
       />
 
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          marginBottom: 6,
-        }}
-      >
-        <span style={{ fontSize: 13 }}>⎇</span>
-        <span
-          style={{
-            color: borderColor,
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: "0.04em",
-          }}
-        >
-          Dispatcher
+      <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 4 }}>
+        <span style={{
+          fontSize: 9, fontFamily: "monospace", fontWeight: 700,
+          color: `${baseColor}cc`, letterSpacing: "0.05em",
+          background: `${baseColor}18`, borderRadius: 3, padding: "1px 5px",
+        }}>
+          {isImg2img ? "img→img" : "txt→img"}
         </span>
-        <span
-          style={{
-            marginLeft: "auto",
-            fontSize: 8,
-            color: "#c026d388",
-            letterSpacing: "0.06em",
-          }}
-        >
-          ⚙ config
+        <span style={{ color: borderColor, fontSize: 10, fontWeight: 700, letterSpacing: "0.04em" }}>
+          {label}
         </span>
       </div>
-
-      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-        <span
-          style={{
-            fontSize: 9,
-            background: "#c026d322",
-            color: "#c026d3",
-            borderRadius: 4,
-            padding: "1px 5px",
-            border: "1px solid #c026d344",
-          }}
-        >
-          {strategy}
+      <div style={{ display: "flex", gap: 3 }}>
+        <span style={{
+          fontSize: 8,
+          background: `${baseColor}22`,
+          color: baseColor,
+          borderRadius: 3,
+          padding: "1px 4px",
+          border: `1px solid ${baseColor}44`,
+        }}>
+          {providerCount} provider{providerCount !== 1 ? "s" : ""}
         </span>
-        <span
-          style={{
-            fontSize: 9,
-            background: "#ffffff11",
-            color: "#ffffff66",
-            borderRadius: 4,
-            padding: "1px 5px",
-            border: "1px solid #ffffff22",
-          }}
-        >
-          max {maxAttempts}
-        </span>
-        {/* Compact badge shown only in dismissed mode */}
-        {durationMs !== undefined &&
-          (status === "completed" || status === "failed") &&
-          timingDismissed && (
-            <TimingBadge durationMs={durationMs} limitMs={limitMs} />
-          )}
       </div>
-      {/* Inline timing panel — default visible, × to dismiss */}
+      {/* Compact badge — dismissed mode */}
+      {durationMs !== undefined && (status === "completed" || status === "failed") && timingDismissed && (
+        <TimingBadge durationMs={durationMs} limitMs={limitMs} />
+      )}
+      {/* Inline timing panel */}
       {durationMs !== undefined && status !== "idle" && !timingDismissed && (
-        <div
-          style={{
-            marginTop: 7,
-            padding: "5px 7px",
-            background: "#c026d30d",
-            border: "1px solid #c026d322",
-            borderRadius: 6,
-            position: "relative",
-          }}
-        >
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setTimingDismissed(true);
-            }}
-            style={{
-              position: "absolute",
-              top: 1,
-              right: 3,
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              color: "#ffffff33",
-              fontSize: 12,
-              padding: 0,
-              lineHeight: 1,
-            }}
-            title="Ocultar"
-          >
-            ×
-          </button>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "baseline",
-              gap: 3,
-              marginBottom: 4,
-            }}
-          >
-            <span
-              style={{
-                fontFamily: "monospace",
-                fontSize: 8,
-                color: getTimingColor(durationMs, limitMs),
-              }}
-            >
-              ⏱
-            </span>
-            <span
-              style={{
-                fontFamily: "monospace",
-                fontSize: 18,
-                fontWeight: 800,
-                color: "#fff",
-                lineHeight: 1,
-              }}
-            >
-              {fmtSec(durationMs)}
-            </span>
-            <span
-              style={{
-                fontFamily: "monospace",
-                fontSize: 9,
-                color: "#ffffff55",
-              }}
-            >
-              s
-            </span>
-            {status === "active" && (
-              <span
-                style={{
-                  fontFamily: "monospace",
-                  fontSize: 7,
-                  color: "#c026d3",
-                  marginLeft: 2,
-                }}
-              >
-                contando…
-              </span>
-            )}
+        <div style={{
+          marginTop: 6,
+          padding: "4px 6px",
+          background: `${baseColor}0d`,
+          border: `1px solid ${baseColor}22`,
+          borderRadius: 5,
+          position: "relative",
+        }}>
+          <button onClick={(e) => { e.stopPropagation(); setTimingDismissed(true); }}
+            style={{ position: "absolute", top: 1, right: 3, background: "none", border: "none", cursor: "pointer", color: "#ffffff33", fontSize: 12, padding: 0, lineHeight: 1 }}
+            title="Ocultar">×</button>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 2 }}>
+            <span style={{ fontFamily: "monospace", fontSize: 7, color: getTimingColor(durationMs, limitMs) }}>⏱</span>
+            <span style={{ fontFamily: "monospace", fontSize: 16, fontWeight: 800, color: "#fff", lineHeight: 1 }}>{fmtSec(durationMs)}</span>
+            <span style={{ fontFamily: "monospace", fontSize: 8, color: "#ffffff55" }}>s</span>
+            {status === "active" && <span style={{ fontFamily: "monospace", fontSize: 7, color: baseColor, marginLeft: 2 }}>contando…</span>}
           </div>
-          {status !== "active" && (
+          {status !== "active" && limitMs && (
             <>
-              <div
-                style={{
-                  background: "#ffffff11",
-                  borderRadius: 2,
-                  height: 3,
-                  width: "100%",
-                  overflow: "hidden",
-                  marginBottom: 2,
-                }}
-              >
-                <div
-                  style={{
-                    width: `${Math.min((durationMs / limitMs) * 100, 100)}%`,
-                    height: "100%",
-                    background: getTimingColor(durationMs, limitMs),
-                    borderRadius: 2,
-                  }}
-                />
+              <div style={{ background: "#ffffff11", borderRadius: 2, height: 3, width: "100%", overflow: "hidden", marginBottom: 2, marginTop: 3 }}>
+                <div style={{ width: `${Math.min((durationMs / limitMs) * 100, 100)}%`, height: "100%", background: getTimingColor(durationMs, limitMs), borderRadius: 2 }} />
               </div>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  fontFamily: "monospace",
-                  fontSize: 7.5,
-                  color: "#ffffff2a",
-                }}
-              >
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "monospace", fontSize: 7, color: "#ffffff2a" }}>
                 <span>lim: {(limitMs / 1000).toFixed(0)}s</span>
-                <span style={{ color: getTimingColor(durationMs, limitMs) }}>
-                  {Math.min((durationMs / limitMs) * 100, 100).toFixed(0)}%
-                </span>
+                <span style={{ color: getTimingColor(durationMs, limitMs) }}>{Math.min((durationMs / limitMs) * 100, 100).toFixed(0)}%</span>
               </div>
             </>
           )}
@@ -1159,13 +1007,10 @@ function LLMRouterNode({ data }: NodeProps) {
   const {
     model,
     provider,
-    visionEnabled,
-    visionModel,
     onOpenPanel,
     status = "idle",
     durationMs,
     limitMs = 20_000,
-    visionDurationMs,
   } = data as LLMRouterNodeData;
   const [hovered, setHovered] = useState(true);
   const [timingDismissed, setTimingDismissed] = useState(false);
@@ -1315,31 +1160,6 @@ function LLMRouterNode({ data }: NodeProps) {
         )}
       </div>
 
-      <div
-        style={{
-          fontSize: 8,
-          fontFamily: "monospace",
-          color: visionEnabled ? "#a855f7aa" : "#ffffff22",
-          borderTop: "1px solid #ffffff0d",
-          paddingTop: 4,
-        }}
-      >
-        <span style={{ marginRight: 4 }}>👁</span>
-        {visionEnabled && visionModel ? (
-          <span style={{ color: "#a855f7" }}>
-            {visionModel.length > 20
-              ? visionModel.slice(0, 20) + "…"
-              : visionModel}
-          </span>
-        ) : (
-          <span style={{ fontStyle: "italic" }}>vision: off</span>
-        )}
-        {visionDurationMs !== undefined && (
-          <span style={{ marginLeft: 6, color: "#a855f7", fontWeight: 700 }}>
-            ⏱ {fmtSec(visionDurationMs)}s
-          </span>
-        )}
-      </div>
       {/* Compact badge — only in dismissed mode */}
       {durationMs !== undefined &&
         (isCompleted || status === "failed") &&
@@ -1515,6 +1335,398 @@ function AddWorkflowNode({ data }: NodeProps) {
   );
 }
 
+// ─── VisionDescriptorNode (custom ReactFlow node) ────────────────────────────
+
+function VisionDescriptorNode({ data }: NodeProps) {
+  const {
+    enabled,
+    provider,
+    model,
+    fallbackProvider,
+    fallbackModel,
+    onOpenPanel,
+    status = "idle",
+    durationMs,
+    limitMs,
+  } = data as VisionDescriptorNodeData;
+  const [hovered, setHovered] = useState(true);
+  const [timingDismissed, setTimingDismissed] = useState(false);
+  const isActive = status === "active";
+  const isCompleted = status === "completed";
+  const isFailed = status === "failed";
+  const color = isFailed
+    ? "#ef4444"
+    : isActive
+      ? "#a855f7"
+      : isCompleted
+        ? "#a855f799"
+        : enabled
+          ? "#a855f766"
+          : "#333344";
+
+  return (
+    <div
+      onClick={(e) => { e.stopPropagation(); onOpenPanel(); }}
+      style={{
+        background: isActive ? "#100018" : "#0a0010",
+        border: `1.5px solid ${color}`,
+        borderRadius: 10,
+        padding: "8px 12px",
+        minWidth: 150,
+        fontFamily: "monospace",
+        cursor: "pointer",
+        transition: "box-shadow 0.2s",
+        boxShadow: isActive
+          ? `0 0 16px ${color}`
+          : isCompleted
+            ? `0 0 6px ${color}44`
+            : "none",
+        animation: isActive
+          ? "nodeGlowPurple 1.1s ease-in-out infinite alternate"
+          : undefined,
+        position: "relative",
+        overflow: "visible",
+        opacity: enabled ? 1 : 0.55,
+      }}
+      onMouseEnter={(e) => {
+        setHovered(true);
+        if (!isActive) (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 12px ${color}66`;
+      }}
+      onMouseLeave={(e) => {
+        setHovered(false);
+        (e.currentTarget as HTMLDivElement).style.boxShadow = isActive
+          ? `0 0 16px ${color}`
+          : isCompleted ? `0 0 6px ${color}44` : "none";
+      }}
+    >
+      {hovered && durationMs !== undefined && status !== "idle" && timingDismissed && (
+        <TimingTooltip
+          label="Vision Descriptor"
+          durationMs={durationMs}
+          limitMs={limitMs}
+          color="#a855f7"
+          isActive={isActive}
+        />
+      )}
+      {(isActive || isCompleted || isFailed) && (
+        <div style={{
+          position: "absolute", top: -9, right: -3,
+          background: isFailed ? "#ef4444" : isActive ? "#a855f7" : "#22c55e",
+          color: "#000", fontFamily: "monospace", fontSize: 7, fontWeight: 800,
+          padding: "1px 4px", borderRadius: 3, zIndex: 10, pointerEvents: "none",
+        }}>
+          {isFailed ? "✗" : isActive ? "●" : "✓"}
+        </div>
+      )}
+
+      <Handle type="target" position={Position.Left} style={{ background: color, borderColor: color }} />
+      <Handle type="source" position={Position.Right} style={{ background: color, borderColor: color }} />
+
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+        <span style={{ fontSize: 11 }}>👁</span>
+        <span style={{ color, fontSize: 10, fontWeight: 700, letterSpacing: "0.04em" }}>
+          Vision
+        </span>
+        {!enabled && (
+          <span style={{ fontSize: 8, color: "#555566", marginLeft: "auto", fontStyle: "italic" }}>
+            off
+          </span>
+        )}
+        {isActive && (
+          <span style={{ color: "#a855f7", fontSize: 8, marginLeft: "auto" }}>●</span>
+        )}
+        <span style={{ fontSize: 8, color: `${color}66`, marginLeft: isActive ? 0 : (enabled ? "auto" : 0) }}>⚙</span>
+      </div>
+
+      {/* Primary model */}
+      <div style={{ fontSize: 9, fontFamily: "monospace", marginBottom: 3 }}>
+        {enabled && model ? (
+          <>
+            <span style={{ color: `${color}99` }}>{provider}: </span>
+            <span style={{ color }}>
+              {model.length > 18 ? model.slice(0, 18) + "…" : model}
+            </span>
+          </>
+        ) : (
+          <span style={{ color: "#444455", fontStyle: "italic" }}>
+            {enabled ? "sem modelo" : "desabilitado"}
+          </span>
+        )}
+      </div>
+
+      {/* Fallback row */}
+      <div style={{
+        fontSize: 8, fontFamily: "monospace",
+        color: fallbackModel ? "#ffffff33" : "#ffffff16",
+        borderTop: "1px solid #ffffff0d", paddingTop: 3,
+        display: "flex", alignItems: "center", gap: 4,
+      }}>
+        <span style={{ color: "#a855f744" }}>↩</span>
+        {fallbackModel ? (
+          <>
+            <span style={{ color: "#a855f755" }}>{fallbackProvider}: </span>
+            <span style={{ color: "#a855f777" }}>
+              {fallbackModel.length > 16 ? fallbackModel.slice(0, 16) + "…" : fallbackModel}
+            </span>
+          </>
+        ) : (
+          <span style={{ fontStyle: "italic", color: "#333344" }}>sem fallback</span>
+        )}
+      </div>
+
+      {/* Compact badge when dismissed */}
+      {durationMs !== undefined && (isCompleted || isFailed) && timingDismissed && (
+        <TimingBadge durationMs={durationMs} limitMs={limitMs}
+          accentColor={isFailed ? "#ef4444" : "#a855f7"} />
+      )}
+
+      {/* Inline timing panel */}
+      {durationMs !== undefined && status !== "idle" && !timingDismissed && (
+        <div style={{
+          marginTop: 7, padding: "5px 7px",
+          background: "#a855f70d", border: "1px solid #a855f722",
+          borderRadius: 6, position: "relative",
+        }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); setTimingDismissed(true); }}
+            style={{
+              position: "absolute", top: 1, right: 3, background: "none",
+              border: "none", cursor: "pointer", color: "#ffffff33", fontSize: 12, padding: 0, lineHeight: 1,
+            }}
+            title="Ocultar"
+          >×</button>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 3, marginBottom: 4 }}>
+            <span style={{ fontFamily: "monospace", fontSize: 8, color: getTimingColor(durationMs, limitMs) }}>⏱</span>
+            <span style={{ fontFamily: "monospace", fontSize: 18, fontWeight: 800, color: "#fff", lineHeight: 1 }}>
+              {fmtSec(durationMs)}
+            </span>
+            <span style={{ fontFamily: "monospace", fontSize: 9, color: "#ffffff55" }}>s</span>
+            {isActive && (
+              <span style={{ fontFamily: "monospace", fontSize: 7, color: "#a855f7", marginLeft: 2 }}>contando…</span>
+            )}
+          </div>
+          {!isActive && limitMs !== undefined && (
+            <>
+              <div style={{ background: "#ffffff11", borderRadius: 2, height: 3, width: "100%", overflow: "hidden", marginBottom: 2 }}>
+                <div style={{
+                  width: `${Math.min((durationMs / limitMs) * 100, 100)}%`,
+                  height: "100%", background: getTimingColor(durationMs, limitMs), borderRadius: 2,
+                }} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "monospace", fontSize: 7.5, color: "#ffffff2a" }}>
+                <span>lim: {(limitMs / 1000).toFixed(0)}s</span>
+                <span style={{ color: getTimingColor(durationMs, limitMs) }}>
+                  {Math.min((durationMs / limitMs) * 100, 100).toFixed(0)}%
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── VisionFallbackNode (canvas node showing fallback provider) ──────────────
+
+function VisionFallbackNode({ data }: NodeProps) {
+  const { provider, model, onOpenPanel, status = "idle" } = data as VisionFallbackNodeData;
+  const isActive = status === "active";
+  const isCompleted = status === "completed";
+  const isFailed = status === "failed";
+  const hasConfig = !!provider && !!model;
+  const color = isFailed
+    ? "#ef4444"
+    : isActive
+      ? "#a855f7"
+      : isCompleted
+        ? "#a855f799"
+        : "#a855f744";
+
+  return (
+    <div
+      onClick={(e) => { e.stopPropagation(); onOpenPanel(); }}
+      style={{
+        background: "#08000e",
+        border: `1px dashed ${color}`,
+        borderRadius: 10,
+        padding: "8px 12px",
+        minWidth: 150,
+        fontFamily: "monospace",
+        cursor: "pointer",
+        opacity: hasConfig ? 0.82 : 0.42,
+        boxShadow: isActive ? `0 0 14px ${color}` : "none",
+        animation: isActive ? "nodeGlowPurple 1.1s ease-in-out infinite alternate" : undefined,
+        position: "relative",
+      }}
+    >
+      <Handle type="target" position={Position.Left} style={{ background: color, borderColor: color }} />
+      <Handle type="source" position={Position.Right} style={{ background: color, borderColor: color }} />
+
+      {/* Status badge */}
+      {(isActive || isCompleted || isFailed) && (
+        <div style={{
+          position: "absolute", top: -9, right: -3,
+          background: isFailed ? "#ef4444" : isActive ? "#a855f7" : "#22c55e",
+          color: "#000", fontFamily: "monospace", fontSize: 7, fontWeight: 800,
+          padding: "1px 4px", borderRadius: 3, zIndex: 10, pointerEvents: "none",
+        }}>
+          {isFailed ? "✗" : isActive ? "●" : "✓"}
+        </div>
+      )}
+
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+        <span style={{
+          fontSize: 7, color: `${color}aa`,
+          background: `${color}18`, border: `1px solid ${color}33`,
+          borderRadius: 3, padding: "1px 5px",
+          letterSpacing: "0.06em", textTransform: "uppercase", flexShrink: 0,
+        }}>
+          FALLBACK
+        </span>
+        <span style={{ color: `${color}55`, fontSize: 8, marginLeft: "auto" }}>⚙ editar</span>
+      </div>
+
+      {/* Model row */}
+      <div style={{ fontSize: 9, fontFamily: "monospace" }}>
+        {hasConfig ? (
+          <>
+            <span style={{ color: `${color}88` }}>{provider}: </span>
+            <span style={{ color }}>
+              {model.length > 18 ? model.slice(0, 18) + "…" : model}
+            </span>
+          </>
+        ) : (
+          <span style={{ color: "#333344", fontStyle: "italic", fontSize: 8 }}>
+            não configurado
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── CategoryFallbackNode (canvas node showing category-level fallback provider) ─
+
+function CategoryFallbackNode({ data }: NodeProps) {
+  const { categoryKey, fallback, onEdit, status = "idle", durationMs, limitMs } = data as CategoryFallbackNodeData;
+  const isText2img = categoryKey === "text2img";
+  const baseColor = isText2img ? "#f97316" : "#a855f7";
+  const isActive = status === "active";
+  const isCompleted = status === "completed";
+  const isFailed = status === "failed";
+  const color = isFailed ? "#ef4444" : isActive ? baseColor : isCompleted ? `${baseColor}99` : `${baseColor}44`;
+  const hasConfig = !!fallback;
+
+  const [dismissed, setDismissed] = useState(false);
+  const showTiming = typeof durationMs === "number" && durationMs > 0 && status !== "idle";
+
+  return (
+    <div
+      onClick={(e) => { e.stopPropagation(); onEdit(); }}
+      style={{
+        background: "#08000e",
+        border: `1px dashed ${color}`,
+        borderRadius: 10,
+        padding: "8px 12px",
+        minWidth: 160,
+        fontFamily: "monospace",
+        opacity: hasConfig ? 0.9 : 0.55,
+        boxShadow: isActive ? `0 0 14px ${color}` : "none",
+        animation: isActive ? (isText2img ? "nodeGlowOrange 1.1s ease-in-out infinite alternate" : "nodeGlowPurple 1.1s ease-in-out infinite alternate") : undefined,
+        position: "relative",
+        cursor: "pointer",
+      }}
+    >
+      <Handle type="target" position={Position.Left} style={{ background: color, borderColor: color }} />
+      <Handle type="source" position={Position.Right} style={{ background: color, borderColor: color }} />
+
+      {/* Status badge */}
+      {(isActive || isCompleted || isFailed) && (
+        <div style={{
+          position: "absolute", top: -9, right: -3,
+          background: isFailed ? "#ef4444" : isActive ? baseColor : "#22c55e",
+          color: "#000", fontFamily: "monospace", fontSize: 7, fontWeight: 800,
+          padding: "1px 4px", borderRadius: 3, zIndex: 10, pointerEvents: "none",
+        }}>
+          {isFailed ? "✗" : isActive ? "●" : "✓"}
+        </div>
+      )}
+
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+        <span style={{
+          fontSize: 7, color: `${color}aa`,
+          background: `${color}18`, border: `1px solid ${color}33`,
+          borderRadius: 3, padding: "1px 5px",
+          letterSpacing: "0.06em", textTransform: "uppercase", flexShrink: 0,
+        }}>
+          FALLBACK
+        </span>
+        <span style={{ fontSize: 7, color: `${baseColor}44`, marginLeft: "auto" }}>
+          {isText2img ? "txt→img" : "img→img"}
+        </span>
+        <span style={{ fontSize: 7, color: `${color}55`, marginLeft: 4 }}>⚙ editar</span>
+      </div>
+
+      {/* Provider info */}
+      <div style={{ fontSize: 9, fontFamily: "monospace" }}>
+        {hasConfig ? (
+          <>
+            <div style={{ color: `${color}88`, marginBottom: 1 }}>
+              {fallback!.executionMode === "cloud" ? "☁️" : "🖥"}{" "}
+              <span style={{ color }}>{fallback!.label ?? fallback!.name}</span>
+            </div>
+            {fallback!.model && (
+              <div style={{ color: `${color}66`, fontSize: 8 }}>
+                {fallback!.model.length > 20 ? fallback!.model.slice(0, 20) + "…" : fallback!.model}
+              </div>
+            )}
+          </>
+        ) : (
+          <span style={{ color: "#333344", fontStyle: "italic", fontSize: 8 }}>
+            não configurado
+          </span>
+        )}
+      </div>
+
+      {/* Timing panel */}
+      {showTiming && !dismissed && (
+        <div style={{
+          marginTop: 6, background: "#0a0010", border: `1px solid ${color}22`,
+          borderRadius: 6, padding: "4px 7px", position: "relative",
+        }}>
+          <button onClick={(e) => { e.stopPropagation(); setDismissed(true); }} style={{
+            position: "absolute", top: 2, right: 4,
+            background: "none", border: "none", color: "#ffffff44", fontSize: 9, cursor: "pointer", padding: 0, lineHeight: 1,
+          }}>×</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9, color: getTimingColor(durationMs!, limitMs) }}>
+            <span>⏱</span>
+            <span style={{ fontWeight: 700 }}>
+              {status === "active" ? fmtSec(durationMs!) : fmtSec(durationMs!)}s
+            </span>
+          </div>
+          {limitMs && (
+            <div style={{ marginTop: 3, height: 3, borderRadius: 2, background: "#ffffff11", overflow: "hidden" }}>
+              <div style={{
+                height: "100%", borderRadius: 2,
+                width: `${Math.min(100, (durationMs! / limitMs) * 100).toFixed(1)}%`,
+                background: getTimingColor(durationMs!, limitMs),
+                transition: "width 0.5s ease",
+              }} />
+            </div>
+          )}
+        </div>
+      )}
+      {showTiming && dismissed && durationMs && (
+        <TimingBadge durationMs={durationMs} limitMs={limitMs} accentColor={baseColor} />
+      )}
+    </div>
+  );
+}
+
 // ─── Panel sub-components (info blocks used in side panels) ──────────────────
 
 const infoText: React.CSSProperties = {
@@ -1681,8 +1893,11 @@ function ResizeHandle({
 
 const NODE_TYPES = {
   workflowNode: WorkflowProviderNode,
-  dispatcherNode: DispatcherNode,
+  categoryBranchNode: CategoryBranchNode,
   llmRouterNode: LLMRouterNode,
+  visionDescriptorNode: VisionDescriptorNode,
+  visionFallbackNode: VisionFallbackNode,
+  categoryFallbackNode: CategoryFallbackNode,
   addNode: AddWorkflowNode,
 };
 
@@ -1691,20 +1906,41 @@ const EDGE_TYPES = {};
 // ─── Graph builder ────────────────────────────────────────────────────────────
 
 function buildNodes(
-  providers: ImageWorkflowProvider[],
-  strategy: string,
-  maxAttempts: number,
+  categories: Record<string, ImageCategoryConfig>,
   routerConfig: ImageRouterConfig,
   visionConfig: VisionDescriptorSkillConfig,
-  onToggle: (name: string, enabled: boolean) => void,
-  onAdd: () => void,
-  onOpenDispatcherPanel: () => void,
+  onToggle: (category: string, name: string, enabled: boolean) => void,
+  onAddInCategory: (category: string) => void,
   onOpenRouterPanel: () => void,
-  onEdit: (name: string) => void,
+  onOpenVisionPanel: () => void,
+  onEdit: (category: string, name: string) => void,
+  onEditFallback: (category: string) => void,
 ): { nodes: Node[]; edges: Edge[] } {
-  const centerY = (providers.length * 110) / 2;
+  const text2imgProviders = categories?.text2img?.providers ?? [];
+  const img2imgProviders = categories?.img2img?.providers ?? [];
+  const hasFallback = !!(visionConfig.fallback?.provider && visionConfig.fallback?.model);
+
+  // Layout columns (x):
+  //   0: entry
+  // 200: llmRouter
+  // 400: branch headers (text2img top, img2img bottom)
+  // 600: vision (img2img only) / text2img providers
+  // 800: visionFallback (img2img) / img2img providers
+  // 1000: img2img providers (after vision)
+
+  const text2imgCount = text2imgProviders.length;
+  const img2imgCount = img2imgProviders.length;
+  // Each branch occupies 110px per provider + vision nodes for img2img
+  const visionRows = visionConfig.enabled ? 2 : 0; // vision + fallback
+  const img2imgRows = img2imgCount + visionRows + 1; // +1 for add node
+  const text2imgRows = text2imgCount + 1; // +1 for add node
+  const totalRows = text2imgRows + img2imgRows + 1; // gap between branches
+  const text2imgTopY = 0;
+  const img2imgTopY = (text2imgRows + 1) * 110;
+  const centerY = (totalRows * 110) / 2;
 
   const nodes: Node[] = [
+    // ── Entry ─────────────────────────────────────────────────────────────────
     {
       id: "entry",
       type: "default",
@@ -1723,84 +1959,200 @@ function buildNodes(
         textAlign: "center",
       },
     },
-    {
-      id: "dispatcher",
-      type: "dispatcherNode",
-      position: { x: 200, y: centerY - 40 },
-      data: {
-        strategy,
-        maxAttempts,
-        onOpenPanel: onOpenDispatcherPanel,
-      } as DispatcherNodeData,
-    },
+    // ── LLM Router ────────────────────────────────────────────────────────────
     {
       id: "llmRouter",
       type: "llmRouterNode",
-      position: { x: 390, y: centerY - 35 },
+      position: { x: 200, y: centerY - 35 },
       data: {
         model: routerConfig.model,
         provider: routerConfig.provider,
-        visionEnabled: visionConfig.enabled ?? false,
-        visionModel: visionConfig.model ?? "",
         onOpenPanel: onOpenRouterPanel,
       } as LLMRouterNodeData,
     },
-    ...providers.map((p, i) => ({
-      id: `provider_${p.name}`,
+    // ── Branch: text2img ──────────────────────────────────────────────────────
+    {
+      id: "branch_text2img",
+      type: "categoryBranchNode",
+      position: { x: 400, y: text2imgTopY + (text2imgRows * 110) / 2 - 30 },
+      data: {
+        categoryKey: "text2img",
+        label: categories?.text2img?.label ?? "Text → Imagem",
+        providerCount: text2imgCount,
+      } as CategoryBranchNodeData,
+    },
+    // text2img providers
+    ...text2imgProviders.map((p, i) => ({
+      id: `provider_text2img_${p.name}`,
       type: "workflowNode",
-      position: { x: 590, y: i * 110 },
+      position: { x: 600, y: text2imgTopY + i * 110 },
       data: {
         provider: p,
+        categoryKey: "text2img",
         onToggle,
         onEdit,
       } as WorkflowNodeData,
     })),
     {
-      id: "addNode",
+      id: "add_text2img",
       type: "addNode",
-      position: { x: 590, y: providers.length * 110 },
-      data: { onAdd } as AddNodeData,
+      position: { x: 600, y: text2imgTopY + text2imgCount * 110 },
+      data: { onAdd: () => onAddInCategory("text2img") } as AddNodeData,
+    },
+    // text2img fallback provider
+    {
+      id: "fallback_text2img",
+      type: "categoryFallbackNode",
+      position: { x: 800, y: text2imgTopY + (text2imgRows * 110) / 2 - 30 },
+      data: {
+        categoryKey: "text2img",
+        fallback: categories?.text2img?.fallback ?? null,
+        onEdit: () => onEditFallback("text2img"),
+      } as CategoryFallbackNodeData,
+    },
+    // ── Branch: img2img ───────────────────────────────────────────────────────
+    {
+      id: "branch_img2img",
+      type: "categoryBranchNode",
+      position: { x: 400, y: img2imgTopY + (img2imgRows * 110) / 2 - 30 },
+      data: {
+        categoryKey: "img2img",
+        label: categories?.img2img?.label ?? "Imagem + Texto → Imagem",
+        providerCount: img2imgCount,
+      } as CategoryBranchNodeData,
+    },
+    // Vision Descriptor (img2img branch, before providers)
+    {
+      id: "vision",
+      type: "visionDescriptorNode",
+      position: { x: 600, y: img2imgTopY + 0 },
+      data: {
+        enabled: visionConfig.enabled ?? false,
+        provider: visionConfig.provider ?? "ollama",
+        model: visionConfig.model ?? "",
+        fallbackProvider: visionConfig.fallback?.provider ?? "",
+        fallbackModel: visionConfig.fallback?.model ?? "",
+        timeoutMs: visionConfig.timeoutMs ?? 60000,
+        onOpenPanel: onOpenVisionPanel,
+      } as VisionDescriptorNodeData,
+    },
+    {
+      id: "visionFallback",
+      type: "visionFallbackNode",
+      position: { x: 600, y: img2imgTopY + 110 },
+      data: {
+        provider: visionConfig.fallback?.provider ?? "",
+        model: visionConfig.fallback?.model ?? "",
+        onOpenPanel: onOpenVisionPanel,
+      } as VisionFallbackNodeData,
+    },
+    // img2img providers (after vision column)
+    ...img2imgProviders.map((p, i) => ({
+      id: `provider_img2img_${p.name}`,
+      type: "workflowNode",
+      position: { x: 800, y: img2imgTopY + i * 110 },
+      data: {
+        provider: p,
+        categoryKey: "img2img",
+        onToggle,
+        onEdit,
+      } as WorkflowNodeData,
+    })),
+    {
+      id: "add_img2img",
+      type: "addNode",
+      position: { x: 800, y: img2imgTopY + img2imgCount * 110 },
+      data: { onAdd: () => onAddInCategory("img2img") } as AddNodeData,
     },
   ];
 
+  const visionColor = visionConfig.enabled ? "#a855f766" : "#333344";
+  const fallbackEdgeColor = hasFallback ? "#a855f733" : "#33333322";
+
   const edges: Edge[] = [
+    // entry → llmRouter
     {
-      id: "entry→dispatcher",
+      id: "entry→llmRouter",
       source: "entry",
-      target: "dispatcher",
-      style: { stroke: "#f9731688", strokeWidth: 1.5 },
-      animated: false,
-    },
-    {
-      id: "dispatcher→llmRouter",
-      source: "dispatcher",
       target: "llmRouter",
-      style: { stroke: "#c026d366", strokeWidth: 1.5 },
+      style: { stroke: "#22d3ee55", strokeWidth: 1.5 },
       animated: false,
     },
-    ...providers.map((p) => ({
-      id: `llmRouter→provider_${p.name}`,
+    // llmRouter → branch_text2img
+    {
+      id: "llmRouter→branch_text2img",
       source: "llmRouter",
-      target: `provider_${p.name}`,
+      target: "branch_text2img",
+      style: { stroke: "#f9731655", strokeWidth: 1.5 },
+      animated: false,
+    },
+    // llmRouter → branch_img2img
+    {
+      id: "llmRouter→branch_img2img",
+      source: "llmRouter",
+      target: "branch_img2img",
+      style: { stroke: "#a855f755", strokeWidth: 1.5 },
+      animated: false,
+    },
+    // branch_text2img → text2img providers
+    ...text2imgProviders.map((p) => ({
+      id: `branch_text2img→provider_text2img_${p.name}`,
+      source: "branch_text2img",
+      target: `provider_text2img_${p.name}`,
       style: {
-        stroke: p.enabled
-          ? p.executionMode === "cloud"
-            ? "#22d3ee55"
-            : "#f9731655"
-          : "#33333355",
+        stroke: p.enabled ? (p.executionMode === "cloud" ? "#22d3ee55" : "#f9731655") : "#33333355",
         strokeWidth: 1.5,
       },
       animated: false,
     })),
     {
-      id: "llmRouter→addNode",
-      source: "llmRouter",
-      target: "addNode",
+      id: "branch_text2img→add_text2img",
+      source: "branch_text2img",
+      target: "add_text2img",
+      style: { stroke: "#ffffff11", strokeWidth: 1, strokeDasharray: "4 3" },
+      animated: false,
+    },
+    // branch_text2img → fallback_text2img
+    {
+      id: "branch_text2img→fallback_text2img",
+      source: "branch_text2img",
+      target: "fallback_text2img",
+      style: { stroke: "#f9731633", strokeWidth: 1, strokeDasharray: "5 4" },
+      animated: false,
+    },
+    // branch_img2img → vision
+    {
+      id: "branch_img2img→vision",
+      source: "branch_img2img",
+      target: "vision",
+      style: { stroke: visionColor, strokeWidth: 1.5, strokeDasharray: visionConfig.enabled ? undefined : "5 3" },
+      animated: false,
+    },
+    // branch_img2img → visionFallback
+    {
+      id: "branch_img2img→visionFallback",
+      source: "branch_img2img",
+      target: "visionFallback",
+      style: { stroke: fallbackEdgeColor, strokeWidth: 1, strokeDasharray: "4 3" },
+      animated: false,
+    },
+    // vision → img2img providers
+    ...img2imgProviders.map((p) => ({
+      id: `vision→provider_img2img_${p.name}`,
+      source: "vision",
+      target: `provider_img2img_${p.name}`,
       style: {
-        stroke: "#ffffff11",
-        strokeWidth: 1,
-        strokeDasharray: "4 3",
+        stroke: p.enabled ? (p.executionMode === "cloud" ? "#22d3ee55" : "#a855f755") : "#33333355",
+        strokeWidth: 1.5,
+        strokeDasharray: visionConfig.enabled ? undefined : "5 3",
       },
+      animated: false,
+    })),
+    {
+      id: "vision→add_img2img",
+      source: "vision",
+      target: "add_img2img",
+      style: { stroke: "#ffffff11", strokeWidth: 1, strokeDasharray: "4 3" },
       animated: false,
     },
   ];
@@ -1822,35 +2174,24 @@ export function ImageGenSubFlow({
   onBack,
   conversationId,
 }: ImageGenSubFlowProps) {
-  const [providers, setProviders] = useState<ImageWorkflowProvider[]>([]);
-  const [strategy, setStrategy] = useState("priority_list");
-  const [maxAttempts, setMaxAttempts] = useState(3);
+  const [categories, setCategories] = useState<Record<string, ImageCategoryConfig>>({});
+  const [addingInCategory, setAddingInCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [addingNew, setAddingNew] = useState(false);
-  const [dispatcherPanelOpen, setDispatcherPanelOpen] = useState(false);
-  const [dispatcherForm, setDispatcherForm] = useState({
-    strategy: "priority_list",
-    maxAttempts: 3,
-  });
-  const [savingDispatcher, setSavingDispatcher] = useState(false);
-  const [editingProviderName, setEditingProviderName] = useState<string | null>(
-    null,
-  );
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editingProviderName, setEditingProviderName] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({
     label: "",
-    prePrompt: "",
-    workflowPath: "",
-    generationType: "text2img",
     description: "",
-    timeoutMs: 90000,
+    workflowPath: "",
+    timeoutMs: 300000,
+    model: "",
   });
   const [form, setForm] = useState({
     name: "",
-    generationType: "text2img",
     executionMode: "local",
     workflowPath: "",
     description: "",
-    timeoutMs: 90000,
+    timeoutMs: 300000,
   });
   const [savingEdit, setSavingEdit] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1894,7 +2235,7 @@ export function ImageGenSubFlow({
     provider: "ollama",
     model: "",
     timeoutMs: 60000,
-    fallback: { provider: "openai", model: "gpt-4o" },
+    fallback: { provider: "openai", model: "gpt-4o", timeoutMs: 30000 },
   };
   const [visionConfig, setVisionConfig] = useState<VisionDescriptorSkillConfig>(
     DEFAULT_VISION_CONFIG,
@@ -1903,6 +2244,15 @@ export function ImageGenSubFlow({
     DEFAULT_VISION_CONFIG,
   );
   const [savingVision, setSavingVision] = useState(false);
+  const [visionPanelOpen, setVisionPanelOpen] = useState(false);
+
+  // ─── Category fallback edit state ─────────────────────────────────────────
+
+  const [fallbackPanelCategory, setFallbackPanelCategory] = useState<string | null>(null);
+  const [fallbackForm, setFallbackForm] = useState<Partial<ImageCategoryProvider>>({
+    name: "", label: "", executionMode: "cloud", timeoutMs: 60000,
+  });
+  const [savingFallback, setSavingFallback] = useState(false);
 
   // ─── SSE animation state ───────────────────────────────────────────────────
 
@@ -1935,39 +2285,32 @@ export function ImageGenSubFlow({
   // ─── Populate edit form when a provider is selected ───────────────────────
 
   useEffect(() => {
-    if (!editingProviderName) return;
-    const p = providers.find((x) => x.name === editingProviderName);
+    if (!editingProviderName || !editingCategory) return;
+    const p = (categories[editingCategory]?.providers ?? []).find(
+      (x) => x.name === editingProviderName,
+    );
     if (!p) return;
     setEditForm({
       label: p.label ?? p.name,
-      prePrompt: p.prePrompt ?? "",
-      workflowPath: p.workflowPath ?? "",
-      generationType: p.generationType ?? "text2img",
       description: p.description ?? "",
-      timeoutMs: p.timeoutMs ?? 90000,
+      workflowPath: p.workflowPath ?? "",
+      timeoutMs: p.timeoutMs ?? 300000,
+      model: p.model ?? "",
     });
-  }, [editingProviderName]);
+  }, [editingProviderName, editingCategory]);
 
   // ─── Load on mount ────────────────────────────────────────────────────────
 
   useEffect(() => {
     setLoading(true);
-    getImageWorkflows(baseUrl)
-      .then(({ providers: p, strategy: s, maxAttempts: m }) => {
-        setProviders(p);
-        setStrategy(s);
-        setMaxAttempts(m);
-        setDispatcherForm({ strategy: s, maxAttempts: m });
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-
     getImageGenConfig(baseUrl)
-      .then(({ routerConfig: rc }) => {
+      .then(({ categories: cats, routerConfig: rc }) => {
+        setCategories(cats ?? {});
         setRouterConfig(rc);
         setRouterForm(rc);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoading(false));
 
     getVisionDescriptorConfig(baseUrl)
       .then((vc) => {
@@ -2010,9 +2353,9 @@ export function ImageGenSubFlow({
         ...prev,
         discovered: { ...prev.discovered, [name]: result.workflow },
       }));
-      // Refresh providers list so the new custom_* provider appears in the canvas
-      const { providers: p } = await getImageWorkflows(baseUrl);
-      setProviders(p);
+      // Refresh categories so the new custom_* provider appears in the canvas
+      const { categories: cats } = await getImageGenConfig(baseUrl);
+      setCategories(cats ?? {});
     } catch {
       /* silently fail */
     } finally {
@@ -2053,48 +2396,50 @@ export function ImageGenSubFlow({
       const t = times.get(id);
       if (t && !t.endTs) times.set(id, { ...t, endTs: ts });
     };
-    if (eventName === "vision.described") {
-      // vision fires BEFORE stage.started; use payload.durationMs if available
-      const dur = payload?.durationMs as number | undefined;
-      if (dur) times.set("vision", { startTs: ts - dur, endTs: ts });
-      else times.set("vision", { startTs: ts, endTs: ts });
-    } else if (
-      eventName === "stage.started" &&
-      payload?.stageId === "image_gen"
-    ) {
+    if (eventName === "stage.started" && payload?.stageId === "image_gen") {
       times.set("entry", { startTs: ts });
-    } else if (eventName === "image.gen_started") {
-      // Routing phase starts (dispatcher + LLM router)
-      times.set("dispatcher", { startTs: ts });
       times.set("llmRouter", { startTs: ts });
-    } else if (eventName === "image.dispatcher_selected") {
-      // Routing done → provider generation starts
-      end("dispatcher");
+    } else if (eventName === "image.category_selected") {
       end("llmRouter");
+      // Start branch node timer
+      const cat = payload?.category as string | undefined;
+      if (cat) times.set(`branch_${cat}`, { startTs: ts });
+    } else if (eventName === "image.provider_selected") {
+      const cat = payload?.category as string | undefined;
+      if (cat) {
+        end(`branch_${cat}`);
+        // If img2img, start vision timer (vision runs next)
+        if (cat === "img2img" && visionConfig.enabled) times.set("vision", { startTs: ts });
+      }
+    } else if (eventName === "vision.described") {
+      const dur = payload?.durationMs as number | undefined;
+      if (dur) {
+        times.set("vision", { startTs: ts - dur, endTs: ts });
+      } else {
+        end("vision");
+      }
+    } else if (eventName === "image.gen_started") {
+      // Provider generation begins
       const prov = payload?.provider as string | undefined;
-      if (prov) times.set(`provider_${prov}`, { startTs: ts });
+      const cat = payload?.category as string | undefined;
+      if (prov && cat) times.set(`provider_${cat}_${prov}`, { startTs: ts });
     } else if (eventName === "image.gen_completed") {
       const prov = payload?.provider as string | undefined;
-      if (prov) end(`provider_${prov}`);
+      const cat = payload?.category as string | undefined;
+      if (prov && cat) end(`provider_${cat}_${prov}`);
     } else if (eventName === "image.gen_failed") {
       const prov = payload?.provider as string | undefined;
-      if (prov) end(`provider_${prov}`);
-    } else if (
-      eventName === "stage.completed" &&
-      payload?.stageId === "image_gen"
-    ) {
+      const cat = payload?.category as string | undefined;
+      if (prov && cat) end(`provider_${cat}_${prov}`);
+    } else if (eventName === "stage.completed" && payload?.stageId === "image_gen") {
       end("entry");
-      // Also close active provider timing in case image.gen_completed had a name mismatch
+      end("llmRouter");
+      end("vision");
       if (activeProvNodeId) end(activeProvNodeId);
-      end("dispatcher");
-      end("llmRouter");
-    } else if (
-      eventName === "stage.failed" &&
-      payload?.stageId === "image_gen"
-    ) {
+    } else if (eventName === "stage.failed" && payload?.stageId === "image_gen") {
       end("entry");
-      end("dispatcher");
       end("llmRouter");
+      end("vision");
       if (activeProvNodeId) end(activeProvNodeId);
     }
   }
@@ -2105,53 +2450,55 @@ export function ImageGenSubFlow({
     m: Map<string, NodeStatus>,
     currentActiveProv?: string | null,
   ): string | null | undefined {
-    // returns new activeProviderId when dispatcher_selected fires, undefined otherwise
-    // currentActiveProv overrides activeProviderRef.current (used in replay)
+    // returns new activeProviderId when provider_selected fires, undefined otherwise
     const activeProv =
       currentActiveProv !== undefined
         ? currentActiveProv
         : activeProviderRef.current;
     if (eventName === "stage.started" && payload?.stageId === "image_gen") {
-      // Only entry activates; dispatcher/llmRouter activate when image.gen_started fires
       m.set("entry", "active");
-    } else if (eventName === "vision.described") {
-      // Vision descriptor runs before image.gen_started — mark llmRouter as preparing
       m.set("llmRouter", "active");
-    } else if (eventName === "image.gen_started") {
-      // Routing phase: both dispatcher and LLM router activate together
-      m.set("dispatcher", "active");
-      m.set("llmRouter", "active");
-      m.set("entry", "active");
-    } else if (eventName === "image.dispatcher_selected") {
-      m.set("dispatcher", "completed");
+    } else if (eventName === "image.category_selected") {
       m.set("llmRouter", "completed");
-      const sel = payload?.provider as string | undefined;
-      if (sel) m.set(`provider_${sel}`, "active");
-      return sel ? `provider_${sel}` : null;
+      const cat = payload?.category as string | undefined;
+      if (cat) m.set(`branch_${cat}`, "active");
+    } else if (eventName === "image.provider_selected") {
+      const cat = payload?.category as string | undefined;
+      if (cat) {
+        m.set(`branch_${cat}`, "completed");
+        // If img2img and vision is enabled, start vision phase
+        if (cat === "img2img" && visionConfig.enabled) m.set("vision", "active");
+      }
+    } else if (eventName === "vision.described") {
+      m.set("vision", "completed");
+    } else if (eventName === "image.gen_started") {
+      const prov = payload?.provider as string | undefined;
+      const cat = payload?.category as string | undefined;
+      if (prov && cat) {
+        m.set(`provider_${cat}_${prov}`, "active");
+        m.set("entry", "active");
+        return `provider_${cat}_${prov}`;
+      }
     } else if (eventName === "image.gen_completed") {
       const prov = payload?.provider as string | undefined;
-      if (prov) m.set(`provider_${prov}`, "completed");
+      const cat = payload?.category as string | undefined;
+      if (prov && cat) m.set(`provider_${cat}_${prov}`, "completed");
       m.set("entry", "completed");
     } else if (eventName === "image.gen_failed") {
       const prov = payload?.provider as string | undefined;
-      if (prov) m.set(`provider_${prov}`, "failed");
+      const cat = payload?.category as string | undefined;
+      if (prov && cat) m.set(`provider_${cat}_${prov}`, "failed");
       m.set("entry", "failed");
-    } else if (
-      eventName === "stage.completed" &&
-      payload?.stageId === "image_gen"
-    ) {
+    } else if (eventName === "stage.completed" && payload?.stageId === "image_gen") {
       m.set("entry", "completed");
-      m.set("dispatcher", "completed");
       m.set("llmRouter", "completed");
       if (activeProv) m.set(activeProv, "completed");
-    } else if (
-      eventName === "stage.failed" &&
-      payload?.stageId === "image_gen"
-    ) {
+      if (m.get("vision") === "active") m.set("vision", "completed");
+    } else if (eventName === "stage.failed" && payload?.stageId === "image_gen") {
       m.set("entry", "failed");
-      m.set("dispatcher", "failed");
       m.set("llmRouter", "failed");
       if (activeProv) m.set(activeProv, "failed");
+      if (m.get("vision") === "active") m.set("vision", "failed");
     }
     return undefined;
   }
@@ -2179,15 +2526,11 @@ export function ImageGenSubFlow({
           if (evt.eventName === "image.gen_started" && evt.payload?.prompt) {
             replayedPendingPrompt = evt.payload.prompt as string;
           }
-          if (
-            evt.eventName === "image.dispatcher_selected" &&
-            evt.payload?.provider
-          ) {
+          if (evt.eventName === "image.provider_selected" && evt.payload?.provider) {
             const prov = evt.payload.provider as string;
-            const prompt =
-              (evt.payload.prompt as string | undefined) ??
-              replayedPendingPrompt;
-            replayedExecMap.set(`provider_${prov}`, {
+            const cat = (evt.payload.category as string | undefined) ?? "text2img";
+            const prompt = (evt.payload.prompt as string | undefined) ?? replayedPendingPrompt;
+            replayedExecMap.set(`provider_${cat}_${prov}`, {
               prompt,
               reasoning: (evt.payload.reasoning as string) ?? "",
               ts: evt.ts,
@@ -2224,8 +2567,9 @@ export function ImageGenSubFlow({
       }
 
       // Track which provider was selected and what prompt was sent
-      if (eventName === "image.dispatcher_selected" && payload?.provider) {
+      if (eventName === "image.provider_selected" && payload?.provider) {
         const prov = payload.provider as string;
+        const cat = (payload.category as string | undefined) ?? "text2img";
         const prompt =
           (payload.prompt as string | undefined) ??
           pendingPromptRef.current ??
@@ -2233,7 +2577,7 @@ export function ImageGenSubFlow({
         pendingPromptRef.current = null;
         setExecInfoMap((prev) => {
           const next = new Map(prev);
-          next.set(`provider_${prov}`, {
+          next.set(`provider_${cat}_${prov}`, {
             prompt,
             reasoning: (payload.reasoning as string) ?? "",
             ts: ts ?? Date.now(),
@@ -2276,99 +2620,92 @@ export function ImageGenSubFlow({
 
   // ─── Handlers ─────────────────────────────────────────────────────────────
 
-  async function handleToggle(name: string, enabled: boolean) {
-    setProviders((prev) =>
-      prev.map((p) => (p.name === name ? { ...p, enabled } : p)),
-    );
+  async function handleToggle(category: string, name: string, enabled: boolean) {
+    setCategories((prev) => ({
+      ...prev,
+      [category]: {
+        ...prev[category],
+        providers: (prev[category]?.providers ?? []).map((p) =>
+          p.name === name ? { ...p, enabled } : p,
+        ),
+      },
+    }));
     try {
-      await updateImageWorkflow(baseUrl, name, { enabled });
+      await updateImageCategoryProvider(baseUrl, category, name, { enabled });
     } catch {
       // revert on error
-      setProviders((prev) =>
-        prev.map((p) => (p.name === name ? { ...p, enabled: !enabled } : p)),
-      );
+      setCategories((prev) => ({
+        ...prev,
+        [category]: {
+          ...prev[category],
+          providers: (prev[category]?.providers ?? []).map((p) =>
+            p.name === name ? { ...p, enabled: !enabled } : p,
+          ),
+        },
+      }));
     }
   }
 
   async function handleAdd() {
+    if (!addingInCategory) return;
     setSaving(true);
-    const envVarName = `${form.name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_KEY`;
     try {
-      const result = await addImageWorkflow(baseUrl, {
+      const result = await addImageCategoryProvider(baseUrl, addingInCategory, {
         name: form.name,
         label: form.name.replace(/_/g, " "),
         executionMode: form.executionMode as "cloud" | "local",
-        generationType: form.generationType as "text2img" | "img2img" | "pulid",
         description: form.description,
         timeoutMs: form.timeoutMs,
-        envKey: envVarName,
         workflowPath: form.workflowPath || null,
         enabled: true,
-        priority: providers.length + 1,
       });
-      setProviders((prev) => [...prev, result.provider]);
-      setCreatedEnvVar(
-        `${envVarName}=${form.workflowPath || "/caminho/do/workflow.json"}`,
-      );
-      setAddingNew(false);
+      setCategories((prev) => ({
+        ...prev,
+        [addingInCategory]: {
+          ...prev[addingInCategory],
+          providers: [...(prev[addingInCategory]?.providers ?? []), result.provider],
+        },
+      }));
+      setAddingInCategory(null);
       setForm({
         name: "",
-        generationType: "text2img",
         executionMode: "local",
         workflowPath: "",
         description: "",
-        timeoutMs: 90000,
+        timeoutMs: 300000,
       });
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleSaveDispatcher() {
-    setSavingDispatcher(true);
-    try {
-      await updateImageDispatcher(baseUrl, {
-        strategy: dispatcherForm.strategy,
-        maxAttempts: dispatcherForm.maxAttempts,
-      });
-      setStrategy(dispatcherForm.strategy);
-      setMaxAttempts(dispatcherForm.maxAttempts);
-      setDispatcherPanelOpen(false);
-    } finally {
-      setSavingDispatcher(false);
-    }
-  }
-
   async function handleSaveEdit() {
-    if (!editingProviderName) return;
+    if (!editingProviderName || !editingCategory) return;
     setSavingEdit(true);
     try {
-      await updateImageWorkflow(baseUrl, editingProviderName, {
-        label: editForm.label,
-        prePrompt: editForm.prePrompt,
-        workflowPath: editForm.workflowPath || null,
-        generationType:
-          editForm.generationType as ImageWorkflowProvider["generationType"],
-        description: editForm.description,
-        timeoutMs: editForm.timeoutMs,
-      });
-      setProviders((prev) =>
-        prev.map((p) =>
-          p.name === editingProviderName
-            ? {
-                ...p,
-                label: editForm.label,
-                prePrompt: editForm.prePrompt,
-                workflowPath: editForm.workflowPath || null,
-                generationType:
-                  editForm.generationType as ImageWorkflowProvider["generationType"],
-                description: editForm.description,
-                timeoutMs: editForm.timeoutMs,
-              }
-            : p,
-        ),
+      const { provider: updated } = await updateImageCategoryProvider(
+        baseUrl,
+        editingCategory,
+        editingProviderName,
+        {
+          label: editForm.label,
+          description: editForm.description,
+          workflowPath: editForm.workflowPath || null,
+          timeoutMs: editForm.timeoutMs,
+          model: editForm.model || null,
+        },
       );
+      setCategories((prev) => ({
+        ...prev,
+        [editingCategory]: {
+          ...prev[editingCategory],
+          providers: (prev[editingCategory]?.providers ?? []).map((p) =>
+            p.name === editingProviderName ? updated : p,
+          ),
+        },
+      }));
       setEditingProviderName(null);
+      setEditingCategory(null);
       setConfirmDelete(false);
     } finally {
       setSavingEdit(false);
@@ -2376,14 +2713,21 @@ export function ImageGenSubFlow({
   }
 
   async function handleDeleteWorkflow() {
-    if (!editingProviderName) return;
+    if (!editingProviderName || !editingCategory) return;
     setDeletingWorkflow(true);
     try {
-      await deleteImageWorkflow(baseUrl, editingProviderName);
-      setProviders((prev) =>
-        prev.filter((p) => p.name !== editingProviderName),
-      );
+      await deleteImageCategoryProvider(baseUrl, editingCategory, editingProviderName);
+      setCategories((prev) => ({
+        ...prev,
+        [editingCategory]: {
+          ...prev[editingCategory],
+          providers: (prev[editingCategory]?.providers ?? []).filter(
+            (p) => p.name !== editingProviderName,
+          ),
+        },
+      }));
       setEditingProviderName(null);
+      setEditingCategory(null);
       setConfirmDelete(false);
     } catch {
       setConfirmDelete(false);
@@ -2419,32 +2763,44 @@ export function ImageGenSubFlow({
   const { nodes: baseNodes, edges } = useMemo(
     () =>
       buildNodes(
-        providers,
-        strategy,
-        maxAttempts,
+        categories,
         routerConfig,
         visionConfig,
         handleToggle,
-        () => setAddingNew(true),
-        () => {
-          setDispatcherPanelOpen(true);
-          setEditingProviderName(null);
-          setRouterPanelOpen(false);
-        },
+        (cat) => setAddingInCategory(cat),
         () => {
           setRouterPanelOpen(true);
-          setDispatcherPanelOpen(false);
+          setVisionPanelOpen(false);
           setEditingProviderName(null);
+          setEditingCategory(null);
         },
-        (name) => {
-          setEditingProviderName(name);
-          setDispatcherPanelOpen(false);
-          setAddingNew(false);
+        () => {
+          setVisionPanelOpen(true);
           setRouterPanelOpen(false);
+          setEditingProviderName(null);
+          setEditingCategory(null);
+        },
+        (category, name) => {
+          setEditingCategory(category);
+          setEditingProviderName(name);
+          setAddingInCategory(null);
+          setRouterPanelOpen(false);
+          setVisionPanelOpen(false);
+          setFallbackPanelCategory(null);
+        },
+        (category) => {
+          const existing = categories[category]?.fallback;
+          setFallbackForm(existing ?? { name: "", label: "", executionMode: "cloud", timeoutMs: 60000 });
+          setFallbackPanelCategory(category);
+          setEditingProviderName(null);
+          setEditingCategory(null);
+          setRouterPanelOpen(false);
+          setVisionPanelOpen(false);
+          setAddingInCategory(null);
         },
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [providers, strategy, maxAttempts, routerConfig, visionConfig],
+    [categories, routerConfig, visionConfig],
   );
 
   const liveNodes = useMemo(() => {
@@ -2452,14 +2808,6 @@ export function ImageGenSubFlow({
     const globalLocalTimeoutMs =
       definition?.resourcePolicy?.localTimeoutMs ?? 90_000;
     const routerLimitMs = routerConfig?.timeoutMs ?? 20_000;
-
-    // Vision descriptor timing
-    const visionT = nodeTimes.get("vision");
-    const visionDurationMs = visionT
-      ? visionT.endTs !== undefined
-        ? visionT.endTs - visionT.startTs
-        : undefined
-      : undefined;
 
     return baseNodes.map((n) => {
       const status = nodeStatuses.get(n.id) ?? "idle";
@@ -2472,13 +2820,20 @@ export function ImageGenSubFlow({
             ? now - t.startTs
             : undefined
         : undefined;
-      // Per-provider timeoutMs from config; fall back to global localTimeoutMs
+      // Per-node timeout limit
       let limitMs: number | undefined;
-      if (n.id === "dispatcher" || n.id === "llmRouter") {
+      if (n.id === "vision" || n.id === "visionFallback") {
+        limitMs = visionConfig.timeoutMs ?? 60_000;
+      } else if (n.id === "llmRouter") {
+        limitMs = routerLimitMs;
+      } else if (n.id.startsWith("branch_")) {
         limitMs = routerLimitMs;
       } else if (n.id.startsWith("provider_")) {
-        const provName = n.id.slice("provider_".length);
-        const prov = providers.find((p) => p.name === provName);
+        // id format: provider_{category}_{name}
+        const withoutPrefix = n.id.slice("provider_".length);
+        const [cat, ...nameParts] = withoutPrefix.split("_");
+        const provName = nameParts.join("_");
+        const prov = (categories[cat]?.providers ?? []).find((p) => p.name === provName);
         limitMs = prov?.timeoutMs ?? globalLocalTimeoutMs;
       }
       const base = {
@@ -2489,7 +2844,6 @@ export function ImageGenSubFlow({
           isActiveProvider,
           durationMs,
           limitMs,
-          ...(n.id === "llmRouter" ? { visionDurationMs } : {}),
           ...(execInfoMap.has(n.id)
             ? { lastExecution: execInfoMap.get(n.id) }
             : {}),
@@ -2522,47 +2876,48 @@ export function ImageGenSubFlow({
     nodeTimes,
     definition,
     routerConfig,
+    visionConfig,
+    categories,
     tick,
   ]);
 
   // ─── Highlight execution path on edges ────────────────────────────────────
 
   const liveEdges = useMemo(() => {
-    const dispatcherStatus = nodeStatuses.get("dispatcher") ?? "idle";
     const llmRouterStatus = nodeStatuses.get("llmRouter") ?? "idle";
-    const dispatcherDone = dispatcherStatus !== "idle";
-    const llmRouterDone = llmRouterStatus !== "idle";
-    const selectedProv = activeProviderId; // e.g. "provider_custom_image_z_image_turbo"
+    const text2imgBranchStatus = nodeStatuses.get("branch_text2img") ?? "idle";
+    const img2imgBranchStatus = nodeStatuses.get("branch_img2img") ?? "idle";
+    const visionStatus = nodeStatuses.get("vision") ?? "idle";
+    const visionFallbackStatus = nodeStatuses.get("visionFallback") ?? "idle";
+    const llmRouterActive = llmRouterStatus !== "idle";
+    const text2imgActive = text2imgBranchStatus !== "idle";
+    const img2imgActive = img2imgBranchStatus !== "idle";
+    const visionActive = visionStatus !== "idle";
+    const visionFallbackActive = visionFallbackStatus !== "idle";
+    const selectedProv = activeProviderId;
 
     return edges.map((e) => {
-      if (e.id === "entry→dispatcher" && dispatcherDone) {
-        return {
-          ...e,
-          animated: true,
-          style: { ...e.style, stroke: "#f97316dd", strokeWidth: 2.5 },
-        };
+      if (e.id === "entry→llmRouter" && llmRouterActive) {
+        return { ...e, animated: true, style: { ...e.style, stroke: "#22d3eedd", strokeWidth: 2.5 } };
       }
-      // dispatcher→llmRouter animates when dispatcher is active OR when llmRouter is active/completed
-      if (
-        e.id === "dispatcher→llmRouter" &&
-        (dispatcherDone || llmRouterDone)
-      ) {
-        return {
-          ...e,
-          animated: true,
-          style: { ...e.style, stroke: "#c026d3dd", strokeWidth: 2.5 },
-        };
+      if (e.id === "llmRouter→branch_text2img" && text2imgActive) {
+        return { ...e, animated: true, style: { ...e.style, stroke: "#f97316dd", strokeWidth: 2.5 } };
+      }
+      if (e.id === "llmRouter→branch_img2img" && img2imgActive) {
+        return { ...e, animated: true, style: { ...e.style, stroke: "#a855f7dd", strokeWidth: 2.5 } };
+      }
+      if (e.id === "branch_img2img→vision" && visionActive) {
+        return { ...e, animated: true, style: { ...e.style, stroke: "#a855f7dd", strokeWidth: 2, strokeDasharray: undefined } };
+      }
+      if (e.id === "branch_img2img→visionFallback" && visionFallbackActive) {
+        return { ...e, animated: true, style: { ...e.style, stroke: "#a855f7bb", strokeWidth: 2, strokeDasharray: undefined } };
       }
       if (selectedProv && e.target === selectedProv) {
         const isCloud = e.style?.stroke?.toString().includes("22d3ee");
         return {
           ...e,
           animated: true,
-          style: {
-            ...e.style,
-            stroke: isCloud ? "#22d3eedd" : "#f97316dd",
-            strokeWidth: 3,
-          },
+          style: { ...e.style, stroke: isCloud ? "#22d3eedd" : (selectedProv.includes("img2img") ? "#a855f7dd" : "#f97316dd"), strokeWidth: 3 },
         };
       }
       return e;
@@ -2646,22 +3001,38 @@ export function ImageGenSubFlow({
           📂 Scan Pasta
         </button>
 
-        {/* Add button */}
+        {/* Add buttons per category */}
         <button
-          onClick={() => setAddingNew(true)}
+          onClick={() => setAddingInCategory("text2img")}
           style={{
             background: "#f9731422",
             border: "1px solid #f9731466",
             color: "#f97316",
             fontFamily: "monospace",
             fontSize: 11,
-            padding: "4px 12px",
+            padding: "4px 10px",
             borderRadius: 6,
             cursor: "pointer",
             flexShrink: 0,
           }}
         >
-          + Adicionar workflow
+          + txt→img
+        </button>
+        <button
+          onClick={() => setAddingInCategory("img2img")}
+          style={{
+            background: "#a855f722",
+            border: "1px solid #a855f766",
+            color: "#a855f7",
+            fontFamily: "monospace",
+            fontSize: 11,
+            padding: "4px 10px",
+            borderRadius: 6,
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
+        >
+          + img→img
         </button>
       </div>
 
@@ -3108,13 +3479,15 @@ export function ImageGenSubFlow({
         <AnimatePresence>
           {editingProviderName &&
             (() => {
-              const editingProvider = providers.find(
-                (p) => p.name === editingProviderName,
-              );
+              const editingProvider = (
+                categories[editingCategory ?? ""]?.providers ?? []
+              ).find((p) => p.name === editingProviderName);
               const accentColor =
                 editingProvider?.executionMode === "cloud"
                   ? "#22d3ee"
-                  : "#f97316";
+                  : editingCategory === "img2img"
+                    ? "#a855f7"
+                    : "#f97316";
               return (
                 <motion.div
                   key={`edit-${editingProviderName}`}
@@ -3242,7 +3615,10 @@ export function ImageGenSubFlow({
                       </button>
                     </div>
                     <button
-                      onClick={() => setEditingProviderName(null)}
+                      onClick={() => {
+                        setEditingProviderName(null);
+                        setEditingCategory(null);
+                      }}
                       style={{
                         background: "transparent",
                         border: "none",
@@ -3323,72 +3699,6 @@ export function ImageGenSubFlow({
                         >
                           Caminho absoluto para o arquivo .json exportado do
                           ComfyUI.
-                        </div>
-                      </div>
-
-                      {/* Tipo de geração */}
-                      <div>
-                        <label
-                          style={{ ...labelStyle, color: `${accentColor}aa` }}
-                        >
-                          Tipo de geração
-                        </label>
-                        <select
-                          style={{
-                            ...inputStyle,
-                            borderColor: `${accentColor}33`,
-                            cursor: "pointer",
-                          }}
-                          value={editForm.generationType}
-                          onChange={(e) =>
-                            setEditForm((f) => ({
-                              ...f,
-                              generationType: e.target.value,
-                            }))
-                          }
-                        >
-                          <option value="text2img">text2img</option>
-                          <option value="img2img">img2img</option>
-                          <option value="pulid">pulid</option>
-                        </select>
-                      </div>
-
-                      {/* Pré-prompt obrigatório */}
-                      <div>
-                        <label
-                          style={{ ...labelStyle, color: `${accentColor}aa` }}
-                        >
-                          Pré-prompt obrigatório
-                        </label>
-                        <textarea
-                          style={{
-                            ...inputStyle,
-                            borderColor: `${accentColor}44`,
-                            resize: "vertical",
-                            minHeight: 90,
-                            lineHeight: 1.6,
-                          }}
-                          value={editForm.prePrompt}
-                          onChange={(e) =>
-                            setEditForm((f) => ({
-                              ...f,
-                              prePrompt: e.target.value,
-                            }))
-                          }
-                          placeholder="Texto sempre adicionado no início do prompt antes de enviar ao ComfyUI…"
-                        />
-                        <div
-                          style={{
-                            marginTop: 4,
-                            fontSize: 8,
-                            color: "#ffffff22",
-                            fontFamily: "monospace",
-                            lineHeight: 1.5,
-                          }}
-                        >
-                          Este texto é concatenado automaticamente antes do
-                          prompt gerado pelo LLM. Use para forçar estilos,
-                          qualidade ou instruções fixas do workflow.
                         </div>
                       </div>
 
@@ -3498,6 +3808,7 @@ export function ImageGenSubFlow({
                         <button
                           onClick={() => {
                             setEditingProviderName(null);
+                            setEditingCategory(null);
                             setConfirmDelete(false);
                           }}
                           style={{
@@ -3621,9 +3932,9 @@ export function ImageGenSubFlow({
             })()}
         </AnimatePresence>
 
-        {/* Dispatcher config panel */}
+        {/* LLM Router config panel */}
         <AnimatePresence>
-          {dispatcherPanelOpen && (
+          {routerPanelOpen && (
             <motion.div
               initial={{ x: 320, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
@@ -3632,39 +3943,38 @@ export function ImageGenSubFlow({
               style={{
                 width: panelWidth,
                 flexShrink: 0,
-                background: "#0a0014",
-                borderLeft: "1px solid #c026d344",
+                background: "#080f12",
+                borderLeft: "1px solid #22d3ee44",
                 display: "flex",
                 flexDirection: "column",
                 overflow: "hidden",
                 position: "relative",
               }}
             >
-              <ResizeHandle onMouseDown={onResizeMouseDown} color="#c026d3" />
-              {/* Fixed header + zoom controls */}
+              <ResizeHandle onMouseDown={onResizeMouseDown} color="#22d3ee" />
+              {/* Header + zoom */}
               <div
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: 8,
                   padding: "12px 16px",
-                  borderBottom: "1px solid #c026d322",
+                  borderBottom: "1px solid #22d3ee22",
                   flexShrink: 0,
-                  background: "#0a0014",
                 }}
               >
-                <span style={{ fontSize: 16 }}>⎇</span>
+                <span style={{ fontSize: 14 }}>🤖</span>
                 <span
                   style={{
                     fontFamily: "monospace",
                     fontSize: 13,
                     fontWeight: 700,
-                    color: "#c026d3",
+                    color: "#22d3ee",
                     letterSpacing: "0.08em",
                     flex: 1,
                   }}
                 >
-                  Dispatcher
+                  LLM Router
                 </span>
                 {/* Zoom controls */}
                 <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -3729,432 +4039,6 @@ export function ImageGenSubFlow({
                   </button>
                 </div>
                 <button
-                  onClick={() => setDispatcherPanelOpen(false)}
-                  style={{
-                    background: "transparent",
-                    border: "none",
-                    color: "#ffffff44",
-                    fontSize: 18,
-                    cursor: "pointer",
-                    padding: 0,
-                    lineHeight: 1,
-                    marginLeft: 2,
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-
-              {/* Scrollable content (zoom applied here) */}
-              <div style={{ overflowY: "auto", flex: 1 }}>
-                <div
-                  style={{
-                    zoom: panelZoom,
-                    padding: 20,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 16,
-                  }}
-                >
-                  {/* Bloco: O que é */}
-                  <Section title="O que é o Dispatcher?" color="#c026d3">
-                    <p style={infoText}>
-                      O Dispatcher é o{" "}
-                      <em style={{ color: "#c026d3" }}>
-                        roteador de disponibilidade
-                      </em>{" "}
-                      do sub-fluxo de geração de imagem. Ele recebe a requisição
-                      e escolhe qual provider/workflow executar com base em{" "}
-                      <strong style={{ color: "#ffffff99" }}>
-                        regras determinísticas de disponibilidade
-                      </strong>{" "}
-                      — sem envolver o LLM nessa decisão.
-                    </p>
-                  </Section>
-
-                  {/* Bloco: Como decide */}
-                  <Section title="Como ele decide?" color="#22d3ee">
-                    <p style={infoText}>
-                      A decisão é feita em tempo real, na hora em que a geração
-                      é solicitada. O dispatcher verifica, nesta ordem de
-                      prioridade:
-                    </p>
-                    <div
-                      style={{
-                        marginTop: 10,
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 6,
-                      }}
-                    >
-                      <DecisionStep
-                        step="1"
-                        color="#f97316"
-                        condition="ComfyUI online + workflow configurado?"
-                        result="→ comfyui_reference"
-                        note="Cobre txt2img (placeholder 1×1) e img2img com foto do cliente."
-                      />
-                      <DecisionStep
-                        step="2"
-                        color="#22d3ee"
-                        condition="Tem foto de referência + FAL_KEY configurado?"
-                        result="→ fal_pulid (cloud)"
-                        note="Fallback cloud quando ComfyUI está offline ou sem workflow."
-                      />
-                      <DecisionStep
-                        step="3"
-                        color="#c026d3"
-                        condition="ComfyUI online mas sem workflow?"
-                        result="→ comfyui (básico)"
-                        note="txt2img legado via detecção automática de modelo GGUF."
-                      />
-                      <DecisionStep
-                        step="✗"
-                        color="#ef4444"
-                        condition="Nenhuma opção disponível"
-                        result="→ image.gen_failed"
-                        note="Evento de falha emitido no EventBus. Orquestrador omite imagem."
-                      />
-                    </div>
-                    <div
-                      style={{ ...infoText, marginTop: 10, color: "#ffffff44" }}
-                    >
-                      A ordem acima é fixa no código (
-                      <code style={{ color: "#c026d3" }}>
-                        selectAutoImageProvider
-                      </code>{" "}
-                      em{" "}
-                      <code style={{ color: "#ffffff55" }}>
-                        imageProvider.js
-                      </code>
-                      ). A variável de ambiente{" "}
-                      <code style={{ color: "#22d3ee" }}>IMAGE_PROVIDER</code>{" "}
-                      pode forçar um provider específico ignorando a ordem.
-                    </div>
-                  </Section>
-
-                  {/* Bloco: LLM envolvido? */}
-                  <Section
-                    title="O LLM decide qual provider usar?"
-                    color="#22c55e"
-                  >
-                    <p style={infoText}>
-                      <strong style={{ color: "#ef4444" }}>Não.</strong> O LLM
-                      nunca é consultado para escolher o provider de imagem. Ele
-                      atua <em>antes</em> do dispatcher, apenas para gerar o{" "}
-                      <strong style={{ color: "#f97316" }}>
-                        prompt textual
-                      </strong>{" "}
-                      que descreve a imagem a ser criada. A escolha do pipeline
-                      de execução é 100% baseada em disponibilidade de
-                      infraestrutura.
-                    </p>
-                    <div
-                      style={{
-                        marginTop: 8,
-                        background: "#001a22",
-                        border: "1px solid #22c55e22",
-                        borderRadius: 6,
-                        padding: "8px 10px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontFamily: "monospace",
-                          fontSize: 8,
-                          color: "#22c55eaa",
-                          marginBottom: 4,
-                          letterSpacing: "0.06em",
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        Fluxo real
-                      </div>
-                      <div
-                        style={{
-                          fontFamily: "monospace",
-                          fontSize: 8,
-                          color: "#ffffff66",
-                          lineHeight: 1.8,
-                        }}
-                      >
-                        LLM →{" "}
-                        <span style={{ color: "#f97316" }}>image_prompt</span> →
-                        image_qc (reparo) →{" "}
-                        <span style={{ color: "#c026d3" }}>Dispatcher</span> →
-                        verifica infra → executa provider →{" "}
-                        <span style={{ color: "#22c55e" }}>imagem gerada</span>
-                      </div>
-                    </div>
-                  </Section>
-
-                  {/* Bloco: Quando um provider falha */}
-                  <Section title="Fallback automático" color="#f97316">
-                    <p style={infoText}>
-                      Cada provider tem um{" "}
-                      <strong style={{ color: "#f97316" }}>
-                        fallbackProvider
-                      </strong>{" "}
-                      definido internamente. Se o provider primário lançar uma
-                      exceção durante a execução (ex: ComfyUI trava no meio da
-                      geração), o dispatcher tenta automaticamente o fallback
-                      antes de declarar falha.
-                    </p>
-                    <div
-                      style={{ ...infoText, marginTop: 8, color: "#ffffff44" }}
-                    >
-                      Providers <em>desabilitados</em> (toggle off neste canvas)
-                      são pulados completamente — nem chegam a ser tentados.
-                    </div>
-                  </Section>
-
-                  {/* Separador */}
-                  <div
-                    style={{ borderTop: "1px solid #c026d322", paddingTop: 16 }}
-                  >
-                    <div
-                      style={{
-                        fontFamily: "monospace",
-                        fontSize: 9,
-                        color: "#c026d3aa",
-                        letterSpacing: "0.08em",
-                        textTransform: "uppercase",
-                        marginBottom: 14,
-                      }}
-                    >
-                      Configuração
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 14,
-                      }}
-                    >
-                      {/* Strategy */}
-                      <div>
-                        <label style={{ ...labelStyle, color: "#c026d3aa" }}>
-                          Estratégia de seleção
-                        </label>
-                        <select
-                          style={{
-                            ...inputStyle,
-                            border: "1px solid #c026d344",
-                            cursor: "pointer",
-                          }}
-                          value={dispatcherForm.strategy}
-                          onChange={(e) =>
-                            setDispatcherForm((f) => ({
-                              ...f,
-                              strategy: e.target.value,
-                            }))
-                          }
-                        >
-                          <option value="priority_list">
-                            priority_list — ordem de prioridade (atual)
-                          </option>
-                          <option value="round_robin">
-                            round_robin — rodízio entre habilitados
-                          </option>
-                          <option value="random">
-                            random — escolha aleatória
-                          </option>
-                          <option value="fastest_first">
-                            fastest_first — histórico de latência
-                          </option>
-                        </select>
-                        <div
-                          style={{
-                            marginTop: 4,
-                            fontSize: 8,
-                            color: "#ffffff33",
-                            fontFamily: "monospace",
-                          }}
-                        >
-                          Salvo em <code>orchestrator.flow.json</code>. A lógica
-                          atual usa sempre{" "}
-                          <code style={{ color: "#c026d3" }}>
-                            priority_list
-                          </code>
-                          ; outros modos são preparação para versões futuras do
-                          engine.
-                        </div>
-                      </div>
-
-                      {/* Max attempts */}
-                      <div>
-                        <label style={{ ...labelStyle, color: "#c026d3aa" }}>
-                          Máximo de tentativas
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={10}
-                          style={{
-                            ...inputStyle,
-                            border: "1px solid #c026d344",
-                            width: 80,
-                          }}
-                          value={dispatcherForm.maxAttempts}
-                          onChange={(e) => {
-                            const v = parseInt(e.target.value, 10);
-                            if (!isNaN(v) && v >= 1)
-                              setDispatcherForm((f) => ({
-                                ...f,
-                                maxAttempts: v,
-                              }));
-                          }}
-                        />
-                        <div
-                          style={{
-                            marginTop: 4,
-                            fontSize: 8,
-                            color: "#ffffff33",
-                            fontFamily: "monospace",
-                          }}
-                        >
-                          Providers a tentar (incluindo fallbacks) antes de
-                          emitir{" "}
-                          <code style={{ color: "#ef4444" }}>
-                            image.gen_failed
-                          </code>
-                          .
-                        </div>
-                      </div>
-
-                      {/* Save */}
-                      <button
-                        onClick={handleSaveDispatcher}
-                        disabled={savingDispatcher}
-                        style={{
-                          background: savingDispatcher
-                            ? "#1a0028"
-                            : "#c026d322",
-                          border: `1px solid ${savingDispatcher ? "#c026d333" : "#c026d366"}`,
-                          color: savingDispatcher ? "#c026d377" : "#c026d3",
-                          fontFamily: "monospace",
-                          fontSize: 11,
-                          fontWeight: 700,
-                          padding: "8px 0",
-                          borderRadius: 6,
-                          cursor: savingDispatcher ? "not-allowed" : "pointer",
-                          letterSpacing: "0.06em",
-                        }}
-                      >
-                        {savingDispatcher ? "Salvando…" : "Salvar configuração"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* LLM Router config panel */}
-        <AnimatePresence>
-          {routerPanelOpen && (
-            <motion.div
-              initial={{ x: 320, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 320, opacity: 0 }}
-              transition={{ duration: 0.22 }}
-              style={{
-                width: panelWidth,
-                flexShrink: 0,
-                background: "#080f12",
-                borderLeft: "1px solid #22d3ee44",
-                display: "flex",
-                flexDirection: "column",
-                overflow: "hidden",
-                position: "relative",
-              }}
-            >
-              <ResizeHandle onMouseDown={onResizeMouseDown} color="#22d3ee" />
-              {/* Header + zoom */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "12px 16px",
-                  borderBottom: "1px solid #22d3ee22",
-                  flexShrink: 0,
-                }}
-              >
-                <span style={{ fontSize: 14 }}>🤖</span>
-                <span
-                  style={{
-                    fontFamily: "monospace",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: "#22d3ee",
-                    letterSpacing: "0.08em",
-                    flex: 1,
-                  }}
-                >
-                  LLM Router
-                </span>
-                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  <button
-                    onClick={() =>
-                      setPanelZoom((z) => Math.max(0.7, +(z - 0.1).toFixed(1)))
-                    }
-                    title="Diminuir zoom"
-                    style={{
-                      background: "#ffffff11",
-                      border: "1px solid #ffffff22",
-                      color: "#ffffff66",
-                      fontFamily: "monospace",
-                      fontSize: 12,
-                      width: 22,
-                      height: 22,
-                      borderRadius: 4,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      padding: 0,
-                    }}
-                  >
-                    −
-                  </button>
-                  <span
-                    style={{
-                      fontFamily: "monospace",
-                      fontSize: 9,
-                      color: "#ffffff44",
-                      minWidth: 28,
-                      textAlign: "center",
-                    }}
-                  >
-                    {Math.round(panelZoom * 100)}%
-                  </span>
-                  <button
-                    onClick={() =>
-                      setPanelZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)))
-                    }
-                    title="Aumentar zoom"
-                    style={{
-                      background: "#ffffff11",
-                      border: "1px solid #ffffff22",
-                      color: "#ffffff66",
-                      fontFamily: "monospace",
-                      fontSize: 12,
-                      width: 22,
-                      height: 22,
-                      borderRadius: 4,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      padding: 0,
-                    }}
-                  >
-                    +
-                  </button>
-                </div>
-                <button
                   onClick={() => setRouterPanelOpen(false)}
                   style={{
                     background: "transparent",
@@ -4199,31 +4083,6 @@ export function ImageGenSubFlow({
                       Se o modelo estiver vazio, a seleção é{" "}
                       <em>determinística</em>: o dispatcher usa apenas
                       disponibilidade e prioridade numérica.
-                    </div>
-                  </Section>
-
-                  {/* Vision Descriptor */}
-                  <Section title="👁 Vision Descriptor" color="#a855f7">
-                    <p style={infoText}>
-                      O LLM Router também é responsável por{" "}
-                      <strong style={{ color: "#a855f7" }}>
-                        descrever imagens de referência
-                      </strong>{" "}
-                      usando um modelo multimodal antes de construir o prompt
-                      final para o ComfyUI. O modelo vision analisa a foto do
-                      cliente e gera uma descrição detalhada (cabelo, pele,
-                      traços, roupa) que substitui o texto genérico{" "}
-                      <em style={{ color: "#f97316" }}>
-                        "Transform the person from the reference photo"
-                      </em>
-                      .
-                    </p>
-                    <div
-                      style={{ ...infoText, marginTop: 6, color: "#ffffff33" }}
-                    >
-                      Apenas modelos com capacidade multimodal aparecem no
-                      seletor abaixo. Modelos locais (Ollama) mantêm o lock de
-                      GPU durante a chamada.
                     </div>
                   </Section>
 
@@ -4367,244 +4226,400 @@ export function ImageGenSubFlow({
                     </div>
                   </div>
 
-                  {/* Vision Descriptor configuration */}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Vision Descriptor panel */}
+        <AnimatePresence>
+          {visionPanelOpen && (
+            <motion.div
+              initial={{ x: 320, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 320, opacity: 0 }}
+              transition={{ duration: 0.22 }}
+              style={{
+                width: panelWidth,
+                flexShrink: 0,
+                background: "#080f12",
+                borderLeft: "1px solid #a855f744",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                position: "relative",
+              }}
+            >
+              <ResizeHandle onMouseDown={onResizeMouseDown} color="#a855f7" />
+              {/* Header */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "12px 16px",
+                  borderBottom: "1px solid #a855f722",
+                  flexShrink: 0,
+                }}
+              >
+                <span style={{ fontSize: 14 }}>👁</span>
+                <span
+                  style={{
+                    fontFamily: "monospace",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#a855f7",
+                    letterSpacing: "0.08em",
+                    flex: 1,
+                  }}
+                >
+                  Vision Descriptor
+                </span>
+                <button
+                  onClick={() => setVisionPanelOpen(false)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "#ffffff44",
+                    cursor: "pointer",
+                    fontSize: 16,
+                    lineHeight: 1,
+                    padding: 4,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Scrollable content */}
+              <div
+                style={{
+                  overflowY: "auto",
+                  flex: 1,
+                  padding: 16,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 16,
+                }}
+              >
+                <Section title="👁 Vision Descriptor" color="#a855f7">
+                  <p style={infoText}>
+                    Descreve imagens de referência usando um modelo{" "}
+                    <strong style={{ color: "#a855f7" }}>multimodal</strong>{" "}
+                    antes de construir o prompt para o ComfyUI. O modelo vision
+                    analisa a foto do cliente e gera uma descrição detalhada
+                    (cabelo, pele, traços, roupa) que substitui o texto genérico{" "}
+                    <em style={{ color: "#f97316" }}>
+                      "Transform the person from the reference photo"
+                    </em>
+                    .
+                  </p>
                   <div
-                    style={{ borderTop: "1px solid #a855f722", paddingTop: 16 }}
+                    style={{ ...infoText, marginTop: 6, color: "#ffffff33" }}
                   >
-                    <div
-                      style={{
-                        fontFamily: "monospace",
-                        fontSize: 9,
-                        color: "#a855f7aa",
-                        letterSpacing: "0.08em",
-                        textTransform: "uppercase",
-                        marginBottom: 14,
-                      }}
-                    >
-                      👁 Vision Descriptor
-                    </div>
+                    Apenas modelos com capacidade multimodal aparecem no seletor
+                    abaixo. Modelos locais (Ollama) mantêm o lock de GPU durante
+                    a chamada.
+                  </div>
+                </Section>
+
+                <div
+                  style={{ borderTop: "1px solid #a855f722", paddingTop: 16 }}
+                >
+                  <div
+                    style={{
+                      fontFamily: "monospace",
+                      fontSize: 9,
+                      color: "#a855f7aa",
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      marginBottom: 14,
+                    }}
+                  >
+                    Configuração
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 14,
+                    }}
+                  >
+                    {/* Enable toggle */}
                     <div
                       style={{
                         display: "flex",
-                        flexDirection: "column",
-                        gap: 14,
+                        alignItems: "center",
+                        gap: 10,
                       }}
                     >
-                      {/* Enable toggle */}
-                      <div
+                      <button
+                        onClick={() =>
+                          setVisionForm((f) => ({
+                            ...f,
+                            enabled: !f.enabled,
+                          }))
+                        }
                         style={{
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                          padding: 0,
                           display: "flex",
                           alignItems: "center",
-                          gap: 10,
                         }}
                       >
-                        <button
-                          onClick={() =>
-                            setVisionForm((f) => ({
-                              ...f,
-                              enabled: !f.enabled,
-                            }))
-                          }
-                          style={{
-                            background: "transparent",
-                            border: "none",
-                            cursor: "pointer",
-                            padding: 0,
-                            display: "flex",
-                            alignItems: "center",
-                          }}
-                        >
-                          {visionForm.enabled ? (
-                            <ToggleRight
-                              size={22}
-                              style={{ color: "#a855f7" }}
-                            />
-                          ) : (
-                            <ToggleLeft
-                              size={22}
-                              style={{ color: "#555555" }}
-                            />
-                          )}
-                        </button>
-                        <span
-                          style={{
-                            fontFamily: "monospace",
-                            fontSize: 10,
-                            color: visionForm.enabled ? "#a855f7" : "#555555",
-                          }}
-                        >
-                          {visionForm.enabled ? "Habilitado" : "Desabilitado"}
-                        </span>
-                      </div>
+                        {visionForm.enabled ? (
+                          <ToggleRight size={22} style={{ color: "#a855f7" }} />
+                        ) : (
+                          <ToggleLeft size={22} style={{ color: "#555555" }} />
+                        )}
+                      </button>
+                      <span
+                        style={{
+                          fontFamily: "monospace",
+                          fontSize: 10,
+                          color: visionForm.enabled ? "#a855f7" : "#555555",
+                        }}
+                      >
+                        {visionForm.enabled ? "Habilitado" : "Desabilitado"}
+                      </span>
+                    </div>
 
-                      {/* Provider */}
-                      <div>
-                        <label style={{ ...labelStyle, color: "#a855f7aa" }}>
-                          Provider (vision)
-                        </label>
-                        <select
-                          style={{
-                            ...inputStyle,
-                            borderColor: "#a855f733",
-                            cursor: "pointer",
-                          }}
-                          value={visionForm.provider}
-                          onChange={(e) =>
-                            setVisionForm((f) => ({
-                              ...f,
+                    {/* Provider */}
+                    <div>
+                      <label style={{ ...labelStyle, color: "#a855f7aa" }}>
+                        Provider (vision)
+                      </label>
+                      <select
+                        style={{
+                          ...inputStyle,
+                          borderColor: "#a855f733",
+                          cursor: "pointer",
+                        }}
+                        value={visionForm.provider}
+                        onChange={(e) =>
+                          setVisionForm((f) => ({
+                            ...f,
+                            provider: e.target.value,
+                            model: "",
+                          }))
+                        }
+                      >
+                        <option value="ollama">ollama (local — GPU lock)</option>
+                        <option value="anthropic">anthropic (cloud)</option>
+                        <option value="openai">openai (cloud)</option>
+                      </select>
+                    </div>
+
+                    {/* Model — only vision-capable */}
+                    <div>
+                      <label style={{ ...labelStyle, color: "#a855f7aa" }}>
+                        Modelo vision
+                      </label>
+                      <ModelSelector
+                        baseUrl={baseUrl}
+                        provider={visionForm.provider}
+                        value={visionForm.model ?? ""}
+                        onChange={(m) =>
+                          setVisionForm((f) => ({ ...f, model: m }))
+                        }
+                        color="#a855f7"
+                        visionOnly
+                      />
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontSize: 8,
+                          color: "#ffffff33",
+                          fontFamily: "monospace",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        Apenas modelos multimodais. Para Ollama: instale com{" "}
+                        <code style={{ color: "#a855f7" }}>
+                          ollama pull llama3.2-vision:11b
+                        </code>
+                        .
+                      </div>
+                    </div>
+
+                    {/* Timeout */}
+                    <div>
+                      <label style={{ ...labelStyle, color: "#a855f7aa" }}>
+                        Timeout (ms)
+                      </label>
+                      <input
+                        type="number"
+                        style={{
+                          ...inputStyle,
+                          borderColor: "#a855f733",
+                          width: 120,
+                        }}
+                        value={visionForm.timeoutMs ?? 60000}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          setVisionForm((f) => ({
+                            ...f,
+                            timeoutMs: isNaN(v) ? 60000 : v,
+                          }));
+                        }}
+                        onBlur={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          const clamped = isNaN(v)
+                            ? 60000
+                            : Math.min(300000, Math.max(5000, v));
+                          setVisionForm((f) => ({
+                            ...f,
+                            timeoutMs: clamped,
+                          }));
+                        }}
+                      />
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontSize: 8,
+                          color: "#ffffff33",
+                          fontFamily: "monospace",
+                        }}
+                      >
+                        Se exceder o tempo, o prompt original é mantido (sem
+                        falha crítica).
+                      </div>
+                    </div>
+
+                    {/* Fallback provider */}
+                    <div>
+                      <label style={{ ...labelStyle, color: "#a855f7aa" }}>
+                        Fallback provider
+                      </label>
+                      <select
+                        style={{
+                          ...inputStyle,
+                          borderColor: "#a855f733",
+                          cursor: "pointer",
+                        }}
+                        value={visionForm.fallback?.provider ?? "openai"}
+                        onChange={(e) =>
+                          setVisionForm((f) => ({
+                            ...f,
+                            fallback: {
+                              ...f.fallback,
                               provider: e.target.value,
                               model: "",
-                            }))
-                          }
-                        >
-                          <option value="ollama">
-                            ollama (local — GPU lock)
-                          </option>
-                          <option value="anthropic">anthropic (cloud)</option>
-                          <option value="openai">openai (cloud)</option>
-                        </select>
-                      </div>
+                            },
+                          }))
+                        }
+                      >
+                        <option value="openai">openai (cloud)</option>
+                        <option value="anthropic">anthropic (cloud)</option>
+                        <option value="ollama">ollama (local)</option>
+                      </select>
+                    </div>
 
-                      {/* Model — only vision-capable */}
-                      <div>
-                        <label style={{ ...labelStyle, color: "#a855f7aa" }}>
-                          Modelo vision
-                        </label>
-                        <ModelSelector
-                          baseUrl={baseUrl}
-                          provider={visionForm.provider}
-                          value={visionForm.model ?? ""}
-                          onChange={(m) =>
-                            setVisionForm((f) => ({ ...f, model: m }))
-                          }
-                          color="#a855f7"
-                          visionOnly
-                        />
-                        <div
-                          style={{
-                            marginTop: 4,
-                            fontSize: 8,
-                            color: "#ffffff33",
-                            fontFamily: "monospace",
-                            lineHeight: 1.5,
-                          }}
-                        >
-                          Apenas modelos multimodais. Para Ollama: instale com{" "}
-                          <code style={{ color: "#a855f7" }}>
-                            ollama pull llama3.2-vision:11b
-                          </code>
-                          .
-                        </div>
-                      </div>
-
-                      {/* Timeout */}
-                      <div>
-                        <label style={{ ...labelStyle, color: "#a855f7aa" }}>
-                          Timeout (ms)
-                        </label>
-                        <input
-                          type="number"
-                          style={{
-                            ...inputStyle,
-                            borderColor: "#a855f733",
-                            width: 120,
-                          }}
-                          value={visionForm.timeoutMs ?? 60000}
-                          onChange={(e) => {
-                            const v = parseInt(e.target.value, 10);
-                            setVisionForm((f) => ({
-                              ...f,
-                              timeoutMs: isNaN(v) ? 60000 : v,
-                            }));
-                          }}
-                          onBlur={(e) => {
-                            const v = parseInt(e.target.value, 10);
-                            const clamped = isNaN(v)
-                              ? 60000
-                              : Math.min(300000, Math.max(5000, v));
-                            setVisionForm((f) => ({
-                              ...f,
-                              timeoutMs: clamped,
-                            }));
-                          }}
-                        />
-                        <div
-                          style={{
-                            marginTop: 4,
-                            fontSize: 8,
-                            color: "#ffffff33",
-                            fontFamily: "monospace",
-                          }}
-                        >
-                          Se exceder o tempo, o prompt original é mantido (sem
-                          falha crítica).
-                        </div>
-                      </div>
-
-                      {/* Fallback provider */}
-                      <div>
-                        <label style={{ ...labelStyle, color: "#a855f7aa" }}>
-                          Fallback provider
-                        </label>
-                        <select
-                          style={{
-                            ...inputStyle,
-                            borderColor: "#a855f733",
-                            cursor: "pointer",
-                          }}
-                          value={visionForm.fallback?.provider ?? "openai"}
-                          onChange={(e) =>
-                            setVisionForm((f) => ({
-                              ...f,
-                              fallback: {
-                                ...f.fallback,
-                                provider: e.target.value,
-                                model: "",
-                              },
-                            }))
-                          }
-                        >
-                          <option value="openai">openai (gpt-4o)</option>
-                          <option value="anthropic">
-                            anthropic (claude-haiku-4-5)
-                          </option>
-                          <option value="ollama">ollama</option>
-                        </select>
-                        <div
-                          style={{
-                            marginTop: 4,
-                            fontSize: 8,
-                            color: "#ffffff33",
-                            fontFamily: "monospace",
-                          }}
-                        >
-                          Usado se o provider principal falhar ou não tiver
-                          modelo configurado.
-                        </div>
-                      </div>
-
-                      {/* Save Vision */}
-                      <button
-                        onClick={handleSaveVision}
-                        disabled={savingVision}
+                    {/* Fallback model */}
+                    <div>
+                      <label style={{ ...labelStyle, color: "#a855f7aa" }}>
+                        Modelo fallback
+                      </label>
+                      <ModelSelector
+                        baseUrl={baseUrl}
+                        provider={visionForm.fallback?.provider ?? "openai"}
+                        value={visionForm.fallback?.model ?? ""}
+                        onChange={(m) =>
+                          setVisionForm((f) => ({
+                            ...f,
+                            fallback: { ...f.fallback, provider: f.fallback?.provider ?? "openai", model: m },
+                          }))
+                        }
+                        color="#a855f7"
+                        visionOnly
+                      />
+                      <div
                         style={{
-                          background: savingVision ? "#110022" : "#a855f722",
-                          border: `1px solid ${savingVision ? "#a855f733" : "#a855f766"}`,
-                          color: savingVision ? "#a855f777" : "#a855f7",
+                          marginTop: 4,
+                          fontSize: 8,
+                          color: "#ffffff33",
                           fontFamily: "monospace",
-                          fontSize: 11,
-                          fontWeight: 700,
-                          padding: "8px 0",
-                          borderRadius: 6,
-                          cursor: savingVision ? "not-allowed" : "pointer",
-                          letterSpacing: "0.06em",
                         }}
                       >
-                        {savingVision
-                          ? "Salvando…"
-                          : "Salvar vision descriptor"}
-                      </button>
+                        Usado se o provider principal falhar ou não tiver modelo
+                        configurado. Deixe vazio para desativar o fallback.
+                      </div>
                     </div>
+
+                    {/* Fallback timeout */}
+                    <div>
+                      <label style={{ ...labelStyle, color: "#a855f7aa" }}>
+                        Timeout fallback (ms)
+                      </label>
+                      <input
+                        type="number"
+                        style={{
+                          ...inputStyle,
+                          borderColor: "#a855f733",
+                          width: 120,
+                        }}
+                        value={visionForm.fallback?.timeoutMs ?? 30000}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          setVisionForm((f) => ({
+                            ...f,
+                            fallback: {
+                              ...f.fallback,
+                              provider: f.fallback?.provider ?? "openai",
+                              timeoutMs: isNaN(v) ? 30000 : v,
+                            },
+                          }));
+                        }}
+                        onBlur={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          const clamped = isNaN(v)
+                            ? 30000
+                            : Math.min(300000, Math.max(5000, v));
+                          setVisionForm((f) => ({
+                            ...f,
+                            fallback: {
+                              ...f.fallback,
+                              provider: f.fallback?.provider ?? "openai",
+                              timeoutMs: clamped,
+                            },
+                          }));
+                        }}
+                      />
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontSize: 8,
+                          color: "#ffffff33",
+                          fontFamily: "monospace",
+                        }}
+                      >
+                        Timeout exclusivo do fallback. Se exceder, o prompt
+                        original é mantido.
+                      </div>
+                    </div>
+
+                    {/* Save Vision */}
+                    <button
+                      onClick={handleSaveVision}
+                      disabled={savingVision}
+                      style={{
+                        background: savingVision ? "#110022" : "#a855f722",
+                        border: `1px solid ${savingVision ? "#a855f733" : "#a855f766"}`,
+                        color: savingVision ? "#a855f777" : "#a855f7",
+                        fontFamily: "monospace",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        padding: "8px 0",
+                        borderRadius: 6,
+                        cursor: savingVision ? "not-allowed" : "pointer",
+                        letterSpacing: "0.06em",
+                      }}
+                    >
+                      {savingVision ? "Salvando…" : "Salvar vision descriptor"}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -4614,7 +4629,7 @@ export function ImageGenSubFlow({
 
         {/* Add workflow form panel */}
         <AnimatePresence>
-          {addingNew && (
+          {addingInCategory !== null && (
             <motion.div
               initial={{ x: 280, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
@@ -4624,7 +4639,7 @@ export function ImageGenSubFlow({
                 width: panelWidth,
                 flexShrink: 0,
                 background: "#0a0014",
-                borderLeft: "1px solid #f9731433",
+                borderLeft: `1px solid ${addingInCategory === "img2img" ? "#a855f733" : "#f9731433"}`,
                 overflowY: "auto",
                 padding: 16,
                 display: "flex",
@@ -4633,18 +4648,22 @@ export function ImageGenSubFlow({
                 position: "relative",
               }}
             >
-              <ResizeHandle onMouseDown={onResizeMouseDown} color="#f97316" />
+              <ResizeHandle
+                onMouseDown={onResizeMouseDown}
+                color={addingInCategory === "img2img" ? "#a855f7" : "#f97316"}
+              />
               <div
                 style={{
                   fontFamily: "monospace",
                   fontSize: 12,
                   fontWeight: 700,
-                  color: "#f97316",
+                  color: addingInCategory === "img2img" ? "#a855f7" : "#f97316",
                   letterSpacing: "0.08em",
                   marginBottom: 4,
                 }}
               >
-                Novo workflow
+                Novo provider —{" "}
+                {addingInCategory === "img2img" ? "img→img" : "txt→img"}
               </div>
 
               {/* Nome */}
@@ -4661,22 +4680,6 @@ export function ImageGenSubFlow({
                     }))
                   }
                 />
-              </div>
-
-              {/* Tipo de geração */}
-              <div>
-                <label style={labelStyle}>Tipo de geração</label>
-                <select
-                  style={{ ...inputStyle, cursor: "pointer" }}
-                  value={form.generationType}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, generationType: e.target.value }))
-                  }
-                >
-                  <option value="text2img">text2img</option>
-                  <option value="img2img">img2img</option>
-                  <option value="pulid">pulid</option>
-                </select>
               </div>
 
               {/* Execução */}
@@ -4791,9 +4794,24 @@ export function ImageGenSubFlow({
                   disabled={saving || !form.name}
                   style={{
                     background:
-                      saving || !form.name ? "#3a1a0088" : "#f9731422",
-                    border: `1px solid ${saving || !form.name ? "#f9731433" : "#f9731466"}`,
-                    color: saving || !form.name ? "#f9731677" : "#f97316",
+                      saving || !form.name
+                        ? "#1a001a88"
+                        : addingInCategory === "img2img"
+                          ? "#a855f722"
+                          : "#f9731422",
+                    border: `1px solid ${
+                      saving || !form.name
+                        ? "#a855f733"
+                        : addingInCategory === "img2img"
+                          ? "#a855f766"
+                          : "#f9731466"
+                    }`,
+                    color:
+                      saving || !form.name
+                        ? "#a855f777"
+                        : addingInCategory === "img2img"
+                          ? "#a855f7"
+                          : "#f97316",
                     fontFamily: "monospace",
                     fontSize: 11,
                     fontWeight: 700,
@@ -4804,19 +4822,18 @@ export function ImageGenSubFlow({
                     transition: "background 0.15s",
                   }}
                 >
-                  {saving ? "Criando…" : "Criar workflow"}
+                  {saving ? "Criando…" : "Criar provider"}
                 </button>
 
                 <button
                   onClick={() => {
-                    setAddingNew(false);
+                    setAddingInCategory(null);
                     setForm({
                       name: "",
-                      generationType: "text2img",
                       executionMode: "local",
                       workflowPath: "",
                       description: "",
-                      timeoutMs: 90000,
+                      timeoutMs: 300000,
                     });
                   }}
                   style={{
@@ -4832,6 +4849,220 @@ export function ImageGenSubFlow({
                 >
                   Cancelar
                 </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Category Fallback edit panel */}
+        <AnimatePresence>
+          {fallbackPanelCategory !== null && (
+            <motion.div
+              initial={{ x: 280, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 280, opacity: 0 }}
+              transition={{ duration: 0.22 }}
+              style={{
+                width: panelWidth,
+                flexShrink: 0,
+                background: "#0a0014",
+                borderLeft: `1px solid #f9731633`,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                position: "relative",
+              }}
+            >
+              {/* Resize handle */}
+              <div
+                onMouseDown={onResizeMouseDown}
+                style={{
+                  position: "absolute", left: 0, top: 0, bottom: 0, width: 4,
+                  cursor: "col-resize", zIndex: 10,
+                  background: "transparent",
+                }}
+              />
+              <div style={{ overflowY: "auto", flex: 1, padding: "18px 18px 24px" }}>
+                {/* Header */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                  <span style={{
+                    fontSize: 7, color: "#f9731688",
+                    background: "#f9731618", border: "1px solid #f9731633",
+                    borderRadius: 3, padding: "1px 5px",
+                    letterSpacing: "0.06em", textTransform: "uppercase",
+                  }}>FALLBACK</span>
+                  <span style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 700, color: "#f97316" }}>
+                    {fallbackPanelCategory === "text2img" ? "txt→img" : "img→img"}
+                  </span>
+                  <button
+                    onClick={() => setFallbackPanelCategory(null)}
+                    style={{
+                      marginLeft: "auto", background: "none", border: "none",
+                      color: "#ffffff44", fontSize: 14, cursor: "pointer", padding: 0, lineHeight: 1,
+                    }}
+                  >×</button>
+                </div>
+
+                <p style={{ fontFamily: "monospace", fontSize: 9, color: "#ffffff44", marginBottom: 16, lineHeight: 1.6 }}>
+                  Provider acionado quando o provider principal falha. Não há fallback entre categorias.
+                </p>
+
+                {/* Name */}
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ fontFamily: "monospace", fontSize: 9, color: "#f97316aa", display: "block", marginBottom: 4 }}>
+                    Nome (ID)
+                  </label>
+                  <input
+                    value={fallbackForm.name ?? ""}
+                    onChange={(e) => setFallbackForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="ex: gpt_image"
+                    style={{
+                      width: "100%", boxSizing: "border-box",
+                      background: "#0d0020", border: "1px solid #f9731633",
+                      color: "#f97316", fontFamily: "monospace", fontSize: 11,
+                      padding: "6px 8px", borderRadius: 6, outline: "none",
+                    }}
+                  />
+                </div>
+
+                {/* Label */}
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ fontFamily: "monospace", fontSize: 9, color: "#f97316aa", display: "block", marginBottom: 4 }}>
+                    Label (exibição)
+                  </label>
+                  <input
+                    value={fallbackForm.label ?? ""}
+                    onChange={(e) => setFallbackForm((f) => ({ ...f, label: e.target.value }))}
+                    placeholder="ex: GPT Image (OpenAI)"
+                    style={{
+                      width: "100%", boxSizing: "border-box",
+                      background: "#0d0020", border: "1px solid #f9731633",
+                      color: "#f97316", fontFamily: "monospace", fontSize: 11,
+                      padding: "6px 8px", borderRadius: 6, outline: "none",
+                    }}
+                  />
+                </div>
+
+                {/* Execution mode */}
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ fontFamily: "monospace", fontSize: 9, color: "#f97316aa", display: "block", marginBottom: 6 }}>
+                    Modo de execução
+                  </label>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {(["cloud", "local"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => setFallbackForm((f) => ({ ...f, executionMode: mode }))}
+                        style={{
+                          flex: 1, padding: "5px 0", fontFamily: "monospace", fontSize: 10,
+                          borderRadius: 5, cursor: "pointer",
+                          background: fallbackForm.executionMode === mode ? (mode === "cloud" ? "#22d3ee22" : "#f9731622") : "transparent",
+                          border: `1px solid ${fallbackForm.executionMode === mode ? (mode === "cloud" ? "#22d3ee" : "#f97316") : "#ffffff22"}`,
+                          color: fallbackForm.executionMode === mode ? (mode === "cloud" ? "#22d3ee" : "#f97316") : "#ffffff44",
+                        }}
+                      >
+                        {mode === "cloud" ? "☁️ cloud" : "🖥 local"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Timeout */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontFamily: "monospace", fontSize: 9, color: "#f97316aa", display: "block", marginBottom: 4 }}>
+                    Timeout (ms)
+                  </label>
+                  <input
+                    type="number"
+                    value={fallbackForm.timeoutMs ?? 60000}
+                    onChange={(e) => setFallbackForm((f) => ({ ...f, timeoutMs: Number(e.target.value) }))}
+                    step={1000}
+                    min={1000}
+                    style={{
+                      width: "100%", boxSizing: "border-box",
+                      background: "#0d0020", border: "1px solid #f9731633",
+                      color: "#f97316", fontFamily: "monospace", fontSize: 11,
+                      padding: "6px 8px", borderRadius: 6, outline: "none",
+                    }}
+                  />
+                </div>
+
+                {/* Save / Remove / Cancel */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <button
+                    disabled={savingFallback || !fallbackForm.name}
+                    onClick={async () => {
+                      if (!fallbackPanelCategory || !fallbackForm.name) return;
+                      setSavingFallback(true);
+                      try {
+                        const payload: ImageCategoryProvider = {
+                          name: fallbackForm.name!,
+                          label: fallbackForm.label || fallbackForm.name!,
+                          executionMode: fallbackForm.executionMode ?? "cloud",
+                          enabled: true,
+                          timeoutMs: fallbackForm.timeoutMs ?? 60000,
+                        };
+                        const res = await setImageCategoryFallback(baseUrl, fallbackPanelCategory, payload);
+                        setCategories((prev) => ({
+                          ...prev,
+                          [fallbackPanelCategory]: { ...prev[fallbackPanelCategory], fallback: res.fallback },
+                        }));
+                        setFallbackPanelCategory(null);
+                      } finally {
+                        setSavingFallback(false);
+                      }
+                    }}
+                    style={{
+                      background: savingFallback || !fallbackForm.name ? "#1a0800" : "#f9731622",
+                      border: "1px solid #f9731655",
+                      color: savingFallback || !fallbackForm.name ? "#f9731644" : "#f97316",
+                      fontFamily: "monospace", fontSize: 10, fontWeight: 700,
+                      padding: "7px 0", borderRadius: 6,
+                      cursor: savingFallback || !fallbackForm.name ? "not-allowed" : "pointer",
+                      letterSpacing: "0.06em",
+                    }}
+                  >
+                    {savingFallback ? "Salvando…" : "Salvar fallback"}
+                  </button>
+
+                  {categories[fallbackPanelCategory ?? ""]?.fallback && (
+                    <button
+                      disabled={savingFallback}
+                      onClick={async () => {
+                        if (!fallbackPanelCategory) return;
+                        setSavingFallback(true);
+                        try {
+                          await setImageCategoryFallback(baseUrl, fallbackPanelCategory, null);
+                          setCategories((prev) => ({
+                            ...prev,
+                            [fallbackPanelCategory]: { ...prev[fallbackPanelCategory], fallback: null },
+                          }));
+                          setFallbackPanelCategory(null);
+                        } finally {
+                          setSavingFallback(false);
+                        }
+                      }}
+                      style={{
+                        background: "transparent", border: "1px solid #ef444433",
+                        color: "#ef444466", fontFamily: "monospace", fontSize: 10,
+                        padding: "6px 0", borderRadius: 6, cursor: "pointer",
+                      }}
+                    >
+                      Remover fallback
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => setFallbackPanelCategory(null)}
+                    style={{
+                      background: "transparent", border: "1px solid #ffffff22",
+                      color: "#ffffff55", fontFamily: "monospace", fontSize: 10,
+                      padding: "6px 0", borderRadius: 6, cursor: "pointer",
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
               </div>
             </motion.div>
           )}
